@@ -1,0 +1,18 @@
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def plot_analysis(df: pd.DataFrame, ticker: str):
+    plt.figure(figsize=(12, 6))
+    plt.plot(df.index, df['Close'], label='Kapanis Fiyati', color='blue', alpha=0.6)
+    
+    if 'SMA_20' in df.columns:
+        plt.plot(df.index, df['SMA_20'], label='SMA 20', color='orange', linestyle='--')
+    if 'EMA_50' in df.columns:
+        plt.plot(df.index, df['EMA_50'], label='EMA 50', color='red', linestyle='--')
+        
+    plt.title(f"{ticker} Teknik Analiz Grafigi")
+    plt.xlabel("Tarih")
+    plt.ylabel("Fiyat")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()

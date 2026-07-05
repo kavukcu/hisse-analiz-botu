@@ -1,0 +1,7 @@
+import pandas as pd
+
+def calculate_sma(df: pd.DataFrame, window: int) -> pd.Series:
+    return df['Close'].rolling(window=window).mean()
+
+def calculate_ema(df: pd.DataFrame, window: int) -> pd.Series:
+    return df['Close'].ewm(span=window, adjust=False).mean()

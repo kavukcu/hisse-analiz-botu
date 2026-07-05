@@ -1,0 +1,26 @@
+from data.data_loader import fetch_stock_data
+from models.indicators import calculate_sma, calculate_ema
+from utils.plotter import plot_analysis
+
+def main():
+    # Türk Hava Yolları verisi (2025 başından 2026 başına kadar)
+    ticker = "THYAO.IS" 
+    start_date = "2025-01-01"
+    end_date = "2026-01-01"
+    
+    # 1. Veriyi Çek
+    df = fetch_stock_data(ticker, start_date, end_date)
+    
+    if df.empty:
+        print("Veri alinamadi, lutfen internetinizi veya sembolu kontrol edin.")
+        return
+        
+    # 2. Göstergeleri Hesapla
+    df['SMA_20'] = calculate_sma(df, window=20)
+    df['EMA_50'] = calculate_ema(df, window=50)
+    
+    # 3. Grafik Çiz
+    plot_analysis(df, ticker)
+
+if __name__ == "__main__":
+    main()

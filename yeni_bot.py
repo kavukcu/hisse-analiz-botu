@@ -4,23 +4,18 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
-import time
 import requests
 
 st.set_page_config(layout="wide", page_title="Pro Hisse Analiz Paneli")
 st.title("🚀 Tam Kapsamlı Hisse Analiz Merkezi")
 
-try:
-    TELEGRAM_TOKEN = st.secrets["8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk"]
-    TELEGRAM_CHAT_ID = st.secrets["1634044181"]
-except:
-    TELEGRAM_TOKEN = "TEST_MODU"
-    TELEGRAM_CHAT_ID = "TEST_MODU"
+TELEGRAM_TOKEN = "8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk"
+TELEGRAM_CHAT_ID = "1634044181"
 
 def telegram_gonder(mesaj):
-    if TELEGRAM_TOKEN == "TEST_MODU":
+    if TELEGRAM_TOKEN == "8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk":
         return
-    url = f"https://api.telegram.org/bot{8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk}/sendMessage?chat_id={1634044181}&text={mesaj}"
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?chat_id={TELEGRAM_CHAT_ID}&text={mesaj}"
     try:
         requests.get(url)
     except:
@@ -33,61 +28,6 @@ def veri_yukle(ticker, start, end):
 @st.cache_data(show_spinner=False)
 def sirket_bilgisi_getir(ticker):
     return yf.Ticker(ticker).info
-
-def ai_score(df):
-    score = 0
-    reasons = []
-
-    close = df["Close"].iloc[-1]
-    ema20 = df["Close"].ewm(span=20).mean()
-    ema50 = df["Close"].ewm(span=50).mean()
-    ema200 = df["Close"].ewm(span=200).mean()
-    rsi = df["RSI"].iloc[-1]
-    macd = df["MACD"].iloc[-1]
-    signal = df["Signal_Line"].iloc[-1]
-    volume_avg = df["Volume"].rolling(20).mean().iloc[-1]
-
-    if close > ema20.iloc[-1]:
-        score += 10
-        reasons.append("EMA20 Üzerinde")
-
-    if close > ema50.iloc[-1]:
-        score += 15
-        reasons.append("EMA50 Üzerinde")
-
-    if close > ema200.iloc[-1]:
-        score += 20
-        reasons.append("EMA200 Üzerinde")
-
-    if 45 < rsi < 70:
-        score += 15
-        reasons.append("RSI Pozitif")
-
-    if macd > signal:
-        score += 15
-        reasons.append("MACD Al Sinyali")
-
-    if df["Volume"].iloc[-1] > volume_avg * 1.5:
-        score += 10
-        reasons.append("Yüksek Hacim")
-
-    if score >= 80:
-        karar = "🟢 GÜÇLÜ AL"
-        renk = "success"
-    elif score >= 60:
-        karar = "🟢 AL"
-        renk = "success"
-    elif score >= 40:
-        karar = "🟡 BEKLE"
-        renk = "warning"
-    elif score >= 20:
-        karar = "🔴 SAT"
-        renk = "error"
-    else:
-        karar = "🔴 GÜÇLÜ SAT"
-        renk = "error"
-
-    return score, karar, reasons, renk
 
 @st.cache_data(show_spinner=False)
 def akilli_tarama_yap(tickers):
@@ -161,6 +101,56 @@ def akilli_tarama_yap(tickers):
             continue
     return bulunanlar
 
+def ai_score(df):
+    score = 0
+    reasons = []
+
+    close = df["Close"].iloc[-1]
+    ema20 = df["Close"].ewm(span=20).mean()
+    ema50 = df["Close"].ewm(span=50).mean()
+    ema200 = df["Close"].ewm(span=200).mean()
+    rsi = df["RSI"].iloc[-1]
+    macd = df["MACD"].iloc[-1]
+    signal = df["Signal_Line"].iloc[-1]
+    volume_avg = df["Volume"].rolling(20).mean().iloc[-1]
+
+    if close > ema20.iloc[-1]:
+        score += 10
+        reasons.append("EMA20 Üzerinde Tutunma")
+
+    if close > ema50.iloc[-1]:
+        score += 15
+        reasons.append("EMA50 Güçlü Trend")
+
+    if close > ema200.iloc[-1]:
+        score += 20
+        reasons.append("EMA200 Uzun Vade Yükseliş Trendi")
+
+    if 45 < rsi < 70:
+        score += 15
+        reasons.append("RSI Pozitif Bölgede")
+
+    if macd > signal:
+        score += 15
+        reasons.append("MACD Al Sinyali")
+
+    if df["Volume"].iloc[-1] > volume_avg * 1.5:
+        score += 10
+        reasons.append("Ortalama Üstü Hacim Patlaması")
+
+    if score >= 80:
+        karar = "🟢 GÜÇLÜ AL"
+    elif score >= 60:
+        karar = "🟢 AL"
+    elif score >= 40:
+        karar = "🟡 BEKLE"
+    elif score >= 20:
+        karar = "🔴 SAT"
+    else:
+        karar = "🔴 GÜÇLÜ SAT"
+
+    return score, karar, reasons
+
 st.sidebar.header("🔧 Analiz Parametreleri")
 hisse_kodu = st.sidebar.text_input("Hisse Kodu (Örn: THYAO.IS):", value="THYAO.IS").upper()
 
@@ -176,50 +166,32 @@ try:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
 
+        # İndikatör Hesaplamaları
+        df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        df['SMA_200'] = df['Close'].rolling(window=200).mean()
+        df['BB_Mid'] = df['Close'].rolling(window=20).mean()
+        df['BB_Std'] = df['Close'].rolling(window=20).std()
+        df['BB_Upper'] = df['BB_Mid'] + (2 * df['BB_Std'])
+        df['BB_Lower'] = df['BB_Mid'] - (2 * df['BB_Std'])
+        
+        delta = df['Close'].diff()
+        gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        df['RSI'] = 100 - (100 / (1 + (gain / loss)))
+        
+        df['MACD'] = df['Close'].ewm(span=12, adjust=False).mean() - df['Close'].ewm(span=26, adjust=False).mean()
+        df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
+        df['MACD_Histogram'] = df['MACD'] - df['Signal_Line']
+        
+        df["EMA20"] = df["Close"].ewm(span=20).mean()
+        df["EMA50"] = df["Close"].ewm(span=50).mean()
+        df["EMA200"] = df["Close"].ewm(span=200).mean()
+
         tab1, tab2, tab3 = st.tabs(["📈 Teknik Analiz", "🏢 Temel Analiz", "🔍 Akıllı Tarama Modülü"])
 
         with tab1:
             current_price = df['Close'].iloc[-1]
             
-            df['SMA_50'] = df['Close'].rolling(window=50).mean()
-            df['SMA_200'] = df['Close'].rolling(window=200).mean()
-            df["EMA20"] = df["Close"].ewm(span=20).mean()
-            df["EMA50"] = df["Close"].ewm(span=50).mean()
-            df["EMA200"] = df["Close"].ewm(span=200).mean()
-            
-            df['BB_Mid'] = df['Close'].rolling(window=20).mean()
-            df['BB_Std'] = df['Close'].rolling(window=20).std()
-            df['BB_Upper'] = df['BB_Mid'] + (2 * df['BB_Std'])
-            df['BB_Lower'] = df['BB_Mid'] - (2 * df['BB_Std'])
-            
-            delta = df['Close'].diff()
-            gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-            loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-            df['RSI'] = 100 - (100 / (1 + (gain / loss)))
-            
-            df['MACD'] = df['Close'].ewm(span=12, adjust=False).mean() - df['Close'].ewm(span=26, adjust=False).mean()
-            df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
-            df['MACD_Histogram'] = df['MACD'] - df['Signal_Line']
-
-            score, karar, nedenler, renk = ai_score(df)
-            
-            st.markdown("### 🤖 Yapay Zeka Karar Motoru")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("AI SCORE", f"{score}/100")
-            
-            if renk == "success":
-                c2.success(karar)
-            elif renk == "warning":
-                c2.warning(karar)
-            else:
-                c2.error(karar)
-                
-            with c3.expander("Skor Nedenleri"):
-                for n in nedenler:
-                    st.write(f"✅ {n}")
-                    
-            st.divider()
-
             df['Min_20'] = df['Low'] == df['Low'].rolling(window=20, center=True).min()
             df['Max_20'] = df['High'] == df['High'].rolling(window=20, center=True).max()
             
@@ -234,17 +206,19 @@ try:
                 shared_xaxes=True, 
                 vertical_spacing=0.03, 
                 row_heights=[0.5, 0.15, 0.15, 0.2], 
-                subplot_titles=("Fiyat, EMA'lar, Bollinger ve Destek/Dirençler", "Hacim (Volume)", "RSI (14)", "MACD")
+                subplot_titles=("Fiyat, Ortalamalar, Bollinger ve Destek/Dirençler", "Hacim (Volume)", "RSI (14)", "MACD")
             )
 
             fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-            
-            fig.add_trace(go.Scatter(x=df.index, y=df["EMA20"], name="EMA20", line=dict(color='#00d2d3', width=1.5)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"], name="EMA50", line=dict(color='#feca57', width=1.5)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df["EMA200"], name="EMA200", line=dict(color='#ff6b6b', width=2)), row=1, col=1)
-            
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_200'], name="SMA 200", line=dict(color='red')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], name="BB Üst", line=dict(color='rgba(255,255,255,0.2)', dash='dot')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], name="BB Alt", line=dict(color='rgba(255,255,255,0.2)', dash='dot')), row=1, col=1)
+
+            # Eklenen EMA Çizgileri
+            fig.add_trace(go.Scatter(x=df.index, y=df["EMA20"], name="EMA20", line=dict(color='cyan')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"], name="EMA50", line=dict(color='magenta')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["EMA200"], name="EMA200", line=dict(color='white')), row=1, col=1)
 
             for sup in active_supports:
                 fig.add_hline(y=sup, line_dash="dash", line_color="#2ecc71", line_width=1.5, annotation_text=f"Destek: {sup}", annotation_position="top left", row=1, col=1)
@@ -267,6 +241,25 @@ try:
             fig.update_layout(height=800, xaxis_rangeslider_visible=False, template="plotly_dark", showlegend=False)
             st.plotly_chart(fig)
 
+            # AI SCORE GÖSTERİM ALANI
+            st.write("---")
+            st.subheader("🤖 Yapay Zeka Skorlama Algoritması")
+            score, karar, nedenler = ai_score(df)
+            
+            col_score, col_status = st.columns(2)
+            col_score.metric("AI SCORE", f"{score}/100")
+            
+            if "GÜÇLÜ AL" in karar or "AL" in karar:
+                col_status.success(karar)
+            elif "BEKLE" in karar:
+                col_status.warning(karar)
+            else:
+                col_status.error(karar)
+
+            st.write("#### Skorlama Gerekçeleri:")
+            for n in nedenler:
+                st.write("✅", n)
+
         with tab2:
             st.subheader(f"🏢 {info.get('longName', hisse_kodu)}")
             c1, c2, c3 = st.columns(3)
@@ -288,4 +281,4 @@ try:
                         st.warning("Şu an kriterlere uyan net bir sinyal bulunamadı.")
 
 except Exception as e:
-    st.error(f"Grafik oluşturulurken hata oluştu: {e}")
+    st.error(f"Grafik veya Analiz oluşturulurken hata oluştu: {e}")

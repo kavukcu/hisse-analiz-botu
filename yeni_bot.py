@@ -4,18 +4,30 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+import time
 import requests
+
+# 1. YAHOO FINANCE ENGELİNİ AŞMAK İÇİN ÖZEL OTURUM (USER-AGENT)
+oturum = requests.Session()
+oturum.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+})
 
 st.set_page_config(layout="wide", page_title="Pro Hisse Analiz Paneli")
 st.title("🚀 Tam Kapsamlı Hisse Analiz Merkezi")
 
-TELEGRAM_TOKEN = "8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk"
-TELEGRAM_CHAT_ID = "1634044181"
+# Telegram Yapılandırması (Secrets üzerinden veya test modu)
+try:
+    TELEGRAM_TOKEN = st.secrets["8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk"]
+    TELEGRAM_CHAT_ID = st.secrets["1634041181"]
+except:
+    TELEGRAM_TOKEN = "TEST_MODU"
+    TELEGRAM_CHAT_ID = "TEST_MODU"
 
 def telegram_gonder(mesaj):
-    if TELEGRAM_TOKEN == "8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk":
+    if TELEGRAM_TOKEN == "TEST_MODU":
         return
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?chat_id={TELEGRAM_CHAT_ID}&text={mesaj}"
+    url = f"https://api.telegram.org/bot{8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk}/sendMessage?chat_id={TELEGRAM_CHAT_ID}&text={mesaj}"
     try:
         requests.get(url)
     except:
@@ -23,18 +35,75 @@ def telegram_gonder(mesaj):
 
 @st.cache_data(show_spinner=False)
 def veri_yukle(ticker, start, end):
-    return yf.download(ticker, start=start, end=end)
+    # session=oturum ekleyerek engel aşılıyor
+    return yf.download(ticker, start=start, end=end, session=oturum)
 
 @st.cache_data(show_spinner=False)
 def sirket_bilgisi_getir(ticker):
-    return yf.Ticker(ticker).info
+    try:
+        return yf.Ticker(ticker, session=oturum).info
+    except:
+        return {}
+
+def ai_score(df):
+    score = 0
+    reasons = []
+
+    close = df["Close"].iloc[-1]
+    ema20 = df["Close"].ewm(span=20).mean().iloc[-1]
+    ema50 = df["Close"].ewm(span=50).mean().iloc[-1]
+    ema200 = df["Close"].ewm(span=200).mean().iloc[-1]
+    rsi = df["RSI"].iloc[-1]
+    macd = df["MACD"].iloc[-1]
+    signal = df["Signal_Line"].iloc[-1]
+    volume_avg = df["Volume"].rolling(20).mean().iloc[-1]
+
+    if close > ema20:
+        score += 10
+        reasons.append("EMA20 Üzerinde Tutunma")
+    if close > ema50:
+        score += 15
+        reasons.append("EMA50 Güçlü Trend")
+    if close > ema200:
+        score += 20
+        reasons.append("EMA200 Uzun Vade Yükseliş Trendi")
+    if 45 < rsi < 70:
+        score += 15
+        reasons.append("RSI Pozitif Bölgede")
+    if macd > signal:
+        score += 15
+        reasons.append("MACD Al Sinyali")
+    if df["Volume"].iloc[-1] > volume_avg * 1.5:
+        score += 10
+        reasons.append("Ortalama Üstü Hacim Patlaması")
+
+    if score >= 80:
+        karar = "🟢 GÜÇLÜ AL"
+        renk = "success"
+    elif score >= 60:
+        karar = "🟢 AL"
+        renk = "success"
+    elif score >= 40:
+        karar = "🟡 BEKLE"
+        renk = "warning"
+    elif score >= 20:
+        karar = "🔴 SAT"
+        renk = "error"
+    else:
+        karar = "🔴 GÜÇLÜ SAT"
+        renk = "error"
+
+    return score, karar, reasons, renk
 
 @st.cache_data(show_spinner=False)
 def akilli_tarama_yap(tickers):
     bulunanlar = []
     for ticker in tickers:
         try:
-            df = yf.download(ticker, period="1y", progress=False)
+            # İstekler arasına 1 saniye bekleme koyarak Yahoo'nun engellemesini önlüyoruz
+            df = yf.download(ticker, period="1y", progress=False, session=oturum)
+            time.sleep(1.0) 
+            
             if len(df) < 200: continue
             
             current_price = df['Close'].iloc[-1]
@@ -101,56 +170,6 @@ def akilli_tarama_yap(tickers):
             continue
     return bulunanlar
 
-def ai_score(df):
-    score = 0
-    reasons = []
-
-    close = df["Close"].iloc[-1]
-    ema20 = df["Close"].ewm(span=20).mean()
-    ema50 = df["Close"].ewm(span=50).mean()
-    ema200 = df["Close"].ewm(span=200).mean()
-    rsi = df["RSI"].iloc[-1]
-    macd = df["MACD"].iloc[-1]
-    signal = df["Signal_Line"].iloc[-1]
-    volume_avg = df["Volume"].rolling(20).mean().iloc[-1]
-
-    if close > ema20.iloc[-1]:
-        score += 10
-        reasons.append("EMA20 Üzerinde Tutunma")
-
-    if close > ema50.iloc[-1]:
-        score += 15
-        reasons.append("EMA50 Güçlü Trend")
-
-    if close > ema200.iloc[-1]:
-        score += 20
-        reasons.append("EMA200 Uzun Vade Yükseliş Trendi")
-
-    if 45 < rsi < 70:
-        score += 15
-        reasons.append("RSI Pozitif Bölgede")
-
-    if macd > signal:
-        score += 15
-        reasons.append("MACD Al Sinyali")
-
-    if df["Volume"].iloc[-1] > volume_avg * 1.5:
-        score += 10
-        reasons.append("Ortalama Üstü Hacim Patlaması")
-
-    if score >= 80:
-        karar = "🟢 GÜÇLÜ AL"
-    elif score >= 60:
-        karar = "🟢 AL"
-    elif score >= 40:
-        karar = "🟡 BEKLE"
-    elif score >= 20:
-        karar = "🔴 SAT"
-    else:
-        karar = "🔴 GÜÇLÜ SAT"
-
-    return score, karar, reasons
-
 st.sidebar.header("🔧 Analiz Parametreleri")
 hisse_kodu = st.sidebar.text_input("Hisse Kodu (Örn: THYAO.IS):", value="THYAO.IS").upper()
 
@@ -201,6 +220,25 @@ try:
             active_supports = [x for x in all_supports if x < current_price][-3:]
             active_resistances = [x for x in all_resistances if x > current_price][:3]
 
+            score, karar, nedenler, renk = ai_score(df)
+            
+            st.markdown("### 🤖 Yapay Zeka Karar Motoru")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("AI SCORE", f"{score}/100")
+            
+            if renk == "success":
+                c2.success(karar)
+            elif renk == "warning":
+                c2.warning(karar)
+            else:
+                c2.error(karar)
+                
+            with c3.expander("Skor Nedenleri"):
+                for n in nedenler:
+                    st.write(f"✅ {n}")
+                    
+            st.divider()
+
             fig = make_subplots(
                 rows=4, cols=1, 
                 shared_xaxes=True, 
@@ -210,15 +248,15 @@ try:
             )
 
             fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_200'], name="SMA 200", line=dict(color='red')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange', width=1)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_200'], name="SMA 200", line=dict(color='red', width=1)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], name="BB Üst", line=dict(color='rgba(255,255,255,0.2)', dash='dot')), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], name="BB Alt", line=dict(color='rgba(255,255,255,0.2)', dash='dot')), row=1, col=1)
 
             # Eklenen EMA Çizgileri
-            fig.add_trace(go.Scatter(x=df.index, y=df["EMA20"], name="EMA20", line=dict(color='cyan')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"], name="EMA50", line=dict(color='magenta')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df["EMA200"], name="EMA200", line=dict(color='white')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["EMA20"], name="EMA20", line=dict(color='cyan', width=1.5)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"], name="EMA50", line=dict(color='magenta', width=1.5)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df["EMA200"], name="EMA200", line=dict(color='white', width=2)), row=1, col=1)
 
             for sup in active_supports:
                 fig.add_hline(y=sup, line_dash="dash", line_color="#2ecc71", line_width=1.5, annotation_text=f"Destek: {sup}", annotation_position="top left", row=1, col=1)
@@ -241,25 +279,6 @@ try:
             fig.update_layout(height=800, xaxis_rangeslider_visible=False, template="plotly_dark", showlegend=False)
             st.plotly_chart(fig)
 
-            # AI SCORE GÖSTERİM ALANI
-            st.write("---")
-            st.subheader("🤖 Yapay Zeka Skorlama Algoritması")
-            score, karar, nedenler = ai_score(df)
-            
-            col_score, col_status = st.columns(2)
-            col_score.metric("AI SCORE", f"{score}/100")
-            
-            if "GÜÇLÜ AL" in karar or "AL" in karar:
-                col_status.success(karar)
-            elif "BEKLE" in karar:
-                col_status.warning(karar)
-            else:
-                col_status.error(karar)
-
-            st.write("#### Skorlama Gerekçeleri:")
-            for n in nedenler:
-                st.write("✅", n)
-
         with tab2:
             st.subheader(f"🏢 {info.get('longName', hisse_kodu)}")
             c1, c2, c3 = st.columns(3)
@@ -271,7 +290,7 @@ try:
             st.subheader("🔍 Piyasayı Çoklu Stratejiyle Tara")
             if st.button("Akıllı Taramayı Başlat"):
                 bist_liste = ["THYAO.IS", "EREGL.IS", "ASELS.IS", "SISE.IS", "KCHOL.IS", "GARAN.IS", "AKBNK.IS", "TUPRS.IS"]
-                with st.spinner("Piyasa akıllı algoritmalarla taranıyor..."):
+                with st.spinner("Piyasa akıllı algoritmalarla taranıyor... (Lütfen bitene kadar sekmeyi kapatmayın)"):
                     sonuclar = akilli_tarama_yap(bist_liste)
                     if sonuclar:
                         st.success("✅ Fırsatlar Bulundu!")
@@ -279,6 +298,8 @@ try:
                             st.write(f"- {sonuc}")
                     else:
                         st.warning("Şu an kriterlere uyan net bir sinyal bulunamadı.")
+    else:
+        st.error("Seçilen hisse için veri bulunamadı. Lütfen kodu kontrol edin (Örn: THYAO.IS).")
 
 except Exception as e:
-    st.error(f"Grafik veya Analiz oluşturulurken hata oluştu: {e}")
+    st.error(f"Sistem geçici olarak meşgul veya veri çekilemedi. Birkaç dakika sonra tekrar deneyin. Hata: {e}")

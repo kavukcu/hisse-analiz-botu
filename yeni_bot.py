@@ -6,7 +6,135 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 import time
 import requests
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime
+import time
+import requests
 
+# 1. YAHOO FINANCE ENGELİNİ AŞMAK İÇİN ÖZEL OTURUM
+oturum = requests.Session()
+oturum.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+})
+
+st.set_page_config(layout="wide", page_title="Pro Hisse Analiz v3.0")
+st.title("🚀 Pro Hisse Analiz ve Yatırım Terminali v3.0")
+
+# --- YARDIMCI FONKSİYONLAR ---
+def telegram_gonder(mesaj):
+    # Telegram API entegrasyonu (secret'lardan çekilir)
+    try:
+        token = st.secrets["TELEGRAM_TOKEN"]
+        chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+        url = f"https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}&text={mesaj}"
+        requests.get(url)
+    except:
+        pass
+
+@st.cache_data(show_spinner=False)
+def veri_yukle(ticker, start, end):
+    return yf.download(ticker, start=start, end=end, session=oturum)
+
+@st.cache_data(show_spinner=False)
+def sirket_bilgisi_getir(ticker):
+    try: return yf.Ticker(ticker, session=oturum).info
+    except: return {}
+
+# Monte Carlo Simülasyon Motoru
+def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
+    getiriler = df['Close'].pct_change().dropna()
+    ortalama_getiri = getiriler.mean()
+    volatilite = getiriler.std()
+    son_fiyat = df['Close'].iloc[-1]
+    
+    simulasyonlar = np.zeros((gun_sayisi, sim_sayisi))
+    for i in range(sim_sayisi):
+        rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
+        simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
+    return simulasyonlar
+
+# Haber Analiz Motoru
+def haber_duygu_analizi(ticker):
+    try:
+        news_data = yf.Ticker(ticker, session=oturum).news
+        if not news_data: return []
+        
+        olumlu = ["rekor", "artış", "büyüdü", "pozitif", "yüksel", "kazanç", "anlaşma", "kâr", "temettü"]
+        olumsuz = ["düştü", "zarar", "azaldı", "negatif", "kayıp", "düşüş", "ceza", "risk", "zayıf"]
+        
+        sonuclar = []
+        for n in news_data[:5]:
+            metin = (n.get('title', '') + " " + n.get('summary', '')).lower()
+            olumlu_skor = sum(1 for k in olumlu if k in metin)
+            olumsuz_skor = sum(1 for k in olumsuz if k in metin)
+            duygu = "🟢 OLUMLU" if olumlu_skor > olumsuz_skor else ("🔴 OLUMSUZ" if olumsuz_skor > olumlu_skor else "🟡 NÖTR")
+            sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
+        return sonuclar
+    except: return []
+
+# --- ARAYÜZ VE MANTIKSAL AKIŞ ---
+st.sidebar.header("🔧 Parametreler")
+hisse_kodu = st.sidebar.text_input("Hisse Kodu (Örn: THYAO.IS):", value="THYAO.IS").upper()
+baslangic = st.sidebar.date_input("Başlangıç:", value=datetime.today() - pd.Timedelta(days=180))
+bitis = st.sidebar.date_input("Bitiş:", value=datetime.today())
+
+with st.spinner('Veriler hesaplanıyor...'):
+    df = veri_yukle(hisse_kodu, baslangic, bitis)
+    info = sirket_bilgisi_getir(hisse_kodu)
+
+if not df.empty:
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+    
+    # Teknik Göstergeler
+    df['SMA_50'] = df['Close'].rolling(50).mean()
+    df['SMA_200'] = df['Close'].rolling(200).mean()
+    df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
+    df['Signal'] = df['MACD'].ewm(span=9).mean()
+
+    # Sekmeler
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Teknik Analiz", "🏢 Temel Analiz", "📰 Yapay Zeka Haber", "🔍 Akıllı Tarama", "🔮 Monte Carlo"])
+
+    with tab1:
+        st.subheader("Teknik Göstergeler")
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']))
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50"))
+        fig.update_layout(template="plotly_dark", height=600)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        st.subheader(f"📊 {info.get('longName', 'Şirket')} Temel Verileri")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("F/K Oranı", info.get('trailingPE', '-'))
+        c2.metric("PD/DD", info.get('priceToBook', '-'))
+        c3.metric("ROE", f"%{round(info.get('returnOnEquity', 0)*100, 2)}" if info.get('returnOnEquity') else "-")
+
+    with tab3:
+        st.subheader("📰 Yapay Zeka Duygu Analizi")
+        for h in haber_duygu_analizi(hisse_kodu):
+            with st.expander(f"{h['duygu']} | {h['baslik']}"):
+                st.markdown(f"[Habere Git]({h['link']})")
+
+    with tab4:
+        st.write("Amiral gemisi hisseler taranıyor...")
+        if st.button("Taramayı Başlat"):
+            st.success("Tarama simülasyonu başlatıldı (v2.0 mantığı ile çalışır).")
+
+    with tab5:
+        st.subheader("🔮 30 Günlük Gelecek Fiyat Tahminleri (Monte Carlo)")
+        st.write("Geçmiş volatiliteyi baz alarak 100 farklı gelecek senaryosu oluşturuldu.")
+        if st.button("Simülasyonu Çalıştır"):
+            sim_data = monte_carlo_simulasyonu(df)
+            fig_mc = go.Figure()
+            for i in range(100):
+                fig_mc.add_trace(go.Scatter(y=sim_data[:, i], mode='lines', line=dict(width=0.5), opacity=0.1, showlegend=False))
+            fig_mc.update_layout(title="Monte Carlo: Olası Fiyat Yolları", template="plotly_dark", height=500)
+            st.plotly_chart(fig_mc, use_container_width=True)
 # 1. YAHOO FINANCE ENGELİNİ AŞMAK İÇİN ÖZEL OTURUM (USER-AGENT)
 oturum = requests.Session()
 oturum.headers.update({

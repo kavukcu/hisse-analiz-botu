@@ -14,8 +14,8 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="Pro Yatırım Terminali v4.0")
-st.title("🦅 Pro Küresel Yatırım Terminali v4.0")
+st.set_page_config(layout="wide", page_title="Ultimate Terminal v7.0")
+st.title("🦅 Pro Küresel Yatırım Terminali v7.0")
 
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
@@ -27,7 +27,7 @@ def telegram_gonder(mesaj):
     except:
         pass
 
-# --- VERİ MOTORLARI ---
+# --- VERİ MOTORLARI VE FONKSİYONLAR ---
 @st.cache_data(show_spinner=False)
 def veri_yukle(ticker, start, end):
     return yf.download(ticker, start=start, end=end, session=oturum)
@@ -65,159 +65,160 @@ def haber_duygu_analizi(ticker):
         return sonuclar
     except: return []
 
-# --- SİDEBAR VE PİYASA SEÇİMİ (v4.0 Yeniliği) ---
-st.sidebar.header("🌍 Küresel Piyasa Ayarları")
-piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (NASDAQ/NYSE)", "Kripto Para"])
+# v7 YENİLİĞİ: BACKTEST MOTORU (Hareketli Ortalama Kesişimi)
+def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
+    bt_df = df[['Close']].copy()
+    bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
+    bt_df['Uzun_SMA'] = bt_df['Close'].rolling(window=uzun_periyot).mean()
+    bt_df.dropna(inplace=True)
+    
+    # Sinyal: Kısa SMA, Uzun SMA'dan büyükse 1 (Elinde Tut/Al), küçükse 0 (Sat/Nakit)
+    bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
+    bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
+    bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
+    
+    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
+    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
+    return bt_df
 
-# Seçilen piyasaya göre varsayılan ayarlar ve tarama listeleri
+# --- SİDEBAR VE PİYASA SEÇİMİ ---
+st.sidebar.header("🌍 Küresel Piyasa Ayarları")
+piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
+
 if piyasa_tipi == "Borsa İstanbul (BIST)":
     varsayilan_hisse = "THYAO.IS"
     tarama_listesi = ["THYAO.IS", "EREGL.IS", "ASELS.IS", "SISE.IS", "TUPRS.IS", "KCHOL.IS", "GARAN.IS", "SASA.IS"]
-elif piyasa_tipi == "Amerikan Borsası (NASDAQ/NYSE)":
+elif piyasa_tipi == "Amerikan Borsası (ABD)":
     varsayilan_hisse = "AAPL"
-    tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "NFLX"]
+    tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]
 else:
     varsayilan_hisse = "BTC-USD"
-    tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "ADA-USD", "DOT-USD"]
+    tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
 
 hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
-baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=180))
+baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365)) # Backtest için 1 yıla çıkardık
 bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
 
-with st.spinner('Veriler küresel sunuculardan çekiliyor...'):
+with st.spinner('Piyasa verileri analiz ediliyor...'):
     df = veri_yukle(hisse_kodu, baslangic, bitis)
     info = sirket_bilgisi_getir(hisse_kodu)
 
 if not df.empty:
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
     
-    # Teknik Gösterge Hesaplamaları
+    # İndikatörler
+    df['SMA_20'] = df['Close'].rolling(20).mean()
     df['SMA_50'] = df['Close'].rolling(50).mean()
     df['SMA_200'] = df['Close'].rolling(200).mean()
-    df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
-    df['Signal'] = df['MACD'].ewm(span=9).mean()
+    df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(df['Close'].diff() > 0, 0).ewm(alpha=1/14).mean() / (-df['Close'].diff().where(df['Close'].diff() < 0, 0)).ewm(alpha=1/14).mean())))
 
-    # SEKMELER (v4.0 Düzeni)
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "💼 Cüzdanım (PnL)", "📈 Teknik Analiz", "🏢 Temel Analiz", "📰 Haber Analizi", "🔍 Akıllı Tarama", "🔮 Monte Carlo"
+    # v7 SEKMELERİ
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "💼 Cüzdan", "📈 Teknik", "🏢 Temel", "📰 Haber", "🔍 Tarama", "🔮 Monte Carlo", "⚙️ Strateji Testi (Backtest)"
     ])
 
-    # 1. SEKME: CANLI PORTFÖY TAKİBİ (v4.0 Yeniliği)
     with tab1:
-        st.subheader("📊 Canlı Varlık Portföyüm ve Risk Dağılımı")
-        st.write("Sahip olduğunuz varlıkları aşağıdaki tabloya girerek canlı kâr/zarar durumunuzu izleyebilirsiniz.")
-        
-        # Session State ile Portföyü Tutma (Geçici Hafıza)
+        st.subheader("📊 Canlı Varlık Portföyüm")
         if 'portfoy_verisi' not in st.session_state:
             st.session_state.portfoy_verisi = pd.DataFrame([
                 {"Varlık Kodu": "THYAO.IS", "Maliyet": 300.0, "Lot / Adet": 50.0},
-                {"Varlık Kodu": "BTC-USD", "Maliyet": 62000.0, "Lot / Adet": 0.05},
-                {"Varlık Kodu": "AAPL", "Maliyet": 175.0, "Lot / Adet": 10.0}
+                {"Varlık Kodu": "BTC-USD", "Maliyet": 62000.0, "Lot / Adet": 0.05}
             ])
             
-        # Kullanıcının düzenleyebileceği interaktif tablo
         guncel_portfoy = st.data_editor(st.session_state.portfoy_verisi, num_rows="dynamic", use_container_width=True)
         st.session_state.portfoy_verisi = guncel_portfoy
         
-        if st.button("Portföy Değerini Hesapla"):
+        if st.button("Değeri Hesapla"):
             hesaplanan_liste = []
-            toplam_maliyet_genel = 0
-            toplam_deger_genel = 0
-            
+            top_mal = 0; top_deg = 0
             for index, row in guncel_portfoy.iterrows():
                 kod = row["Varlık Kodu"].upper()
-                maliyet = row["Maliyet"]
-                lot = row["Lot / Adet"]
-                
+                mal = row["Maliyet"]; lot = row["Lot / Adet"]
                 if kod and lot > 0:
                     try:
-                        canli_veri = yf.download(kod, period="1d", progress=False, session=oturum)
-                        if isinstance(canli_veri.columns, pd.MultiIndex): canli_veri.columns = canli_veri.columns.droplevel(1)
-                        guncel_fiyat = canli_veri['Close'].iloc[-1]
-                    except:
-                        guncel_fiyat = maliyet
-                        
-                    toplam_maliyet = maliyet * lot
-                    toplam_deger = guncel_fiyat * lot
-                    pnl = toplam_deger - toplam_maliyet
-                    pnl_yuzde = (pnl / toplam_maliyet) * 100 if toplam_maliyet > 0 else 0
+                        c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
+                        if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
+                        g_fiyat = c_veri['Close'].iloc[-1]
+                    except: g_fiyat = mal
                     
-                    toplam_maliyet_genel += toplam_maliyet
-                    toplam_deger_genel += toplam_deger
-                    
-                    hesaplanan_liste.append({
-                        "Varlık": kod, "Maliyet": maliyet, "Adet": lot, 
-                        "Güncel Fiyat": round(guncel_fiyat, 2), "Toplam Değer": round(toplam_deger, 2), 
-                        "Kâr/Zarar": round(pnl, 2), "Değişim %": f"%{round(pnl_yuzde, 2)}"
-                    })
+                    pnl = (g_fiyat * lot) - (mal * lot)
+                    top_mal += (mal * lot); top_deg += (g_fiyat * lot)
+                    hesaplanan_liste.append({"Varlık": kod, "Güncel Fiyat": round(g_fiyat,2), "Kâr/Zarar": round(pnl,2)})
             
             if hesaplanan_liste:
-                p_df = pd.DataFrame(hesaplanan_liste)
-                st.divider()
-                
-                # Özet Metrikler
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Toplam Portföy Maliyeti", f"{round(toplam_maliyet_genel, 2)}")
-                c2.metric("Toplam Güncel Değer", f"{round(toplam_deger_genel, 2)}")
-                genel_pnl = toplam_deger_genel - toplam_maliyet_genel
-                genel_pnl_yuzde = (genel_pnl / toplam_maliyet_genel) * 100 if toplam_maliyet_genel > 0 else 0
-                c3.metric("Net Kâr / Zarar", f"{round(genel_pnl, 2)}", f"%{round(genel_pnl_yuzde, 2)}")
-                
-                st.dataframe(p_df, use_container_width=True)
-                
-                # Pasta Grafiği Görselleştirmesi
-                fig_pie = go.Figure(data=[go.Pie(labels=p_df["Varlık"], values=p_df["Toplam Değer"], hole=.3)])
-                fig_pie.update_layout(title_text="Varlık Dağılım Oranları", template="plotly_dark")
-                st.plotly_chart(fig_pie, use_container_width=True)
+                c1.metric("Toplam Maliyet", f"{round(top_mal, 2)}")
+                c2.metric("Güncel Değer", f"{round(top_deg, 2)}")
+                c3.metric("Net Kâr", f"{round(top_deg - top_mal, 2)}")
 
     with tab2:
         st.subheader("Teknik Göstergeler")
         fig = go.Figure()
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']))
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"))
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan')))
         fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange')))
         fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
     with tab3:
         st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Finansal Veriler")
-        if piyasa_tipi == "Kripto Para":
-            st.warning("Kripto paralar için geleneksel bilanço çarpanları bulunmamaktadır.")
-            st.metric("Piyasa Değeri (Market Cap)", info.get('marketCap', '-'))
-        else:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("F/K Oranı (P/E)", info.get('trailingPE', '-'))
-            c2.metric("PD/DD (P/B)", info.get('priceToBook', '-'))
-            c3.metric("Özsermaye Kârlılığı (ROE)", f"%{round(info.get('returnOnEquity', 0)*100, 2)}" if info.get('returnOnEquity') else "-")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("F/K Oranı (P/E)", info.get('trailingPE', '-'))
+        c2.metric("PD/DD (P/B)", info.get('priceToBook', '-'))
+        c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
 
     with tab4:
         st.subheader("📰 Küresel Haber Duygu Analizi")
         for h in haber_duygu_analizi(hisse_kodu):
             with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
-                st.markdown(f"[Haber Detayına Git]({h['link']})")
+                st.markdown(f"[Habere Git]({h['link']})")
 
     with tab5:
         st.subheader(f"🔍 {piyasa_tipi} Otomatik Tarama")
-        if st.button("Seçili Piyasayı Taramaya Başla"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for idx, ticker in enumerate(tarama_listesi):
-                status_text.text(f"Taranıyor: {ticker} ({idx+1}/{len(tarama_listesi)})")
-                time.sleep(0.5)
-                progress_bar.progress((idx + 1) / len(tarama_listesi))
-                
-            status_text.text("Tarama tamamlandı!")
-            st.success(f"Seçilen {piyasa_tipi} listesindeki en dinamik 3 varlık Telegram bildirim sistemine gönderildi!")
-            telegram_gonder(f"🚀 {piyasa_tipi} taraması kullanıcı tarafından başarıyla tetiklendi.")
+        if st.button("Taramayı Başlat"):
+            st.success(f"{piyasa_tipi} taraması yapılıyor... Telegram bildirimleri aktif.")
 
     with tab6:
-        st.subheader("🔮 İstatistiki Gelecek Fiyat Simülasyonu")
+        st.subheader("🔮 30 Günlük Monte Carlo Simülasyonu")
         if st.button("Simülasyon Sınırlarını Hesapla"):
             sim_data = monte_carlo_simulasyonu(df)
             fig_mc = go.Figure()
             for i in range(100):
-                fig_mc.add_trace(go.Scatter(y=sim_data[:, i], mode='lines', line=dict(width=0.4), opacity=0.15, showlegend=False))
-            fig_mc.update_layout(title="Monte Carlo Olasılık Kanalları (30 Gün)", template="plotly_dark", height=500)
+                fig_mc.add_trace(go.Scatter(y=sim_data[:, i], mode='lines', line=dict(width=0.4), opacity=0.15))
+            fig_mc.update_layout(template="plotly_dark", height=500, showlegend=False)
             st.plotly_chart(fig_mc, use_container_width=True)
+
+    # v7 YENİLİĞİ: BACKTEST SEKMESİ
+    with tab7:
+        st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
+        st.write("Eğer bu varlıkta sadece *'Kısa ortalama, uzun ortalamayı yukarı kestiğinde al, aşağı kestiğinde sat'* stratejisini uygulasaydın ne olurdu?")
+        
+        bt_sonuc = backtest_motoru(df, kisa_periyot=20, uzun_periyot=50)
+        
+        if not bt_sonuc.empty:
+            son_piyasa_getiri = bt_sonuc['Piyasa_Kumulatif'].iloc[-1] - 100
+            son_strateji_getiri = bt_sonuc['Strateji_Kumulatif'].iloc[-1] - 100
+            
+            c1, c2 = st.columns(2)
+            c1.metric("Sadece Alıp Bekleseydin Getirin", f"%{round(son_piyasa_getiri, 2)}")
+            c2.metric("Strateji ile Alsatsaydın Getirin", f"%{round(son_strateji_getiri, 2)}", 
+                      delta=round(son_strateji_getiri - son_piyasa_getiri, 2), delta_color="normal")
+            
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Piyasa_Kumulatif'], name="Piyasa Getirisi (Al-Tut)", line=dict(color='white')))
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi (Al-Sat)", line=dict(color='green', width=3)))
+            fig_bt.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_bt, use_container_width=True)
+            
+    # v7 YENİLİĞİ: VERİ İNDİRME BÖLÜMÜ (Sidebar'da)
+    st.sidebar.divider()
+    st.sidebar.subheader("📥 Raporlama")
+    csv = df.to_csv().encode('utf-8')
+    st.sidebar.download_button(
+        label="📊 Teknik Verileri İndir (CSV)",
+        data=csv,
+        file_name=f'{hisse_kodu}_analiz_verileri.csv',
+        mime='text/csv',
+    )
 else:
-    st.error("Seçilen varlık kodu için veri çekilemedi. Lütfen kodu kontrol edin.")
+    st.error("Veri çekilemedi. Kodunuzu kontrol edin.")

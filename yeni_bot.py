@@ -68,7 +68,15 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
     bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
     return bt_df
-
+# v12 YENİLİĞİ: ATR ve Dinamik Risk Motoru
+def atr_hesapla(df, periyot=14):
+    df_atr = df.copy()
+    df_atr['H-L'] = abs(df_atr['High'] - df_atr['Low'])
+    df_atr['H-PC'] = abs(df_atr['High'] - df_atr['Close'].shift(1))
+    df_atr['L-PC'] = abs(df_atr['Low'] - df_atr['Close'].shift(1))
+    df_atr['TR'] = df_atr[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+    df_atr['ATR'] = df_atr['TR'].rolling(window=periyot).mean()
+    return df_atr['ATR']
 # v11 YENİLİĞİ: POLİNOMSAL REGRESYON (Daha Gerçekçi AI Eğrisi)
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30, derece=3):
     df_ml = df.copy()
@@ -125,7 +133,8 @@ if not df.empty:
     
     df['BB_Ust'] = df['SMA_20'] + 2 * df['Close'].rolling(window=20).std()
     df['BB_Alt'] = df['SMA_20'] - 2 * df['Close'].rolling(window=20).std()
-
+# ATR İndikatörünü veri setine ekle
+    df['ATR'] = atr_hesapla(df)
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel Analiz", "📰 Haber", "🔍 Akıllı Tarama", "📊 Isı Haritası", "⚙️ Backtest"
     ])
@@ -162,13 +171,36 @@ if not df.empty:
                 cc2.metric("Güncel Değer", f"{round(top_deg, 2)}")
                 cc3.metric("Net Kâr", f"{round(top_deg - top_mal, 2)}", f"%{round(((top_deg - top_mal)/top_mal)*100,2) if top_mal>0 else 0}")
 
+# v12 YENİLİĞİ: DİNAMİK RİSK YÖNETİMİ (ATR)
         with c2:
-            st.markdown("#### 🔔 Telegram Alarm Kur")
-            alarm_fiyat = st.number_input(f"{hisse_kodu} için Hedef Fiyat:", min_value=0.0, value=float(df['Close'].iloc[-1] * 1.05))
-            if st.button("Alarmı Kur"):
-                st.success(f"Alarm kuruldu! Hedef: {alarm_fiyat}")
-                telegram_gonder(f"⏰ YENİ ALARM\nVarlık: {hisse_kodu}\nHedef: {alarm_fiyat}\nGüncel: {round(df['Close'].iloc[-1], 2)}")
-
+            st.markdown(f"#### 🛡️ AI Risk & Stop-Loss Motoru ({hisse_kodu})")
+            
+            son_kapanis = df['Close'].iloc[-1]
+            son_atr = df['ATR'].iloc[-1]
+            
+            st.info(f"Güncel Fiyat: **{son_kapanis:.2f}** | Günlük Dalgalanma (ATR): **{son_atr:.2f}**")
+            
+            # Risk Profilini Seç
+            risk_profili = st.selectbox("Risk Profilinizi Seçin:", ["Muhafazakar (Dar Stop)", "Dengeli (Normal Stop)", "Agresif (Geniş Stop)"], index=1)
+            
+            # ATR Çarpanları
+            if risk_profili == "Muhafazakar (Dar Stop)":
+                sl_carpan = 1.5; tp_carpan = 2.0
+            elif risk_profili == "Dengeli (Normal Stop)":
+                sl_carpan = 2.0; tp_carpan = 3.0
+            else:
+                sl_carpan = 3.0; tp_carpan = 5.0
+                
+            dinamik_stop = son_kapanis - (son_atr * sl_carpan)
+            dinamik_hedef = son_kapanis + (son_atr * tp_carpan)
+            
+            st.metric("🔴 Otomatik Stop-Loss (Zarar Kes)", f"{dinamik_stop:.2f}", f"-%{((son_kapanis - dinamik_stop)/son_kapanis)*100:.2f}")
+            st.metric("🟢 Otomatik Take-Profit (Kâr Al)", f"{dinamik_hedef:.2f}", f"+%{((dinamik_hedef - son_kapanis)/son_kapanis)*100:.2f}")
+            
+            if st.button("Risk Kurallarını Telegrama Gönder"):
+                mesaj = f"🛡️ GÜVENLİ TRADE KURULUMU ({hisse_kodu})\nFiyat: {son_kapanis:.2f}\n\nHedef (TP): {dinamik_hedef:.2f}\nStop (SL): {dinamik_stop:.2f}\nProfil: {risk_profili}"
+                st.success("Kurulum Telegram'a iletildi!")
+                telegram_gonder(mesaj)
     with tab2:
         st.subheader("📈 Gelişmiş Teknik Göstergeler ve AI Trend Tahmini")
         

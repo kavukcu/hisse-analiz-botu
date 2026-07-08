@@ -5,7 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 import requests
-from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
 import time
 
 # --- OTURUM ---
@@ -14,9 +14,9 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="Otonom Bot v12.0")
-st.title("🤖 Pro Küresel Yatırım Terminali v12.0 (Otonom Edition)")
-st.markdown("*Makine Öğrenmesi ile Kendi Kendine Karar Veren Otomatik Trade Simülatörü*")
+st.set_page_config(layout="wide", page_title="Otonom Bot v13.0")
+st.title("🧠 Pro Küresel Yatırım Terminali v13.0 (Deep Forest Edition)")
+st.markdown("*Random Forest Algoritması ile Güçlendirilmiş Yapay Zeka Karar Motoru*")
 
 # --- FONKSİYONLAR ---
 @st.cache_data(show_spinner=False)
@@ -24,22 +24,40 @@ def veri_yukle(ticker, start, end):
     return yf.download(ticker, start=start, end=end, session=oturum)
 
 def makine_ogrenmesi_sinyal(df_subset):
+    # Veri hazırlığı
     df_ml = df_subset.copy().reset_index()
     df_ml['Gun'] = np.arange(len(df_ml))
-    X = df_ml[['Gun']]
+    
+    # Basit özellikleri (features) zenginleştiriyoruz ki Random Forest daha iyi öğrensin
+    df_ml['SMA_5'] = df_ml['Close'].rolling(window=5).mean().fillna(method='bfill')
+    df_ml['SMA_10'] = df_ml['Close'].rolling(window=10).mean().fillna(method='bfill')
+    df_ml['Volatilite'] = df_ml['Close'].rolling(window=5).std().fillna(method='bfill')
+    
+    X = df_ml[['Gun', 'SMA_5', 'SMA_10', 'Volatilite']]
     y = df_ml['Close']
     
-    model = LinearRegression()
+    # Yıldız Oyuncu Sahada: Random Forest
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X, y)
     
+    # Yarın için verileri hazırla
     son_gun = df_ml['Gun'].iloc[-1]
+    son_sma5 = df_ml['SMA_5'].iloc[-1]
+    son_sma10 = df_ml['SMA_10'].iloc[-1]
+    son_volatilite = df_ml['Volatilite'].iloc[-1]
     son_fiyat = df_ml['Close'].iloc[-1]
     
-    gelecek_X = np.array([[son_gun + 1]])
-    yarin_tahmin = model.predict(gelecek_X)[0]
+    gelecek_X = pd.DataFrame({
+        'Gun': [son_gun + 1],
+        'SMA_5': [son_sma5],
+        'SMA_10': [son_sma10],
+        'Volatilite': [son_volatilite]
+    })
     
+    yarin_tahmin = model.predict(gelecek_X)[0]
     beklenen_degisim = ((yarin_tahmin - son_fiyat) / son_fiyat) * 100
     
+    # Karar mekanizması
     if beklenen_degisim > 1.0:
         return "AL", yarin_tahmin
     elif beklenen_degisim < -1.0:
@@ -62,7 +80,7 @@ with st.sidebar:
     st.divider()
     st.markdown(f"**💰 Güncel Bakiye: {round(st.session_state.sanal_bakiye, 2)}**")
 
-with st.spinner('Yapay zeka modelleri eğitiliyor...'):
+with st.spinner('Random Forest Modeli eğitiliyor... (Bu işlem Linear regresyondan biraz daha uzun sürebilir)'):
     df = veri_yukle(hisse_kodu, baslangic, bitis)
 
 if not df.empty:
@@ -71,16 +89,16 @@ if not df.empty:
     
     t1, t2, t3 = st.tabs(["🔁 Otonom Trade Simülatörü", "🧪 Manuel Sandbox", "📈 Canlı Grafik"])
 
-    # --- SEKME 1: OTONOM SİMÜLATÖR (YENİ) ---
+    # --- SEKME 1: OTONOM SİMÜLATÖR ---
     with t1:
-        st.subheader("🔁 Otonom Zaman Makinesi (Auto-Trading)")
-        st.write("Yapay zeka botunu geçmiş 30 güne göndererek kendi başına al-sat yapmasına izin ver.")
+        st.subheader("🔁 Otonom Zaman Makinesi (Deep Forest)")
+        st.write("Yapay zeka botunu geçmiş 30 güne göndererek Random Forest zekasıyla al-sat yapmasına izin ver.")
         
         c1, c2 = st.columns(2)
         baslangic_bakiyesi = c1.number_input("Bota Verilecek Başlangıç Bakiyesi:", value=100000)
         islem_gunu = c2.number_input("Kaç Günlük Simülasyon Yapılsın?", value=30, max_value=100)
         
-        if st.button("🚀 Otonom Botu Başlat", type="primary"):
+        if st.button("🚀 Akıllı Botu Başlat", type="primary"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             log_kutusu = st.empty()
@@ -89,7 +107,6 @@ if not df.empty:
             elindeki_lot = 0
             islem_gecmisi = []
             
-            # DataFrame'i simülasyon için böl
             toplam_veri = len(df)
             test_baslangic_idx = toplam_veri - islem_gunu
             
@@ -97,11 +114,14 @@ if not df.empty:
                 guncel_idx = test_baslangic_idx + i
                 if guncel_idx >= toplam_veri: break
                 
-                # Bot sadece o güne kadar olan veriyi "görüyor"
                 df_gecmis = df.iloc[:guncel_idx]
                 o_gunku_fiyat = float(df_gecmis['Close'].iloc[-1])
                 o_gunku_tarih = df.index[guncel_idx-1].strftime('%Y-%m-%d')
                 
+                # Minimum veri kontrolü (Hareketli ortalamalar için en az 10 gün lazım)
+                if len(df_gecmis) < 15:
+                    continue
+                    
                 sinyal, tahmin = makine_ogrenmesi_sinyal(df_gecmis)
                 
                 islem_notu = f"{o_gunku_tarih} | Fiyat: {round(o_gunku_fiyat,2)} | Sinyal: {sinyal}"
@@ -121,13 +141,11 @@ if not df.empty:
                     
                 islem_gecmisi.append(islem_notu)
                 
-                # Arayüzü güncelle
-                status_text.markdown(f"**İşleniyor:** {o_gunku_tarih}... (Kalan Gün: {islem_gunu - i})")
-                log_kutusu.code("\n".join(islem_gecmisi[-5:])) # Son 5 işlemi göster
+                status_text.markdown(f"**Random Forest Karar Veriyor:** {o_gunku_tarih}... (Kalan Gün: {islem_gunu - i})")
+                log_kutusu.code("\n".join(islem_gecmisi[-5:]))
                 progress_bar.progress((i + 1) / islem_gunu)
-                time.sleep(0.1) # Görsel efekt için hafif bekleme
+                time.sleep(0.1)
             
-            # Simülasyon Sonu Hesaplamaları
             son_fiyat = float(df['Close'].iloc[-1])
             nihai_deger = bakiye + (elindeki_lot * son_fiyat)
             net_kar = nihai_deger - baslangic_bakiyesi
@@ -155,7 +173,6 @@ if not df.empty:
         c1.metric("Güncel Fiyat", round(guncel_fiyat, 2))
         c2.metric("Sanal Bakiye", round(st.session_state.sanal_bakiye, 2))
         c3.metric("ML Kararı (Yarın İçin)", makine_ogrenmesi_sinyal(df)[0])
-        st.info("Manuel işlemler v11'deki gibi çalışmaya devam etmektedir. Test amaçlı ayrılmıştır.")
 
     # --- SEKME 3: GRAFİK ---
     with t3:

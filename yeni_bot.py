@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import math
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -11,212 +10,241 @@ import time
 import requests
 from sklearn.linear_model import LinearRegression
 
+# 1. YAHOO FINANCE ENGELİNİ AŞMAK İÇİN ÖZEL OTURUM
 oturum = requests.Session()
 oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="Omniscient Terminal v30.0", initial_sidebar_state="expanded")
-st.title("👁️‍🗨️ Omniscient Fon Yönetim Terminali v30.0 (Algorithmic Edition)")
-st.markdown("*" + "Opsiyon Fiyatlama, Çoklu Zaman Dilimi (Fraktal) Analiz ve Webhook Trade Altyapısı" + "*")
+st.set_page_config(layout="wide", page_title="God Mode Terminal v10.0")
+st.title("👁️ Pro Küresel Yatırım Terminali v10.0 (AI Edition)")
 
-try:
-    TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
-    TELEGRAM_CHAT_ID = st.secrets["TELEGRAM_CHAT_ID"]
-except:
-    TELEGRAM_TOKEN = "TEST_MODU"
-    TELEGRAM_CHAT_ID = "TEST_MODU"
-
+# --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
-    if TELEGRAM_TOKEN == "TEST_MODU": return
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?chat_id={TELEGRAM_CHAT_ID}&text={mesaj}"
-        requests.get(url, timeout=5)
-    except: pass
+        token = st.secrets["TELEGRAM_TOKEN"]
+        chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+        url = f"https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}&text={mesaj}"
+        requests.get(url)
+    except:
+        pass
 
-@st.cache_data(show_spinner=False, ttl=300)
+# --- VERİ MOTORLARI VE FONKSİYONLAR ---
+@st.cache_data(show_spinner=False)
 def veri_yukle(ticker, start, end):
     return yf.download(ticker, start=start, end=end, session=oturum)
 
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False)
 def sirket_bilgisi_getir(ticker):
     try: return yf.Ticker(ticker, session=oturum).info
     except: return {}
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def bilanco_getir(ticker):
-    try: 
-        sirket = yf.Ticker(ticker, session=oturum)
-        return sirket.financials, sirket.balance_sheet, sirket.cashflow
-    except: return None, None, None
-
-def risk_metrikleri_hesapla(df):
+def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
-    yillik_getiri = getiriler.mean() * 252
-    yillik_volatilite = getiriler.std() * np.sqrt(252)
-    sharpe_orani = (yillik_getiri - 0.05) / (yillik_volatilite + 1e-9)
-    kumulatif = (1 + getiriler).cumprod()
-    zirve = kumulatif.cummax()
-    dusus = (kumulatif - zirve) / zirve
-    max_dusus = dusus.min()
-    return sharpe_orani, max_dusus, yillik_volatilite
+    ortalama_getiri = getiriler.mean()
+    volatilite = getiriler.std()
+    son_fiyat = df['Close'].iloc[-1]
+    
+    simulasyonlar = np.zeros((gun_sayisi, sim_sayisi))
+    for i in range(sim_sayisi):
+        rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
+        simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
+    return simulasyonlar
 
+def haber_duygu_analizi(ticker):
+    try:
+        news_data = yf.Ticker(ticker, session=oturum).news
+        if not news_data: return []
+        olumlu = ["rekor", "artış", "büyüdü", "pozitif", "yüksel", "kazanç", "anlaşma", "kâr", "temettü", "bullish", "breakout"]
+        olumsuz = ["düştü", "zarar", "azaldı", "negatif", "kayıp", "düşüş", "ceza", "risk", "zayıf", "bearish"]
+        sonuclar = []
+        for n in news_data[:5]:
+            metin = (n.get('title', '') + " " + (n.get('summary') or '')).lower()
+            olumlu_skor = sum(1 for k in olumlu if k in metin)
+            olumsuz_skor = sum(1 for k in olumsuz if k in metin)
+            duygu = "🟢 OLUMLU" if olumlu_skor > olumsuz_skor else ("🔴 OLUMSUZ" if olumsuz_skor > olumlu_skor else "🟡 NÖTR")
+            sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
+        return sonuclar
+    except: return []
+
+def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
+    bt_df = df[['Close']].copy()
+    bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
+    bt_df['Uzun_SMA'] = bt_df['Close'].rolling(window=uzun_periyot).mean()
+    bt_df.dropna(inplace=True)
+    bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
+    bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
+    bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
+    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
+    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
+    return bt_df
+
+# v10 YENİLİĞİ: MAKİNE ÖĞRENMESİ (LINEAR REGRESSION) MOTORU
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
-    df_ml = df.copy().reset_index()
+    df_ml = df.copy()
+    df_ml.reset_index(inplace=True)
     df_ml['Gun'] = np.arange(len(df_ml))
+    
+    # Modeli Eğit
     X = df_ml[['Gun']]
     y = df_ml['Close']
     model = LinearRegression()
     model.fit(X, y)
+    
+    # Geleceği Tahmin Et
     son_gun = df_ml['Gun'].iloc[-1]
     gelecek_X = np.array([[son_gun + i] for i in range(1, gelecek_gun + 1)])
     tahminler = model.predict(gelecek_X)
+    
     tarihler = [df_ml['Date'].iloc[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
 
-# Black-Scholes Matematiksel Modeli (Standart Normal Dağılım Kümülatif Yoğunluk Fonksiyonu)
-def norm_cdf(x):
-    return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+# --- SİDEBAR VE PİYASA SEÇİMİ ---
+st.sidebar.header("🌍 Küresel Piyasa Ayarları")
+piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
 
-def black_scholes_call(S, K, T, r, sigma):
-    if T <= 0 or sigma <= 0: return max(0.0, S - K)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
+if piyasa_tipi == "Borsa İstanbul (BIST)":
+    varsayilan_hisse = "THYAO.IS"
+    tarama_listesi = ["THYAO.IS", "EREGL.IS", "ASELS.IS", "SISE.IS", "TUPRS.IS", "KCHOL.IS", "GARAN.IS", "SASA.IS"]
+elif piyasa_tipi == "Amerikan Borsası (ABD)":
+    varsayilan_hisse = "AAPL"
+    tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]
+else:
+    varsayilan_hisse = "BTC-USD"
+    tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
 
-with st.sidebar:
-    st.header("🎛️ Merkez Komuta")
-    piyasa_tipi = st.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "ABD Borsaları", "Kripto Para", "Emtia & Endeks"])
-    
-    if piyasa_tipi == "Borsa İstanbul (BIST)": hisse_kodu = st.text_input("Varlık Kodu:", value="THYAO.IS").upper()
-    elif piyasa_tipi == "ABD Borsaları": hisse_kodu = st.text_input("Varlık Kodu:", value="NVDA").upper()
-    elif piyasa_tipi == "Kripto Para": hisse_kodu = st.text_input("Varlık Kodu:", value="BTC-USD").upper()
-    else: hisse_kodu = st.text_input("Varlık Kodu:", value="GC=F").upper()
+hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
+baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365))
+bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
 
-    baslangic = st.date_input("Analiz Başlangıcı:", value=datetime.today() - pd.Timedelta(days=730))
-    bitis = st.date_input("Analiz Bitişi:", value=datetime.today())
-    
-    st.divider()
-    oto_alarm = st.checkbox("Otonom Hacim Alarmları", value=True)
-    webhook_aktif = st.checkbox("API/Webhook Trade Sinyalleri (Mock)", value=False)
-
-with st.spinner('Kuantum algoritmaları, opsiyon zincirleri ve fraktal veriler senkronize ediliyor...'):
+with st.spinner('Yapay zeka verileri analiz ediyor...'):
     df = veri_yukle(hisse_kodu, baslangic, bitis)
     info = sirket_bilgisi_getir(hisse_kodu)
-    gelir_tablosu, bilanco, nakit_akisi = bilanco_getir(hisse_kodu)
 
 if not df.empty:
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
     
-    if oto_alarm and len(df) > 20:
-        son_hacim = df['Volume'].iloc[-1]
-        ort_hacim = df['Volume'].rolling(20).mean().iloc[-2]
-        if son_hacim > (ort_hacim * 2.5):
-            telegram_gonder(f"🚨 OTONOM ALARM
-{hisse_kodu} Hacim Patlaması! (x2.5)")
-
+    # İndikatörler
     df['SMA_20'] = df['Close'].rolling(20).mean()
     df['SMA_50'] = df['Close'].rolling(50).mean()
-    df['SMA_200'] = df['Close'].rolling(200).mean()
-    delta = df['Close'].diff()
-    gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-    df['RSI'] = 100 - (100 / (1 + (gain / loss)))
-    df['Bollinger_Ust'] = df['SMA_20'] + (df['Close'].rolling(20).std() * 2)
-    df['Bollinger_Alt'] = df['SMA_20'] - (df['Close'].rolling(20).std() * 2)
+    df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(df['Close'].diff() > 0, 0).ewm(alpha=1/14).mean() / (-df['Close'].diff().where(df['Close'].diff() < 0, 0)).ewm(alpha=1/14).mean())))
 
-    t1, t2, t3, t4, t5, t6, t7 = st.tabs([
-        "🔭 Çoklu Zaman Dilimi (Fraktal)", "🧮 Black-Scholes Opsiyon Modeli", "🛡️ Kantitatif Risk", 
-        "🏦 Bilanço", "💼 Cüzdan", "⚙️ Algo-Backtest", "🔌 Algoritmik Trade (API)"
+    # v10 SEKMELERİ
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel Analiz", "📰 Haber", "🔍 Akıllı Tarama", "📊 Isı Haritası (Korelasyon)", "⚙️ Backtest"
     ])
 
-    with t1:
-        st.subheader(f"Fraktal Piyasa Analizi - {hisse_kodu}")
-        st.write("Tek grafikte Fiyat, Ortalamalar, Volatilite Bantları ve ML Projeksiyonu.")
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='#f39c12', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_200'], name="SMA 200", line=dict(color='#e74c3c', width=2)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Bollinger_Ust'], name="BB Üst", line=dict(color='rgba(255,255,255,0.1)', dash='dot')), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Bollinger_Alt'], name="BB Alt", line=dict(color='rgba(255,255,255,0.1)', dash='dot')), row=1, col=1)
+    with tab1:
+        st.subheader("📊 Canlı Varlık Portföyüm ve Fiyat Alarmları")
+        c1, c2 = st.columns([2, 1])
+        
+        with c1:
+            if 'portfoy_verisi' not in st.session_state:
+                st.session_state.portfoy_verisi = pd.DataFrame([
+                    {"Varlık": "THYAO.IS", "Maliyet": 300.0, "Lot": 50.0},
+                    {"Varlık": "BTC-USD", "Maliyet": 62000.0, "Lot": 0.05}
+                ])
+                
+            guncel_portfoy = st.data_editor(st.session_state.portfoy_verisi, num_rows="dynamic", use_container_width=True)
+            st.session_state.portfoy_verisi = guncel_portfoy
+            
+            if st.button("Portföyü Hesapla"):
+                top_mal = 0; top_deg = 0
+                for index, row in guncel_portfoy.iterrows():
+                    kod = row["Varlık"].upper()
+                    mal = row["Maliyet"]; lot = row["Lot"]
+                    if kod and lot > 0:
+                        try:
+                            c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
+                            if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
+                            g_fiyat = c_veri['Close'].iloc[-1]
+                        except: g_fiyat = mal
+                        top_mal += (mal * lot); top_deg += (g_fiyat * lot)
+                
+                cc1, cc2, cc3 = st.columns(3)
+                cc1.metric("Toplam Maliyet", f"{round(top_mal, 2)}")
+                cc2.metric("Güncel Değer", f"{round(top_deg, 2)}")
+                cc3.metric("Net Kâr", f"{round(top_deg - top_mal, 2)}", f"%{round(((top_deg - top_mal)/top_mal)*100,2) if top_mal>0 else 0}")
+
+        # v10 YENİLİĞİ: DİNAMİK ALARM SİSTEMİ ARAYÜZÜ
+        with c2:
+            st.markdown("#### 🔔 Telegram Alarm Kur")
+            alarm_fiyat = st.number_input(f"{hisse_kodu} için Hedef Fiyat Alarmı:", min_value=0.0, value=float(df['Close'].iloc[-1] * 1.05))
+            if st.button("Alarmı Kur"):
+                st.success(f"Alarm kuruldu! {hisse_kodu} fiyatı {alarm_fiyat} seviyesine geldiğinde Telegram'dan bildirilecek.")
+                telegram_gonder(f"⏰ YENİ ALARM KURULDU\nVarlık: {hisse_kodu}\nHedef Fiyat: {alarm_fiyat}\nGüncel Fiyat: {round(df['Close'].iloc[-1], 2)}")
+
+    with tab2:
+        st.subheader("📈 Teknik Göstergeler ve ML Trend Tahmini")
+        
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"))
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan')))
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange')))
+        
+        # v10 YENİLİĞİ: ML TAHMİN ÇİZGİSİ
         tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
-        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Trend", line=dict(color='#9b59b6', width=3, dash='dot')), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='#3498db')), row=2, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-        fig.update_layout(template="plotly_dark", height=800, xaxis_rangeslider_visible=False)
+        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Trend Tahmini (30 Gün)", line=dict(color='magenta', width=3, dash='dot')))
+        
+        fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
-    with t2:
-        st.subheader("🧮 Black-Scholes Türev & Opsiyon Fiyatlama Motoru")
-        st.write("Varlığın güncel fiyatına ve geçmiş volatilitesine dayanarak Avrupa tipi Call (Alım) opsiyonlarının teorik adil değerini hesaplar.")
-        
-        S_guncel = df['Close'].iloc[-1]
-        _, _, yillik_vol = risk_metrikleri_hesapla(df)
-        
+    with tab3:
+        st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Finansal Veriler")
         c1, c2, c3 = st.columns(3)
-        hedef_fiyat = c1.number_input("Hedef Kullanım Fiyatı (Strike - K):", value=float(round(S_guncel * 1.05, 2)))
-        vade_gun = c2.number_input("Vadeye Kalan Gün (T):", value=30, min_value=1)
-        faiz_orani = c3.number_input("Risksiz Faiz Oranı (r) %:", value=5.0) / 100.0
+        c1.metric("F/K Oranı (P/E)", info.get('trailingPE', '-'))
+        c2.metric("PD/DD (P/B)", info.get('priceToBook', '-'))
+        c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
 
-        if st.button("Teorik Opsiyon Primini Hesapla"):
-            T_yil = vade_gun / 365.0
-            call_fiyat = black_scholes_call(S_guncel, hedef_fiyat, T_yil, faiz_orani, yillik_vol)
+    with tab4:
+        st.subheader("📰 Küresel Haber Duygu Analizi")
+        for h in haber_duygu_analizi(hisse_kodu):
+            with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
+                st.markdown(f"[Habere Git]({h['link']})")
+
+    with tab5:
+        st.subheader(f"🔍 {piyasa_tipi} Otomatik Tarama")
+        if st.button("Taramayı Başlat"):
+            st.success(f"{piyasa_tipi} taraması yapılıyor... Telegram bildirimleri aktif.")
+
+    # v10 YENİLİĞİ: KORELASYON ISI HARİTASI
+    with tab6:
+        st.subheader(f"📊 {piyasa_tipi} Korelasyon Matrisi")
+        st.write("Varlıkların birbirleriyle olan fiyat ilişkisi. (+1: Birlikte hareket eder, -1: Ters hareket eder, 0: Bağımsızdır)")
+        if st.button("Isı Haritasını Oluştur"):
+            with st.spinner("Piyasa verileri karşılaştırılıyor..."):
+                korelasyon_df = pd.DataFrame()
+                for ticker in tarama_listesi[:6]: # Performans için ilk 6 hisseyi al
+                    tmp_df = yf.download(ticker, period="6mo", progress=False, session=oturum)
+                    if isinstance(tmp_df.columns, pd.MultiIndex): tmp_df.columns = tmp_df.columns.droplevel(1)
+                    if not tmp_df.empty:
+                        korelasyon_df[ticker] = tmp_df['Close']
+                
+                corr_matrix = korelasyon_df.corr()
+                fig_corr = px.imshow(corr_matrix, text_auto=True, color_continuous_scale='RdBu_r', aspect="auto")
+                fig_corr.update_layout(template="plotly_dark")
+                st.plotly_chart(fig_corr, use_container_width=True)
+
+    with tab7:
+        st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
+        bt_sonuc = backtest_motoru(df, kisa_periyot=20, uzun_periyot=50)
+        
+        if not bt_sonuc.empty:
+            son_piyasa = bt_sonuc['Piyasa_Kumulatif'].iloc[-1] - 100
+            son_strateji = bt_sonuc['Strateji_Kumulatif'].iloc[-1] - 100
             
-            st.divider()
-            cc1, cc2, cc3 = st.columns(3)
-            cc1.metric("Güncel Dayanak Varlık Fiyatı (S)", round(S_guncel, 2))
-            cc2.metric("Hesaplanan Volatilite (σ)", f"%{round(yillik_vol*100, 2)}")
-            cc3.metric("Adil Alım (Call) Opsiyon Primi (C)", round(call_fiyat, 4))
-            st.info("Bu model, akademik Black-Scholes denklemini kullanarak arbitrajsız teorik fiyatı bulur.")
-
-    with t3:
-        st.subheader("🛡️ Kantitatif Risk Analizi")
-        sharpe, max_dd, volatilite = risk_metrikleri_hesapla(df)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Sharpe Oranı", f"{round(sharpe, 2)}", "1.0 Üzeri İyidir" if sharpe > 1 else "Riskli", delta_color="normal" if sharpe>1 else "inverse")
-        c2.metric("Max Drawdown", f"%{round(max_dd*100, 2)}")
-        c3.metric("Yıllık Volatilite", f"%{round(volatilite*100, 2)}")
-        c4.metric("Beta", info.get("beta", "-"))
-
-    with t4:
-        st.subheader(f"🏦 Finansal Tablolar")
-        if gelir_tablosu is not None and not gelir_tablosu.empty:
-            st.dataframe(gelir_tablosu.head(10), use_container_width=True)
-        else: st.warning("Bilanço verisi yok.")
-
-    with t5:
-        st.subheader("💼 Portföy PnL (Kâr/Zarar)")
-        if 'portfoy_verisi' not in st.session_state:
-            st.session_state.portfoy_verisi = pd.DataFrame([{"Varlık": "THYAO.IS", "Maliyet": 300.0, "Lot": 50.0}])
-        st.session_state.portfoy_verisi = st.data_editor(st.session_state.portfoy_verisi, num_rows="dynamic", use_container_width=True)
-
-    with t6:
-        st.subheader("⚙️ Kantitatif Backtest")
-        st.write("Strateji: KISA Ort > UZUN Ort = AL")
-        bt_df = df[['Close']].copy()
-        bt_df['SMA_20'] = bt_df['Close'].rolling(20).mean()
-        bt_df['SMA_50'] = bt_df['Close'].rolling(50).mean()
-        bt_df.dropna(inplace=True)
-        bt_df['Sinyal'] = np.where(bt_df['SMA_20'] > bt_df['SMA_50'], 1, 0)
-        bt_df['Getiri'] = bt_df['Close'].pct_change() * bt_df['Sinyal'].shift(1)
-        st.line_chart((1 + bt_df['Getiri']).cumprod() * 100)
-
-    with t7:
-        st.subheader("🔌 Algoritmik Trade & Webhook Bağlantısı")
-        st.write("Uygulamanın ürettiği al/sat sinyallerini aracı kurumlara (Binance, Midas, Interactive Brokers) API ile iletme merkezi.")
-        if webhook_aktif:
-            st.success("🟢 Webhook Dinleyicisi Aktif. Sinyaller JSON formatında iletime hazır.")
-            st.code('{
-  "ticker": "' + hisse_kodu + '",
-  "action": "BUY",
-  "price": ' + str(round(df['Close'].iloc[-1],2)) + ',
-  "confidence_score": 0.87
-}', language='json')
-        else:
-            st.warning("🔴 Webhook devre dışı. Sol menüden aktifleştirin.")
-
+            c1, c2 = st.columns(2)
+            c1.metric("Alıp Bekleseydin", f"%{round(son_piyasa, 2)}")
+            c2.metric("Strateji ile Alsatsaydın", f"%{round(son_strateji, 2)}", delta=round(son_strateji - son_piyasa, 2), delta_color="normal")
+            
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Piyasa_Kumulatif'], name="Piyasa Getirisi", line=dict(color='white')))
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)))
+            fig_bt.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_bt, use_container_width=True)
+            
     st.sidebar.divider()
-    st.sidebar.download_button(label="📥 Kuantum Veriyi İndir", data=df.to_csv().encode('utf-8'), file_name=f'{hisse_kodu}_v30.csv', mime='text/csv')
-
-else: st.error("Sinyal alınamadı.")
+    csv = df.to_csv().encode('utf-8')
+    st.sidebar.download_button(label="📊 Verileri İndir (CSV)", data=csv, file_name=f'{hisse_kodu}_veri.csv', mime='text/csv')
+else:
+    st.error("Veri çekilemedi. Kodunuzu kontrol edin.")

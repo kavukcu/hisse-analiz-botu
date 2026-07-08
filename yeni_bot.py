@@ -77,6 +77,31 @@ def atr_hesapla(df, periyot=14):
     df_atr['TR'] = df_atr[['H-L', 'H-PC', 'L-PC']].max(axis=1)
     df_atr['ATR'] = df_atr['TR'].rolling(window=periyot).mean()
     return df_atr['ATR']
+# v13 YENİLİĞİ: Otomatik Mum Formasyonu Tespiti
+def mum_formasyonu_bul(df):
+    df_mum = df.copy()
+    # Gövde ve gölgeleri hesapla
+    df_mum['Govde'] = abs(df_mum['Close'] - df_mum['Open'])
+    df_mum['Ust_Golge'] = df_mum['High'] - df_mum[['Open', 'Close']].max(axis=1)
+    df_mum['Alt_Golge'] = df_mum[['Open', 'Close']].min(axis=1) - df_mum['Low']
+    
+    formasyonlar = []
+    # Veriyi tarih sırasına göre tarıyoruz
+    for i in range(1, len(df_mum)):
+        # 1. Yutan Boğa (Bullish Engulfing): Düşüş trendini bitiren güçlü alım sinyali
+        if (df_mum['Close'].iloc[i-1] < df_mum['Open'].iloc[i-1]) and \
+           (df_mum['Close'].iloc[i] > df_mum['Open'].iloc[i]) and \
+           (df_mum['Open'].iloc[i] < df_mum['Close'].iloc[i-1]) and \
+           (df_mum['Close'].iloc[i] > df_mum['Open'].iloc[i-1]):
+            formasyonlar.append((df_mum.index[i], df_mum['Low'].iloc[i], "Yutan Boğa 🐂"))
+            
+        # 2. Çekiç (Hammer): Dipten sert alım geldiğini gösteren sinyal
+        elif (df_mum['Alt_Golge'].iloc[i] > 2 * df_mum['Govde'].iloc[i]) and \
+             (df_mum['Ust_Golge'].iloc[i] < 0.2 * df_mum['Govde'].iloc[i]) and \
+             (df_mum['Govde'].iloc[i] > 0): 
+            formasyonlar.append((df_mum.index[i], df_mum['Low'].iloc[i], "Çekiç 🔨"))
+            
+    return formasyonlar
 # v11 YENİLİĞİ: POLİNOMSAL REGRESYON (Daha Gerçekçi AI Eğrisi)
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30, derece=3):
     df_ml = df.copy()
@@ -217,6 +242,22 @@ if not df.empty:
         fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Eğri Tahmini (30 Gün)", line=dict(color='magenta', width=3, dash='dash')))
         
         fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
+        # v13 YENİLİĞİ: Sinyalleri Grafiğe Ekle
+        formasyonlar = mum_formasyonu_bul(df)
+        for tarih, fiyat, isim in formasyonlar:
+            fig.add_annotation(
+                x=tarih, y=fiyat,
+                text=isim,
+                showarrow=True,
+                arrowhead=2,
+                arrowcolor="yellow",
+                arrowsize=1,
+                arrowwidth=2,
+                ax=0, ay=40, # Yazıyı mumun altına doğru kaydır
+                font=dict(color="white", size=10),
+                bgcolor="green" if "Boğa" in isim else "darkorange",
+                opacity=0.8
+            )
         st.plotly_chart(fig, use_container_width=True)
 
     with tab3:

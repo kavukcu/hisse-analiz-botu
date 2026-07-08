@@ -57,16 +57,29 @@ def haber_duygu_analizi(ticker):
         return sonuclar
     except: return []
 
+# v14 YENİLİĞİ: Kurumsal Backtest Motoru
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df = df[['Close']].copy()
     bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
     bt_df['Uzun_SMA'] = bt_df['Close'].rolling(window=uzun_periyot).mean()
     bt_df.dropna(inplace=True)
+    
+    # Sinyal ve Pozisyon Değişimi
     bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
+    bt_df['Pozisyon_Degisimi'] = bt_df['Sinyal'].diff() # 1: Alış, -1: Satış
+    
+    # Getiriler
     bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
     bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
+    
+    # Kümülatif Büyüme (100 Birim Para üzerinden)
     bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
     bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
+    
+    # Max Drawdown (Maksimum Düşüş) Hesaplaması
+    bt_df['Zirve'] = bt_df['Strateji_Kumulatif'].cummax()
+    bt_df['Drawdown'] = (bt_df['Strateji_Kumulatif'] - bt_df['Zirve']) / bt_df['Zirve'] * 100
+    
     return bt_df
 # v12 YENİLİĞİ: ATR ve Dinamik Risk Motoru
 def atr_hesapla(df, periyot=14):
@@ -324,26 +337,42 @@ if not df.empty:
                 fig_corr.update_layout(template="plotly_dark")
                 st.plotly_chart(fig_corr, use_container_width=True)
 
+# v14 YENİLİĞİ: Gelişmiş Performans Raporu ve Çöküş (Drawdown) Grafiği
     with tab7:
-        st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
+        st.subheader("⚙️ Profesyonel Strateji Testi: SMA 20 vs SMA 50")
         bt_sonuc = backtest_motoru(df, kisa_periyot=20, uzun_periyot=50)
         
         if not bt_sonuc.empty:
             son_piyasa = bt_sonuc['Piyasa_Kumulatif'].iloc[-1] - 100
             son_strateji = bt_sonuc['Strateji_Kumulatif'].iloc[-1] - 100
             
-            c1, c2 = st.columns(2)
-            c1.metric("Alıp Bekleseydin", f"%{round(son_piyasa, 2)}")
-            c2.metric("Strateji ile Alsatsaydın", f"%{round(son_strateji, 2)}", delta=round(son_strateji - son_piyasa, 2), delta_color="normal")
+            # İleri Düzey Metrikleri Hesapla
+            kazanan_gunler = len(bt_sonuc[bt_sonuc['Strateji_Getirisi'] > 0])
+            toplam_islem_gunu = len(bt_sonuc[bt_sonuc['Strateji_Getirisi'] != 0])
+            win_rate = (kazanan_gunler / toplam_islem_gunu * 100) if toplam_islem_gunu > 0 else 0
+            max_dd = bt_sonuc['Drawdown'].min()
             
-            fig_bt = go.Figure()
-            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Piyasa_Kumulatif'], name="Piyasa Getirisi", line=dict(color='white')))
-            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)))
-            fig_bt.update_layout(template="plotly_dark", height=400)
+            # Sharpe Ratio (Yıllıklandırılmış - 252 İş Günü üzerinden)
+            ortalama_getiri = bt_sonuc['Strateji_Getirisi'].mean()
+            getiri_std = bt_sonuc['Strateji_Getirisi'].std()
+            sharpe = (ortalama_getiri / getiri_std) * np.sqrt(252) if getiri_std > 0 else 0
+            
+            # Metrik Kartları
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Strateji Net Kâr", f"%{round(son_strateji, 2)}", delta=f"Piyasadan %{round(son_strateji - son_piyasa, 2)} Fark")
+            c2.metric("Kazanma Oranı (Win Rate)", f"%{round(win_rate, 2)}")
+            c3.metric("Maksimum Düşüş (Drawdown)", f"%{round(max_dd, 2)}")
+            c4.metric("Sharpe Oranı", f"{round(sharpe, 2)}")
+            
+            # Alt Alta İki Grafik (Performans ve Drawdown)
+            fig_bt = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
+            
+            # Üst Grafik: Sermaye Büyümesi
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Piyasa_Kumulatif'], name="Piyasa Getirisi", line=dict(color='gray', dash='dot')), row=1, col=1)
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)), row=1, col=1)
+            
+            # Alt Grafik: Drawdown (Kanama / Düşüş Bölgeleri)
+            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Drawdown'], name="Drawdown", fill='tozeroy', line=dict(color='red', width=1)), row=2, col=1)
+            
+            fig_bt.update_layout(template="plotly_dark", height=600, title_text="Sermaye Büyümesi ve Çöküş (Drawdown) Analizi")
             st.plotly_chart(fig_bt, use_container_width=True)
-            
-    st.sidebar.divider()
-    csv = df.to_csv().encode('utf-8')
-    st.sidebar.download_button(label="📊 Verileri İndir (CSV)", data=csv, file_name=f'{hisse_kodu}_veri.csv', mime='text/csv')
-else:
-    st.error("Veri çekilemedi. Kodunuzu veya internet bağlantınızı kontrol edin.")

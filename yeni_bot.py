@@ -16,8 +16,8 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="God Mode Terminal v15.0")
-st.title("👁️ Pro Küresel Yatırım Terminali v15.0 (AI Edition)")
+st.set_page_config(layout="wide", page_title="God Mode Terminal v16.0")
+st.title("👁️ Pro Küresel Yatırım Terminali v16.0 (AI Edition)")
 
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
@@ -39,6 +39,7 @@ def sirket_bilgisi_getir(ticker):
     try: return yf.Ticker(ticker, session=oturum).info
     except: return {}
 
+# v16 YENİLİĞİ: MONTE CARLO MOTORU
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()
@@ -168,10 +169,11 @@ if not df.empty:
     df['SMA_20'] = df['Close'].rolling(20).mean()
     df['SMA_50'] = df['Close'].rolling(50).mean()
     df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(df['Close'].diff() > 0, 0).ewm(alpha=1/14).mean() / (-df['Close'].diff().where(df['Close'].diff() < 0, 0)).ewm(alpha=1/14).mean())))
-    df['ATR'] = atr_hesapla(df) # v12 YENİLİĞİ
+    df['ATR'] = atr_hesapla(df)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel Analiz", "📰 Haber", "🔍 Akıllı Tarama", "📊 Isı Haritası", "⚙️ Backtest"
+    # BURASI ÖNEMLİ: tab8 BURADA TANIMLANIYOR
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel Analiz", "📰 Haber", "🔍 Akıllı Tarama", "📊 Isı Haritası", "⚙️ Backtest", "🎲 Monte Carlo"
     ])
 
     with tab1:
@@ -219,7 +221,6 @@ if not df.empty:
                 cc2.metric("Güncel Değer", f"{round(top_deg, 2)}")
                 cc3.metric("Net Kâr", f"{round(top_deg - top_mal, 2)}", f"%{round(((top_deg - top_mal)/top_mal)*100,2) if top_mal>0 else 0}")
 
-                # v15 YENİLİĞİ: İnteraktif Portföy Dağılımı Grafiği
                 if dagilim_verisi:
                     df_dagilim = pd.DataFrame(dagilim_verisi)
                     fig_pie = px.pie(df_dagilim, values='Değer', names='Varlık', hole=0.4, 
@@ -230,7 +231,6 @@ if not df.empty:
                     st.plotly_chart(fig_pie, use_container_width=True)
 
         with c2:
-            # v12 YENİLİĞİ: DİNAMİK RİSK YÖNETİMİ
             st.markdown(f"#### 🛡️ AI Risk Motoru ({hisse_kodu})")
             
             son_kapanis = df['Close'].iloc[-1]
@@ -269,16 +269,12 @@ if not df.empty:
         tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
         fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Trend Tahmini (30 Gün)", line=dict(color='magenta', width=3, dash='dot')))
         
-        # v13 YENİLİĞİ: Sinyalleri Grafiğe Ekle
         formasyonlar = mum_formasyonu_bul(df)
         for tarih, fiyat, isim in formasyonlar:
             fig.add_annotation(
-                x=tarih, y=fiyat,
-                text=isim,
+                x=tarih, y=fiyat, text=isim,
                 showarrow=True, arrowhead=2, arrowcolor="yellow", arrowsize=1, arrowwidth=2, ax=0, ay=40,
-                font=dict(color="white", size=10),
-                bgcolor="green" if "Boğa" in isim else "darkorange",
-                opacity=0.8
+                font=dict(color="white", size=10), bgcolor="green" if "Boğa" in isim else "darkorange", opacity=0.8
             )
         
         fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
@@ -349,6 +345,44 @@ if not df.empty:
             
             fig_bt.update_layout(template="plotly_dark", height=600, title_text="Sermaye Büyümesi ve Çöküş (Drawdown) Analizi")
             st.plotly_chart(fig_bt, use_container_width=True)
+
+    # v16 YENİLİĞİ: MONTE CARLO SEKMESİ
+    with tab8:
+        st.subheader(f"🎲 {hisse_kodu} İçin Monte Carlo Gelecek Simülasyonu (30 Gün)")
+        st.write("Geçmiş volatilite baz alınarak oluşturulmuş **100 farklı rastgele olasılık senaryosu**. Koyu kırmızı çizgi en olası senaryoyu temsil eder.")
+        
+        mc_sonuclar = monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100)
+        
+        son_tarih = df.index[-1]
+        gelecek_tarihler = [son_tarih + timedelta(days=i) for i in range(1, 31)]
+        
+        fig_mc = go.Figure()
+        
+        for i in range(100):
+            fig_mc.add_trace(go.Scatter(
+                x=gelecek_tarihler, y=mc_sonuclar[:, i], mode='lines', 
+                line=dict(color='rgba(135, 206, 250, 0.05)', width=1), 
+                showlegend=False, hoverinfo='skip'
+            ))
+            
+        beklenen_deger = np.median(mc_sonuclar, axis=1)
+        fig_mc.add_trace(go.Scatter(
+            x=gelecek_tarihler, y=beklenen_deger, mode='lines', 
+            name='Beklenen Ortanca Fiyat', line=dict(color='red', width=3)
+        ))
+        
+        fig_mc.update_layout(template="plotly_dark", height=500)
+        st.plotly_chart(fig_mc, use_container_width=True)
+        
+        son_gun_fiyatlari = mc_sonuclar[-1, :]
+        en_kotu = np.percentile(son_gun_fiyatlari, 5) 
+        en_iyi = np.percentile(son_gun_fiyatlari, 95) 
+        
+        st.markdown("#### 📅 30 Gün Sonrası İçin Olasılık Metrikleri")
+        cc1, cc2, cc3 = st.columns(3)
+        cc1.metric("🔴 Karamsar Senaryo (Alt %5)", f"{round(en_kotu, 2)}")
+        cc2.metric("⚪ Beklenen Ortalama Fiyat", f"{round(np.median(son_gun_fiyatlari), 2)}")
+        cc3.metric("🟢 İyimser Senaryo (Üst %5)", f"{round(en_iyi, 2)}")
             
     st.sidebar.divider()
     csv = df.to_csv().encode('utf-8')

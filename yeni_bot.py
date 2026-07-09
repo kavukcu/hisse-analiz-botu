@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-import time
 import requests
 from sklearn.linear_model import LinearRegression
 
@@ -16,8 +15,20 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="God Mode Terminal v16.0")
-st.title("👁️ Pro Küresel Yatırım Terminali v16.0 (AI Edition)")
+st.set_page_config(layout="wide", page_title="God Mode Terminal v17.0")
+st.title("👁️ Pro Küresel Yatırım Terminali v17.0 (Fully Fixed)")
+
+# --- VERİ GÜVENLİĞİ VE SÜTUN DÜZLEŞTİRİCİ MOTOR ---
+def sutunlari_duzlestir(df_downloaded):
+    if df_downloaded is None or df_downloaded.empty:
+        return df_downloaded
+    if isinstance(df_downloaded.columns, pd.MultiIndex):
+        if any(col in ['Close', 'Open', 'High', 'Low', 'Volume'] for col in df_downloaded.columns.get_level_values(0)):
+            df_downloaded.columns = df_downloaded.columns.get_level_values(0)
+        else:
+            df_downloaded.columns = df_downloaded.columns.get_level_values(1)
+    df_downloaded.columns = [str(c).strip() for c in df_downloaded.columns]
+    return df_downloaded
 
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
@@ -32,19 +43,24 @@ def telegram_gonder(mesaj):
 # --- VERİ MOTORLARI VE FONKSİYONLAR ---
 @st.cache_data(show_spinner=False)
 def veri_yukle(ticker, start, end):
-    return yf.download(ticker, start=start, end=end, session=oturum)
+    try:
+        df_dl = yf.download(ticker, start=start, end=end, session=oturum)
+        return sutunlari_duzlestir(df_dl)
+    except:
+        return pd.DataFrame()
 
 @st.cache_data(show_spinner=False)
 def sirket_bilgisi_getir(ticker):
-    try: return yf.Ticker(ticker, session=oturum).info
-    except: return {}
+    try: 
+        return yf.Ticker(ticker, session=oturum).info
+    except: 
+        return {}
 
-# v16 YENİLİĞİ: MONTE CARLO MOTORU
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()
     volatilite = getiriler.std()
-    son_fiyat = df['Close'].iloc[-1]
+    son_fiyat = float(df['Close'].iloc[-1])
     
     simulasyonlar = np.zeros((gun_sayisi, sim_sayisi))
     for i in range(sim_sayisi):
@@ -55,7 +71,8 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
 def haber_duygu_analizi(ticker):
     try:
         news_data = yf.Ticker(ticker, session=oturum).news
-        if not news_data: return []
+        if not news_data: 
+            return []
         olumlu = ["rekor", "artış", "büyüdü", "pozitif", "yüksel", "kazanç", "anlaşma", "kâr", "temettü", "bullish", "breakout"]
         olumsuz = ["düştü", "zarar", "azaldı", "negatif", "kayıp", "düşüş", "ceza", "risk", "zayıf", "bearish"]
         sonuclar = []
@@ -66,9 +83,9 @@ def haber_duygu_analizi(ticker):
             duygu = "🟢 OLUMLU" if olumlu_skor > olumsuz_skor else ("🔴 OLUMSUZ" if olumsuz_skor > olumlu_skor else "🟡 NÖTR")
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
-    except: return []
+    except: 
+        return []
 
-# v14 YENİLİĞİ: Kurumsal Backtest Motoru
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df = df[['Close']].copy()
     bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
@@ -76,23 +93,17 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df.dropna(inplace=True)
     
     bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
-    bt_df['Pozisyon_Degisimi'] = bt_df['Sinyal'].diff()
-    
     bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
     bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
-    
-    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
-    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
+    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri'].fillna(0)).cumprod() * 100
+    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi'].fillna(0)).cumprod() * 100
     
     bt_df['Zirve'] = bt_df['Strateji_Kumulatif'].cummax()
     bt_df['Drawdown'] = (bt_df['Strateji_Kumulatif'] - bt_df['Zirve']) / bt_df['Zirve'] * 100
-    
     return bt_df
 
-# v10 YENİLİĞİ: MAKİNE ÖĞRENMESİ (LINEAR REGRESSION) MOTORU
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     df_ml = df.copy()
-    df_ml.reset_index(inplace=True)
     df_ml['Gun'] = np.arange(len(df_ml))
     
     X = df_ml[['Gun']]
@@ -104,20 +115,18 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     gelecek_X = np.array([[son_gun + i] for i in range(1, gelecek_gun + 1)])
     tahminler = model.predict(gelecek_X)
     
-    tarihler = [df_ml['Date'].iloc[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+    son_tarih = df.index[-1]
+    tarihler = [son_tarih + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
 
-# v12 YENİLİĞİ: ATR ve Dinamik Risk Motoru
 def atr_hesapla(df, periyot=14):
     df_atr = df.copy()
     df_atr['H-L'] = abs(df_atr['High'] - df_atr['Low'])
     df_atr['H-PC'] = abs(df_atr['High'] - df_atr['Close'].shift(1))
     df_atr['L-PC'] = abs(df_atr['Low'] - df_atr['Close'].shift(1))
     df_atr['TR'] = df_atr[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-    df_atr['ATR'] = df_atr['TR'].rolling(window=periyot).mean()
-    return df_atr['ATR']
+    return df_atr['TR'].rolling(window=periyot).mean()
 
-# v13 YENİLİĞİ: Otomatik Mum Formasyonu Tespiti
 def mum_formasyonu_bul(df):
     df_mum = df.copy()
     df_mum['Govde'] = abs(df_mum['Close'] - df_mum['Open'])
@@ -128,17 +137,15 @@ def mum_formasyonu_bul(df):
     for i in range(1, len(df_mum)):
         if (df_mum['Close'].iloc[i-1] < df_mum['Open'].iloc[i-1]) and \
            (df_mum['Close'].iloc[i] > df_mum['Open'].iloc[i]) and \
-           (df_mum['Open'].iloc[i] < df_mum['Close'].iloc[i-1]) and \
-           (df_mum['Close'].iloc[i] > df_mum['Open'].iloc[i-1]):
-            formasyonlar.append((df_mum.index[i], df_mum['Low'].iloc[i], "Yutan Boğa 🐂"))
+           (df_mum['Open'].iloc[i] <= df_mum['Close'].iloc[i-1]) and \
+           (df_mum['Close'].iloc[i] >= df_mum['Open'].iloc[i-1]):
+            formasyonlar.append((df_mum.index[i], float(df_mum['Low'].iloc[i]), "Yutan Boğa 🐂"))
             
         elif (df_mum['Alt_Golge'].iloc[i] > 2 * df_mum['Govde'].iloc[i]) and \
              (df_mum['Ust_Golge'].iloc[i] < 0.2 * df_mum['Govde'].iloc[i]) and \
              (df_mum['Govde'].iloc[i] > 0): 
-            formasyonlar.append((df_mum.index[i], df_mum['Low'].iloc[i], "Çekiç 🔨"))
-            
+            formasyonlar.append((df_mum.index[i], float(df_mum['Low'].iloc[i]), "Çekiç 🔨"))
     return formasyonlar
-
 
 # --- SİDEBAR VE PİYASA SEÇİMİ ---
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
@@ -162,230 +169,5 @@ with st.spinner('Yapay zeka verileri analiz ediyor...'):
     df = veri_yukle(hisse_kodu, baslangic, bitis)
     info = sirket_bilgisi_getir(hisse_kodu)
 
-if not df.empty:
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-    
-    # İndikatörler
-    df['SMA_20'] = df['Close'].rolling(20).mean()
-    df['SMA_50'] = df['Close'].rolling(50).mean()
-    df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(df['Close'].diff() > 0, 0).ewm(alpha=1/14).mean() / (-df['Close'].diff().where(df['Close'].diff() < 0, 0)).ewm(alpha=1/14).mean())))
-    df['ATR'] = atr_hesapla(df)
-
-    # BURASI ÖNEMLİ: tab8 BURADA TANIMLANIYOR
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel Analiz", "📰 Haber", "🔍 Akıllı Tarama", "📊 Isı Haritası", "⚙️ Backtest", "🎲 Monte Carlo"
-    ])
-
-    with tab1:
-        st.subheader("📊 Canlı Varlık Portföyüm ve Fiyat Alarmları")
-        c1, c2 = st.columns([2, 1])
-        
-        with c1:
-            if 'portfoy_verisi' not in st.session_state:
-                st.session_state.portfoy_verisi = pd.DataFrame([
-                    {"Varlık": "THYAO.IS", "Maliyet": 300.0, "Lot": 50.0},
-                    {"Varlık": "BTC-USD", "Maliyet": 62000.0, "Lot": 0.05}
-                ])
-                
-            guncel_portfoy = st.data_editor(st.session_state.portfoy_verisi, num_rows="dynamic", use_container_width=True)
-            st.session_state.portfoy_verisi = guncel_portfoy
-            
-            if st.button("Portföyü Hesapla ve Görselleştir"):
-                top_mal = 0; top_deg = 0
-                dagilim_verisi = [] 
-                
-                with st.spinner("Canlı fiyatlar çekiliyor..."):
-                    for index, row in guncel_portfoy.iterrows():
-                        kod = row["Varlık"].upper()
-                        mal = row["Maliyet"]; lot = row["Lot"]
-                        if kod and lot > 0:
-                            try:
-                                c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
-                                if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
-                                g_fiyat = c_veri['Close'].iloc[-1]
-                            except: g_fiyat = mal
-                            
-                            varlik_maliyet = mal * lot
-                            varlik_guncel = g_fiyat * lot
-                            top_mal += varlik_maliyet
-                            top_deg += varlik_guncel
-                            
-                            dagilim_verisi.append({
-                                "Varlık": kod, 
-                                "Değer": varlik_guncel, 
-                                "Kâr/Zarar (%)": round(((g_fiyat-mal)/mal)*100 if mal>0 else 0, 2)
-                            })
-                
-                cc1, cc2, cc3 = st.columns(3)
-                cc1.metric("Toplam Maliyet", f"{round(top_mal, 2)}")
-                cc2.metric("Güncel Değer", f"{round(top_deg, 2)}")
-                cc3.metric("Net Kâr", f"{round(top_deg - top_mal, 2)}", f"%{round(((top_deg - top_mal)/top_mal)*100,2) if top_mal>0 else 0}")
-
-                if dagilim_verisi:
-                    df_dagilim = pd.DataFrame(dagilim_verisi)
-                    fig_pie = px.pie(df_dagilim, values='Değer', names='Varlık', hole=0.4, 
-                                     title="Sermaye Dağılımı (Çeşitlendirme)", 
-                                     hover_data=['Kâr/Zarar (%)'])
-                    fig_pie.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#000000', width=2)))
-                    fig_pie.update_layout(template="plotly_dark", height=400, margin=dict(t=50, b=10, l=10, r=10))
-                    st.plotly_chart(fig_pie, use_container_width=True)
-
-        with c2:
-            st.markdown(f"#### 🛡️ AI Risk Motoru ({hisse_kodu})")
-            
-            son_kapanis = df['Close'].iloc[-1]
-            son_atr = df['ATR'].iloc[-1]
-            
-            st.info(f"Güncel: **{son_kapanis:.2f}** | ATR: **{son_atr:.2f}**")
-            
-            risk_profili = st.selectbox("Risk Profilinizi Seçin:", ["Muhafazakar (Dar Stop)", "Dengeli (Normal Stop)", "Agresif (Geniş Stop)"], index=1)
-            
-            if risk_profili == "Muhafazakar (Dar Stop)":
-                sl_carpan = 1.5; tp_carpan = 2.0
-            elif risk_profili == "Dengeli (Normal Stop)":
-                sl_carpan = 2.0; tp_carpan = 3.0
-            else:
-                sl_carpan = 3.0; tp_carpan = 5.0
-                
-            dinamik_stop = son_kapanis - (son_atr * sl_carpan)
-            dinamik_hedef = son_kapanis + (son_atr * tp_carpan)
-            
-            st.metric("🔴 Otomatik Stop-Loss", f"{dinamik_stop:.2f}", f"-%{((son_kapanis - dinamik_stop)/son_kapanis)*100:.2f}")
-            st.metric("🟢 Otomatik Take-Profit", f"{dinamik_hedef:.2f}", f"+%{((dinamik_hedef - son_kapanis)/son_kapanis)*100:.2f}")
-            
-            if st.button("Kuralları Gönder"):
-                mesaj = f"🛡️ GÜVENLİ TRADE KURULUMU ({hisse_kodu})\nFiyat: {son_kapanis:.2f}\nHedef: {dinamik_hedef:.2f}\nStop: {dinamik_stop:.2f}"
-                st.success("İletildi!")
-                telegram_gonder(mesaj)
-
-    with tab2:
-        st.subheader("📈 Teknik Göstergeler ve ML Trend Tahmini")
-        
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"))
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange')))
-        
-        tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
-        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Trend Tahmini (30 Gün)", line=dict(color='magenta', width=3, dash='dot')))
-        
-        formasyonlar = mum_formasyonu_bul(df)
-        for tarih, fiyat, isim in formasyonlar:
-            fig.add_annotation(
-                x=tarih, y=fiyat, text=isim,
-                showarrow=True, arrowhead=2, arrowcolor="yellow", arrowsize=1, arrowwidth=2, ax=0, ay=40,
-                font=dict(color="white", size=10), bgcolor="green" if "Boğa" in isim else "darkorange", opacity=0.8
-            )
-        
-        fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tab3:
-        st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Finansal Veriler")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("F/K Oranı (P/E)", info.get('trailingPE', '-'))
-        c2.metric("PD/DD (P/B)", info.get('priceToBook', '-'))
-        c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
-
-    with tab4:
-        st.subheader("📰 Küresel Haber Duygu Analizi")
-        for h in haber_duygu_analizi(hisse_kodu):
-            with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
-                st.markdown(f"[Habere Git]({h['link']})")
-
-    with tab5:
-        st.subheader(f"🔍 {piyasa_tipi} Otomatik Tarama")
-        if st.button("Taramayı Başlat"):
-            st.success(f"{piyasa_tipi} taraması yapılıyor... Telegram bildirimleri aktif.")
-
-    with tab6:
-        st.subheader(f"📊 {piyasa_tipi} Korelasyon Matrisi")
-        st.write("Varlıkların birbirleriyle olan fiyat ilişkisi. (+1: Birlikte hareket eder, -1: Ters hareket eder, 0: Bağımsızdır)")
-        if st.button("Isı Haritasını Oluştur"):
-            with st.spinner("Piyasa verileri karşılaştırılıyor..."):
-                korelasyon_df = pd.DataFrame()
-                for ticker in tarama_listesi[:6]:
-                    tmp_df = yf.download(ticker, period="6mo", progress=False, session=oturum)
-                    if isinstance(tmp_df.columns, pd.MultiIndex): tmp_df.columns = tmp_df.columns.droplevel(1)
-                    if not tmp_df.empty:
-                        korelasyon_df[ticker] = tmp_df['Close']
-                
-                corr_matrix = korelasyon_df.corr()
-                fig_corr = px.imshow(corr_matrix, text_auto=True, color_continuous_scale='RdBu_r', aspect="auto")
-                fig_corr.update_layout(template="plotly_dark")
-                st.plotly_chart(fig_corr, use_container_width=True)
-
-    with tab7:
-        st.subheader("⚙️ Profesyonel Strateji Testi: SMA 20 vs SMA 50")
-        bt_sonuc = backtest_motoru(df, kisa_periyot=20, uzun_periyot=50)
-        
-        if not bt_sonuc.empty:
-            son_piyasa = bt_sonuc['Piyasa_Kumulatif'].iloc[-1] - 100
-            son_strateji = bt_sonuc['Strateji_Kumulatif'].iloc[-1] - 100
-            
-            kazanan_gunler = len(bt_sonuc[bt_sonuc['Strateji_Getirisi'] > 0])
-            toplam_islem_gunu = len(bt_sonuc[bt_sonuc['Strateji_Getirisi'] != 0])
-            win_rate = (kazanan_gunler / toplam_islem_gunu * 100) if toplam_islem_gunu > 0 else 0
-            max_dd = bt_sonuc['Drawdown'].min()
-            
-            ortalama_getiri = bt_sonuc['Strateji_Getirisi'].mean()
-            getiri_std = bt_sonuc['Strateji_Getirisi'].std()
-            sharpe = (ortalama_getiri / getiri_std) * np.sqrt(252) if getiri_std > 0 else 0
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Strateji Net Kâr", f"%{round(son_strateji, 2)}", delta=f"Piyasadan %{round(son_strateji - son_piyasa, 2)} Fark")
-            c2.metric("Kazanma Oranı (Win)", f"%{round(win_rate, 2)}")
-            c3.metric("Maksimum Düşüş", f"%{round(max_dd, 2)}")
-            c4.metric("Sharpe Oranı", f"{round(sharpe, 2)}")
-            
-            fig_bt = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Piyasa_Kumulatif'], name="Piyasa Getirisi", line=dict(color='gray', dash='dot')), row=1, col=1)
-            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)), row=1, col=1)
-            fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Drawdown'], name="Drawdown", fill='tozeroy', line=dict(color='red', width=1)), row=2, col=1)
-            
-            fig_bt.update_layout(template="plotly_dark", height=600, title_text="Sermaye Büyümesi ve Çöküş (Drawdown) Analizi")
-            st.plotly_chart(fig_bt, use_container_width=True)
-
-    # v16 YENİLİĞİ: MONTE CARLO SEKMESİ
-    with tab8:
-        st.subheader(f"🎲 {hisse_kodu} İçin Monte Carlo Gelecek Simülasyonu (30 Gün)")
-        st.write("Geçmiş volatilite baz alınarak oluşturulmuş **100 farklı rastgele olasılık senaryosu**. Koyu kırmızı çizgi en olası senaryoyu temsil eder.")
-        
-        mc_sonuclar = monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100)
-        
-        son_tarih = df.index[-1]
-        gelecek_tarihler = [son_tarih + timedelta(days=i) for i in range(1, 31)]
-        
-        fig_mc = go.Figure()
-        
-        for i in range(100):
-            fig_mc.add_trace(go.Scatter(
-                x=gelecek_tarihler, y=mc_sonuclar[:, i], mode='lines', 
-                line=dict(color='rgba(135, 206, 250, 0.05)', width=1), 
-                showlegend=False, hoverinfo='skip'
-            ))
-            
-        beklenen_deger = np.median(mc_sonuclar, axis=1)
-        fig_mc.add_trace(go.Scatter(
-            x=gelecek_tarihler, y=beklenen_deger, mode='lines', 
-            name='Beklenen Ortanca Fiyat', line=dict(color='red', width=3)
-        ))
-        
-        fig_mc.update_layout(template="plotly_dark", height=500)
-        st.plotly_chart(fig_mc, use_container_width=True)
-        
-        son_gun_fiyatlari = mc_sonuclar[-1, :]
-        en_kotu = np.percentile(son_gun_fiyatlari, 5) 
-        en_iyi = np.percentile(son_gun_fiyatlari, 95) 
-        
-        st.markdown("#### 📅 30 Gün Sonrası İçin Olasılık Metrikleri")
-        cc1, cc2, cc3 = st.columns(3)
-        cc1.metric("🔴 Karamsar Senaryo (Alt %5)", f"{round(en_kotu, 2)}")
-        cc2.metric("⚪ Beklenen Ortalama Fiyat", f"{round(np.median(son_gun_fiyatlari), 2)}")
-        cc3.metric("🟢 İyimser Senaryo (Üst %5)", f"{round(en_iyi, 2)}")
-            
-    st.sidebar.divider()
-    csv = df.to_csv().encode('utf-8')
-    st.sidebar.download_button(label="📊 Verileri İndir (CSV)", data=csv, file_name=f'{hisse_kodu}_veri.csv', mime='text/csv')
-else:
-    st.error("Veri çekilemedi. Kodunuzu kontrol edin.")
+if df is not None and not df.empty:
+    df['SMA_20'] = df

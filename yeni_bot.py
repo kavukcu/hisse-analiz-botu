@@ -16,8 +16,8 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="God Mode Terminal v19.0")
-st.title("👁️ Pro Küresel Yatırım Terminali v19.0 (Ultimate BİST Edition)")
+st.set_page_config(layout="wide", page_title="God Mode Terminal v20.0")
+st.title("👁️ Pro Küresel Yatırım Terminali v20.0 (Yıldız Sürüm)")
 
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
@@ -127,9 +127,23 @@ if not df.empty:
     if isinstance(df.columns, pd.MultiIndex): 
         df.columns = df.columns.droplevel(1)
     
+    # --- İNDİKATÖR HESAPLAMALARI (YENİ v20.0 GÜNCELLEMELERİ) ---
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     
+    # Bollinger Bantları
+    df['BB_Std'] = df['Close'].rolling(window=20).std()
+    df['BB_Up'] = df['SMA_20'] + (df['BB_Std'] * 2)
+    df['BB_Low'] = df['SMA_20'] - (df['BB_Std'] * 2)
+    
+    # MACD
+    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+    
+    # RSI
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -139,7 +153,7 @@ if not df.empty:
     df['RSI'] = 100 - (100 / (1 + rs))
 
     tabs = st.tabs([
-        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel Analiz", 
+        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel & Temettü", 
         "📰 Haber", "🔍 Akıllı Radar", "📊 Isı Haritası (Korelasyon)", 
         "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Entegrasyonu"
     ])
@@ -194,72 +208,131 @@ if not df.empty:
                 msg = f"Alarm Kuruldu: {hisse_kodu} - Hedef: {alarm_fiyat}"
                 telegram_gonder(msg)
 
-    # TAB 2: TEKNİK & AI TAHMİN
+    # TAB 2: TEKNİK & AI TAHMİN (MACD VE BOLLINGER EKLENDİ)
     with tabs[1]:
-        st.subheader("📈 Teknik Göstergeler ve ML Trend Tahmini")
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"))
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='orange')))
+        st.subheader("📈 Profesyonel Teknik Göstergeler (MACD & Bollinger)")
+        
+        # Subplot Oluşturma (Üstte Fiyat, Altta MACD)
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+        
+        # 1. Grafiğe Fiyatlar ve Bollinger Ekleme
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Up'], name="BB Üst", line=dict(color='gray', dash='dot')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Low'], name="BB Alt", line=dict(color='gray', dash='dot'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
         
         tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
-        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Trend Tahmini (30 Gün)", line=dict(color='magenta', width=3, dash='dot')))
+        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
         
-        fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False)
+        # 2. Grafiğe MACD Ekleme
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
+        
+        # Histogram renklerini belirleme (pozitif yeşil, negatif kırmızı)
+        hist_colors = np.where(df['MACD_Hist'] < 0, '#ef5350', '#26a69a')
+        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Histogram", marker_color=hist_colors), row=2, col=1)
+        
+        fig.update_layout(template="plotly_dark", height=800, xaxis_rangeslider_visible=False, xaxis2_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
         if piyasa_tipi == "Borsa İstanbul (BIST)":
             st.markdown("---")
-            # YENİ ÖZELLİKLER YAN YANA GÜZEL DURSUN DİYE SÜTUNLARA AYIRALIM
             rc1, rc2 = st.columns(2)
             
             with rc1:
-                st.subheader("💵 Dolar (USD) Bazlı Fiyat Analizi")
-                usd_goster = st.checkbox(f"{hisse_kodu} Dolar Bazlı Grafiğini Göster")
+                st.subheader("💵 Dolar (USD) Bazlı Fiyat")
+                usd_goster = st.checkbox(f"{hisse_kodu} USD Grafiği")
                 if usd_goster:
-                    with st.spinner("USD/TRY Kuru Çekiliyor..."):
+                    with st.spinner("Kur Çekiliyor..."):
                         kur_df = veri_yukle("TRY=X", baslangic, bitis)
                         if not kur_df.empty:
-                            if isinstance(kur_df.columns, pd.MultiIndex): 
-                                kur_df.columns = kur_df.columns.droplevel(1)
+                            if isinstance(kur_df.columns, pd.MultiIndex): kur_df.columns = kur_df.columns.droplevel(1)
                             ortak_index = df.index.intersection(kur_df.index)
                             df_usd = df.loc[ortak_index].copy()
                             df_usd['Close_USD'] = df_usd['Close'] / kur_df.loc[ortak_index, 'Close']
-                            
                             fig_usd = go.Figure()
-                            fig_usd.add_trace(go.Scatter(x=df_usd.index, y=df_usd['Close_USD'], name="USD Bazlı Fiyat", line=dict(color='#00ffcc', width=2)))
+                            fig_usd.add_trace(go.Scatter(x=df_usd.index, y=df_usd['Close_USD'], name="USD Fiyat", line=dict(color='#00ffcc', width=2)))
                             fig_usd.update_layout(template="plotly_dark", height=350, xaxis_rangeslider_visible=False)
                             st.plotly_chart(fig_usd, use_container_width=True)
             
             with rc2:
-                # 🔥 YENİ ÖZELLİK 1: BİST 100 RÖLATİF GÜÇ ANALİZİ
-                st.subheader("📊 BİST-100 Endeks Kıyaslaması")
-                bist_kiyasla = st.checkbox(f"{hisse_kodu} vs XU100 Performansı")
+                st.subheader("📊 Endeks & Sektör Rakibi Kıyaslaması")
+                bist_kiyasla = st.checkbox(f"{hisse_kodu} Göreceli Performans")
                 if bist_kiyasla:
-                    with st.spinner("BİST-100 Endeks Verisi Çekiliyor..."):
+                    with st.spinner("Kıyaslama Verileri Çekiliyor..."):
+                        # Otomatik Rakip Belirleme Sistemi
+                        rakipler = {
+                            "THYAO.IS": "PGSUS.IS", "PGSUS.IS": "THYAO.IS",
+                            "AKBNK.IS": "GARAN.IS", "GARAN.IS": "AKBNK.IS",
+                            "ISCTR.IS": "YKBNK.IS", "YKBNK.IS": "ISCTR.IS",
+                            "FROTO.IS": "TOASO.IS", "TOASO.IS": "FROTO.IS",
+                            "EREGL.IS": "KRDMD.IS", "KRDMD.IS": "EREGL.IS",
+                            "TUPRS.IS": "PETKM.IS", "PETKM.IS": "TUPRS.IS",
+                            "BIMAS.IS": "SOKM.IS", "SOKM.IS": "BIMAS.IS",
+                            "KCHOL.IS": "SAHOL.IS", "SAHOL.IS": "KCHOL.IS"
+                        }
+                        rakip_kodu = rakipler.get(hisse_kodu, None)
+                        
                         xu100 = veri_yukle("XU100.IS", baslangic, bitis)
-                        if not xu100.empty:
-                            if isinstance(xu100.columns, pd.MultiIndex): 
-                                xu100.columns = xu100.columns.droplevel(1)
-                            ortak_bist = df.index.intersection(xu100.index)
+                        rakip_df = pd.DataFrame()
+                        if rakip_kodu:
+                            rakip_df = veri_yukle(rakip_kodu, baslangic, bitis)
                             
-                            # Performansı % bazında eşitlemek için normalize (100 baz) yapıyoruz
+                        if not xu100.empty:
+                            if isinstance(xu100.columns, pd.MultiIndex): xu100.columns = xu100.columns.droplevel(1)
+                            ortak_bist = df.index.intersection(xu100.index)
                             hisse_norm = (df.loc[ortak_bist, 'Close'] / df.loc[ortak_bist, 'Close'].iloc[0]) * 100
                             xu100_norm = (xu100.loc[ortak_bist, 'Close'] / xu100.loc[ortak_bist, 'Close'].iloc[0]) * 100
                             
                             fig_rel = go.Figure()
-                            fig_rel.add_trace(go.Scatter(x=ortak_bist, y=hisse_norm, name=hisse_kodu, line=dict(color='#magenta')))
-                            fig_rel.add_trace(go.Scatter(x=ortak_bist, y=xu100_norm, name="BİST-100 (XU100)", line=dict(color='gray', dash='dash')))
+                            fig_rel.add_trace(go.Scatter(x=ortak_bist, y=hisse_norm, name=hisse_kodu, line=dict(color='magenta', width=2)))
+                            fig_rel.add_trace(go.Scatter(x=ortak_bist, y=xu100_norm, name="XU100", line=dict(color='gray', dash='dash')))
+                            
+                            if not rakip_df.empty:
+                                if isinstance(rakip_df.columns, pd.MultiIndex): rakip_df.columns = rakip_df.columns.droplevel(1)
+                                rakip_norm = (rakip_df.loc[ortak_bist, 'Close'] / rakip_df.loc[ortak_bist, 'Close'].iloc[0]) * 100
+                                fig_rel.add_trace(go.Scatter(x=ortak_bist, y=rakip_norm, name=f"Rakip: {rakip_kodu}", line=dict(color='orange')))
+                                
                             fig_rel.update_layout(template="plotly_dark", height=350, yaxis_title="Göreli Getiri (Başlangıç=100)")
                             st.plotly_chart(fig_rel, use_container_width=True)
 
-    # TAB 3: TEMEL ANALİZ
+    # TAB 3: TEMEL ANALİZ VE TEMETTÜ GEÇMİŞİ
     with tabs[2]:
-        st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Finansal Veriler")
+        st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Veriler & Temettü")
+        
         c1, c2, c3 = st.columns(3)
         c1.metric("F/K Oranı (P/E)", info.get('trailingPE', '-'))
         c2.metric("PD/DD (P/B)", info.get('priceToBook', '-'))
         c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
+        
+        st.markdown("---")
+        tc1, tc2 = st.columns(2)
+        
+        with tc1:
+            st.markdown("#### 💰 Temettü (Kar Payı) Geçmişi")
+            try:
+                temettuler = yf.Ticker(hisse_kodu, session=oturum).dividends
+                if not temettuler.empty:
+                    son_temettuler = temettuler.tail(10).sort_index(ascending=False)
+                    son_temettuler.index = son_temettuler.index.strftime('%Y-%m-%d')
+                    st.dataframe(son_temettuler, use_container_width=True)
+                else:
+                    st.info("Bu şirkete ait temettü verisi bulunamadı.")
+            except:
+                st.warning("Temettü verileri çekilemedi.")
+                
+        with tc2:
+            st.markdown("#### ✂️ Bölünme (Bedelli/Bedelsiz) Geçmişi")
+            try:
+                bolunmeler = yf.Ticker(hisse_kodu, session=oturum).splits
+                if not bolunmeler.empty:
+                    son_bolunmeler = bolunmeler.tail(10).sort_index(ascending=False)
+                    son_bolunmeler.index = son_bolunmeler.index.strftime('%Y-%m-%d')
+                    st.dataframe(son_bolunmeler, use_container_width=True)
+                else:
+                    st.info("Bu şirkete ait yakın zamanlı bölünme kaydı bulunamadı.")
+            except:
+                st.warning("Bölünme verileri çekilemedi.")
 
     # TAB 4: HABER
     with tabs[3]:
@@ -273,7 +346,6 @@ if not df.empty:
         st.subheader(f"🔍 {piyasa_tipi} Akıllı Multi-Radar")
         
         if piyasa_tipi == "Borsa İstanbul (BIST)":
-            # Tarama modu seçimi ekleyelim
             tarama_modu = st.radio("Tarama Modu Seçin:", ["🟢 Aşırı Satım Radarı (RSI < 35)", "🔥 Hacim Patlaması Radarı (Balina Avcısı)"])
             
             if st.button("🚀 Seçili BİST-30 Radarını Çalıştır"):
@@ -285,7 +357,6 @@ if not df.empty:
                     
                     for i, hisse in enumerate(bist30_hisseler):
                         try:
-                            # Hacim ortalaması ve RSI için son 60 günlük veri yeterli
                             t_df = veri_yukle(hisse, datetime.today() - timedelta(days=60), datetime.today())
                             if not t_df.empty and isinstance(t_df.columns, pd.MultiIndex): 
                                 t_df.columns = t_df.columns.droplevel(1)
@@ -295,7 +366,6 @@ if not df.empty:
                                 son_kapanis = round(float(t_df['Close'].iloc[-1]), 2)
                                 
                                 if "Aşırı Satım" in tarama_modu:
-                                    # RSI Taraması
                                     delta_h = t_df['Close'].diff()
                                     gain_h = delta_h.where(delta_h > 0, 0).ewm(alpha=1/14, adjust=False).mean()
                                     loss_h = -delta_h.where(delta_h < 0, 0).ewm(alpha=1/14, adjust=False).mean()
@@ -306,15 +376,12 @@ if not df.empty:
                                         firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"RSI: {round(rsi_son, 1)}", "Durum": "🟢 Aşırı Satım Bölgesinde"})
                                 
                                 else:
-                                    # 🔥 YENİ ÖZELLİK 2: HACİM PATLAMASI (BALİNA AVCISI)
                                     son_hacim = t_df['Volume'].iloc[-1]
-                                    hacim_ortalamasi = t_df['Volume'].iloc[-21:-1].mean() # Son 20 günün ortalama hacmi
+                                    hacim_ortalamasi = t_df['Volume'].iloc[-21:-1].mean()
                                     
-                                    # Eğer bugünkü hacim, son 20 günün ortalamasının 1.8 katından fazlaysa balina girmiştir
                                     if son_hacim > (hacim_ortalamasi * 1.8):
                                         kat_artisi = round(son_hacim / hacim_ortalamasi, 2)
                                         firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"{kat_artisi}x Hacim", "Durum": "🔥 Olağanüstü Hacim Girişi"})
-                                        
                         except:
                             pass
                         
@@ -325,7 +392,6 @@ if not df.empty:
                         f_df = pd.DataFrame(firsatlar).set_index("Hisse Kodu")
                         st.dataframe(f_df, use_container_width=True)
                         
-                        # 🔥 YENİ ÖZELLİK 3: SONUÇLARI DOĞRUDAN TELEGRAM'A FIRLATMA
                         st.markdown("---")
                         st.markdown("### 📲 Radar Sonuçlarını Cebe Gönder")
                         if st.button("📨 Bu Listeyi Telegram'a Uçur"):
@@ -397,7 +463,7 @@ if not df.empty:
         st.subheader("🛠️ Terminal Entegrasyon Durumu")
         st.success("🤖 Telegram API Bağlantısı: Doğrulandı")
         st.success("🐍 Python Sözdizimi & Pylance Hataları: %100 Temizlendi")
-        st.info("Terminal v19.0 (Ultimate Edition) Kararlı Sürüm Modunda Çalışıyor.")
+        st.info("Terminal v20.0 (Yıldız Sürüm) Kararlı Sürüm Modunda Çalışıyor.")
             
     st.sidebar.divider()
     csv = df.to_csv().encode('utf-8')

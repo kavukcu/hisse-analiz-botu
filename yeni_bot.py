@@ -22,8 +22,8 @@ st.title("👁️ Pro Küresel Yatırım Terminali v51 (BİST Teknik Zirvesi)")
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
     try:
-        token = st.secrets["TELEGRAM_TOKEN"]
-        chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+        token = st.secrets["8868337575:AAE4TUSI-PtXfwWn-zmzjpEv2kZ-t59_mRk"]
+        chat_id = st.secrets["1634044181"]
         url = f"https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}&text={mesaj}"
         requests.get(url)
         return True

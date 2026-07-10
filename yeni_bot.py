@@ -16,8 +16,8 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="God Mode Terminal v21.0")
-st.title("👁️ Pro Küresel Yatırım Terminali v21.0 (BİST Değer Avcısı)")
+st.set_page_config(layout="wide", page_title="God Mode Terminal v51")
+st.title("👁️ Pro Küresel Yatırım Terminali v51 (BİST Teknik Zirvesi)")
 
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
@@ -116,7 +116,7 @@ else:
     tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
 
 hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
-baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365))
+baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=730)) # Uzun vadeli analiz için 2 yıla çıkarıldı
 bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
 
 with st.spinner('Yapay zeka verileri analiz ediyor...'):
@@ -130,6 +130,7 @@ if not df.empty:
     # --- İNDİKATÖR HESAPLAMALARI ---
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean() # Golden Cross için
     
     # Bollinger Bantları
     df['BB_Std'] = df['Close'].rolling(window=20).std()
@@ -152,83 +153,61 @@ if not df.empty:
     rs = avg_gain / (avg_loss + 1e-9)
     df['RSI'] = 100 - (100 / (1 + rs))
 
+    # Stokastik RSI (BIST için ekstra hassasiyet)
+    min_val = df['RSI'].rolling(window=14).min()
+    max_val = df['RSI'].rolling(window=14).max()
+    df['Stoch_RSI'] = (df['RSI'] - min_val) / (max_val - min_val)
+    df['Stoch_RSI_K'] = df['Stoch_RSI'].rolling(window=3).mean() * 100
+    df['Stoch_RSI_D'] = df['Stoch_RSI_K'].rolling(window=3).mean()
+    
+    # On-Balance Volume (OBV) - Para Giriş/Çıkış Teyidi
+    df['Daily_Ret'] = df['Close'].diff()
+    df['Direction'] = np.where(df['Daily_Ret'] > 0, 1, -1)
+    df['Direction'] = np.where(df['Daily_Ret'] == 0, 0, df['Direction'])
+    df['OBV'] = (df['Volume'] * df['Direction']).cumsum()
+
     tabs = st.tabs([
-        "💼 Cüzdan & Alarm", "📈 Teknik & AI Tahmin", "🏢 Temel & Temettü", 
-        "📰 Haber", "🔍 Akıllı Radar", "📊 Isı Haritası (Korelasyon)", 
+        "📈 Teknik & AI Tahmin", "🔍 Akıllı Radar", "💼 Cüzdan & Alarm", 
+        "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası (Korelasyon)", 
         "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Entegrasyonu"
     ])
 
-    # TAB 1: CÜZDAN & ALARM
+    # TAB 1: TEKNİK & AI TAHMİN (Öne Alındı ve Geliştirildi)
     with tabs[0]:
-        st.subheader("📊 Canlı Varlık Portföyüm ve Fiyat Alarmları")
-        c1, c2 = st.columns([2, 1])
+        st.subheader("📈 Profesyonel Teknik Göstergeler (BIST Hacim ve Trend Onaylı)")
         
-        with c1:
-            if 'portfoy_verisi' not in st.session_state:
-                st.session_state.portfoy_verisi = pd.DataFrame([
-                    {"Varlık": "THYAO.IS", "Maliyet": 300.0, "Lot": 50.0},
-                    {"Varlık": "BTC-USD", "Maliyet": 62000.0, "Lot": 0.05}
-                ])
-                
-            guncel_portfoy = st.data_editor(st.session_state.portfoy_verisi, num_rows="dynamic", use_container_width=True)
-            st.session_state.portfoy_verisi = guncel_portfoy
-            
-            if st.button("Portföyü Hesapla"):
-                top_mal = 0.0
-                top_deg = 0.0
-                for index, row in guncel_portfoy.iterrows():
-                    kod = str(row["Varlık"]).upper()
-                    mal = float(row["Maliyet"])
-                    lot = float(row["Lot"])
-                    if kod and lot > 0:
-                        try:
-                            c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
-                            if isinstance(c_veri.columns, pd.MultiIndex): 
-                                c_veri.columns = c_veri.columns.droplevel(1)
-                            g_fiyat = float(c_veri['Close'].iloc[-1])
-                            top_mal += (mal * lot)
-                            top_deg += (g_fiyat * lot)
-                        except: 
-                            top_mal += (mal * lot)
-                            top_deg += (mal * lot)
-                
-                cc1, cc2, cc3 = st.columns(3)
-                cc1.metric("Toplam Maliyet", f"{round(top_mal, 2)}")
-                cc2.metric("Güncel Değer", f"{round(top_deg, 2)}")
-                net_kar = top_deg - top_mal
-                kar_yuzde = round((net_kar / top_mal) * 100, 2) if top_mal > 0 else 0
-                cc3.metric("Net Kâr", f"{round(net_kar, 2)}", f"%{kar_yuzde}")
-
-        with c2:
-            st.markdown("#### 🔔 Telegram Alarm Kur")
-            guncel_son_fiyat = float(df['Close'].iloc[-1])
-            alarm_fiyat = st.number_input(f"{hisse_kodu} Hedef Fiyatı:", min_value=0.0, value=guncel_son_fiyat * 1.05)
-            if st.button("Alarmı Kur"):
-                st.success("Alarm kuruldu! Hedef fiyatta bildirim gönderilecek.")
-                msg = f"Alarm Kuruldu: {hisse_kodu} - Hedef: {alarm_fiyat}"
-                telegram_gonder(msg)
-
-    # TAB 2: TEKNİK & AI TAHMİN
-    with tabs[1]:
-        st.subheader("📈 Profesyonel Teknik Göstergeler (MACD & Bollinger)")
+        # 3 Satırlı Yapı: Fiyat, MACD, Stoch RSI + OBV
+        fig = make_subplots(
+            rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, 
+            row_heights=[0.6, 0.2, 0.2],
+            subplot_titles=("Fiyat & Hareketli Ortalamalar", "MACD & Hacim (OBV)", "Stokastik RSI")
+        )
         
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
-        
+        # 1. SATIR: Fiyat, SMA'lar, Bollinger ve AI
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan', width=1)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='yellow', width=2)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_200'], name="SMA 200", line=dict(color='red', width=3)), row=1, col=1)
+        
         fig.add_trace(go.Scatter(x=df.index, y=df['BB_Up'], name="BB Üst", line=dict(color='gray', dash='dot')), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['BB_Low'], name="BB Alt", line=dict(color='gray', dash='dot'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
         
         tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
         fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="AI Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
         
+        # 2. SATIR: MACD ve Sağ Eksende OBV (Hacim Teyidi)
         fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
-        
         hist_colors = np.where(df['MACD_Hist'] < 0, '#ef5350', '#26a69a')
         fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Histogram", marker_color=hist_colors), row=2, col=1)
         
-        fig.update_layout(template="plotly_dark", height=800, xaxis_rangeslider_visible=False, xaxis2_rangeslider_visible=False)
+        # 3. SATIR: Stokastik RSI
+        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_K'], name="%K", line=dict(color='blue')), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_D'], name="%D", line=dict(color='orange')), row=3, col=1)
+        fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1, annotation_text="Aşırı Alım")
+        fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1, annotation_text="Aşırı Satım")
+        
+        fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
         if piyasa_tipi == "Borsa İstanbul (BIST)":
@@ -291,8 +270,163 @@ if not df.empty:
                             fig_rel.update_layout(template="plotly_dark", height=350, yaxis_title="Göreli Getiri (Başlangıç=100)")
                             st.plotly_chart(fig_rel, use_container_width=True)
 
-    # TAB 3: TEMEL ANALİZ VE TEMETTÜ GEÇMİŞİ
+    # TAB 2: AKILLI TARAMA
+    with tabs[1]:
+        st.subheader(f"🔍 {piyasa_tipi} Akıllı Multi-Radar")
+        
+        if piyasa_tipi == "Borsa İstanbul (BIST)":
+            tarama_modu = st.radio("Tarama Modu Seçin:", [
+                "🟢 Aşırı Satım Radarı (RSI < 35)", 
+                "🔥 Hacim Patlaması Radarı (Balina Avcısı)",
+                "💼 Temel Analiz Radarı (Değer Avcısı - Düşük F/K ve PD/DD)",
+                "⭐ Stoch RSI Alım Fırsatı (Stoch RSI %K Yukarı Kesişim)"
+            ])
+            
+            if st.button("🚀 Seçili BİST Radarını Çalıştır"):
+                with st.spinner("BİST Hisseleri Taranıyor, Veriler Çekiliyor..."):
+                    firsatlar = []
+                    bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS", "ENKAI.IS", "KRDMD.IS", "PETKM.IS"] 
+                    
+                    ilerleme_cubugu = st.progress(0)
+                    
+                    for i, hisse in enumerate(bist30_hisseler):
+                        try:
+                            temiz_ad = hisse.replace(".IS", "")
+                            
+                            if "Temel Analiz" in tarama_modu:
+                                s_info = sirket_bilgisi_getir(hisse)
+                                fk = s_info.get('trailingPE', 999)
+                                pddd = s_info.get('priceToBook', 999)
+                                son_fiyat = s_info.get('currentPrice', 0)
+                                
+                                if isinstance(fk, (int, float)) and isinstance(pddd, (int, float)):
+                                    if 0 < fk < 10 and 0 < pddd < 3:
+                                        firsatlar.append({
+                                            "Hisse Kodu": temiz_ad, 
+                                            "Fiyat": son_fiyat, 
+                                            "Değer": f"F/K: {round(fk, 2)} | PD/DD: {round(pddd, 2)}", 
+                                            "Durum": "💼 Ucuz Çarpanlar"
+                                        })
+                            else:
+                                t_df = veri_yukle(hisse, datetime.today() - timedelta(days=90), datetime.today())
+                                if not t_df.empty and isinstance(t_df.columns, pd.MultiIndex): 
+                                    t_df.columns = t_df.columns.droplevel(1)
+                                
+                                if len(t_df) > 20:
+                                    son_kapanis = round(float(t_df['Close'].iloc[-1]), 2)
+                                    
+                                    if "Aşırı Satım" in tarama_modu:
+                                        delta_h = t_df['Close'].diff()
+                                        gain_h = delta_h.where(delta_h > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                                        loss_h = -delta_h.where(delta_h < 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                                        rs_h = gain_h / (loss_h + 1e-9)
+                                        rsi_son = (100 - (100 / (1 + rs_h))).iloc[-1]
+                                        
+                                        if rsi_son < 35: 
+                                            firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"RSI: {round(rsi_son, 1)}", "Durum": "🟢 Aşırı Satım Bölgesi"})
+                                            
+                                    elif "Stoch RSI" in tarama_modu:
+                                        delta_s = t_df['Close'].diff()
+                                        gain_s = delta_s.where(delta_s > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                                        loss_s = -delta_s.where(delta_s < 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                                        rs_s = gain_s / (loss_s + 1e-9)
+                                        rsi_serisi = 100 - (100 / (1 + rs_s))
+                                        
+                                        min_v = rsi_serisi.rolling(window=14).min()
+                                        max_v = rsi_serisi.rolling(window=14).max()
+                                        stoch = (rsi_serisi - min_v) / (max_v - min_v)
+                                        k_line = stoch.rolling(window=3).mean() * 100
+                                        d_line = k_line.rolling(window=3).mean()
+                                        
+                                        if k_line.iloc[-1] > d_line.iloc[-1] and k_line.iloc[-2] <= d_line.iloc[-2] and k_line.iloc[-1] < 40:
+                                             firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"Stoch K:{round(k_line.iloc[-1],1)}", "Durum": "⭐ Dipten Dönüş Kesişimi"})
+                                    
+                                    elif "Hacim" in tarama_modu:
+                                        son_hacim = t_df['Volume'].iloc[-1]
+                                        hacim_ortalamasi = t_df['Volume'].iloc[-21:-1].mean()
+                                        
+                                        if son_hacim > (hacim_ortalamasi * 1.8):
+                                            kat_artisi = round(son_hacim / hacim_ortalamasi, 2)
+                                            firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"{kat_artisi}x Hacim", "Durum": "🔥 Olağanüstü Hacim Girişi"})
+                        except:
+                            pass
+                        
+                        ilerleme_cubugu.progress((i + 1) / len(bist30_hisseler))
+                        
+                    if firsatlar:
+                        st.success(f"✅ Tarama tamamlandı! {len(firsatlar)} adet hisse kriterlere uyuyor:")
+                        f_df = pd.DataFrame(firsatlar).set_index("Hisse Kodu")
+                        st.dataframe(f_df, use_container_width=True)
+                        
+                        st.markdown("---")
+                        st.markdown("### 📲 Radar Sonuçlarını Cebe Gönder")
+                        if st.button("📨 Bu Listeyi Telegram'a Uçur"):
+                            tg_mesaj = f"🚨 BİST RADAR RAPORU ({datetime.today().strftime('%d.%m.%Y')})\n\nMod: {tarama_modu}\n\n"
+                            for f in firsatlar:
+                                tg_mesaj += f"• {f['Hisse Kodu']} | Fiyat: {f['Fiyat']} TL | ({f['Değer']})\n"
+                            
+                            if telegram_gonder(tg_mesaj):
+                                st.success("🚀 Liste başarıyla Telegram kanalına fırlatıldı!")
+                            else:
+                                st.error("Telegram gönderimi başarısız. secrets ayarlarınızı kontrol edin.")
+                    else:
+                        st.warning(f"📉 Şu an için BİST'te seçilen kritere ({tarama_modu}) uyan bir varlık tespit edilemedi.")
+        else:
+            if st.button("Taramayı Başlat"):
+                st.success(f"{piyasa_tipi} taraması yapılıyor... Telegram bildirimleri aktif.")
+
+    # TAB 3: CÜZDAN & ALARM
     with tabs[2]:
+        st.subheader("📊 Canlı Varlık Portföyüm ve Fiyat Alarmları")
+        c1, c2 = st.columns([2, 1])
+        
+        with c1:
+            if 'portfoy_verisi' not in st.session_state:
+                st.session_state.portfoy_verisi = pd.DataFrame([
+                    {"Varlık": "THYAO.IS", "Maliyet": 300.0, "Lot": 50.0},
+                    {"Varlık": "BTC-USD", "Maliyet": 62000.0, "Lot": 0.05}
+                ])
+                
+            guncel_portfoy = st.data_editor(st.session_state.portfoy_verisi, num_rows="dynamic", use_container_width=True)
+            st.session_state.portfoy_verisi = guncel_portfoy
+            
+            if st.button("Portföyü Hesapla"):
+                top_mal = 0.0
+                top_deg = 0.0
+                for index, row in guncel_portfoy.iterrows():
+                    kod = str(row["Varlık"]).upper()
+                    mal = float(row["Maliyet"])
+                    lot = float(row["Lot"])
+                    if kod and lot > 0:
+                        try:
+                            c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
+                            if isinstance(c_veri.columns, pd.MultiIndex): 
+                                c_veri.columns = c_veri.columns.droplevel(1)
+                            g_fiyat = float(c_veri['Close'].iloc[-1])
+                            top_mal += (mal * lot)
+                            top_deg += (g_fiyat * lot)
+                        except: 
+                            top_mal += (mal * lot)
+                            top_deg += (mal * lot)
+                
+                cc1, cc2, cc3 = st.columns(3)
+                cc1.metric("Toplam Maliyet", f"{round(top_mal, 2)}")
+                cc2.metric("Güncel Değer", f"{round(top_deg, 2)}")
+                net_kar = top_deg - top_mal
+                kar_yuzde = round((net_kar / top_mal) * 100, 2) if top_mal > 0 else 0
+                cc3.metric("Net Kâr", f"{round(net_kar, 2)}", f"%{kar_yuzde}")
+
+        with c2:
+            st.markdown("#### 🔔 Telegram Alarm Kur")
+            guncel_son_fiyat = float(df['Close'].iloc[-1])
+            alarm_fiyat = st.number_input(f"{hisse_kodu} Hedef Fiyatı:", min_value=0.0, value=guncel_son_fiyat * 1.05)
+            if st.button("Alarmı Kur"):
+                st.success("Alarm kuruldu! Hedef fiyatta bildirim gönderilecek.")
+                msg = f"Alarm Kuruldu: {hisse_kodu} - Hedef: {alarm_fiyat}"
+                telegram_gonder(msg)
+
+    # TAB 4: TEMEL ANALİZ VE TEMETTÜ GEÇMİŞİ
+    with tabs[3]:
         st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Veriler & Temettü")
         
         c1, c2, c3 = st.columns(3)
@@ -329,103 +463,12 @@ if not df.empty:
             except:
                 st.warning("Bölünme verileri çekilemedi.")
 
-    # TAB 4: HABER
-    with tabs[3]:
+    # TAB 5: HABER
+    with tabs[4]:
         st.subheader("📰 Küresel Haber Duygu Analizi")
         for h in haber_duygu_analizi(hisse_kodu):
             with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
                 st.markdown(f"[Habere Git]({h['link']})")
-
-    # TAB 5: AKILLI TARAMA (YENİ: DEĞER AVCISI RADARI EKLENDİ)
-    with tabs[4]:
-        st.subheader(f"🔍 {piyasa_tipi} Akıllı Multi-Radar")
-        
-        if piyasa_tipi == "Borsa İstanbul (BIST)":
-            tarama_modu = st.radio("Tarama Modu Seçin:", [
-                "🟢 Aşırı Satım Radarı (RSI < 35)", 
-                "🔥 Hacim Patlaması Radarı (Balina Avcısı)",
-                "💼 Temel Analiz Radarı (Değer Avcısı - Düşük F/K ve PD/DD)"
-            ])
-            
-            if st.button("🚀 Seçili BİST Radarını Çalıştır"):
-                with st.spinner("BİST Hisseleri Taranıyor, Veriler Çekiliyor... (Temel analiz taraması biraz sürebilir)"):
-                    firsatlar = []
-                    bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS", "ENKAI.IS", "KRDMD.IS", "PETKM.IS"] 
-                    
-                    ilerleme_cubugu = st.progress(0)
-                    
-                    for i, hisse in enumerate(bist30_hisseler):
-                        try:
-                            temiz_ad = hisse.replace(".IS", "")
-                            
-                            if "Temel Analiz" in tarama_modu:
-                                # Temel Veri Taraması (Değer Avcısı)
-                                s_info = sirket_bilgisi_getir(hisse)
-                                fk = s_info.get('trailingPE', 999)
-                                pddd = s_info.get('priceToBook', 999)
-                                son_fiyat = s_info.get('currentPrice', 0)
-                                
-                                # Kriter: F/K 10'dan küçük VE PD/DD 3'ten küçükse listeye ekle
-                                if isinstance(fk, (int, float)) and isinstance(pddd, (int, float)):
-                                    if 0 < fk < 10 and 0 < pddd < 3:
-                                        firsatlar.append({
-                                            "Hisse Kodu": temiz_ad, 
-                                            "Fiyat": son_fiyat, 
-                                            "Değer": f"F/K: {round(fk, 2)} | PD/DD: {round(pddd, 2)}", 
-                                            "Durum": "💼 Ucuz Çarpanlar (Değer Hissesi)"
-                                        })
-                            else:
-                                # Teknik Veri Taraması (RSI veya Hacim)
-                                t_df = veri_yukle(hisse, datetime.today() - timedelta(days=60), datetime.today())
-                                if not t_df.empty and isinstance(t_df.columns, pd.MultiIndex): 
-                                    t_df.columns = t_df.columns.droplevel(1)
-                                
-                                if len(t_df) > 20:
-                                    son_kapanis = round(float(t_df['Close'].iloc[-1]), 2)
-                                    
-                                    if "Aşırı Satım" in tarama_modu:
-                                        delta_h = t_df['Close'].diff()
-                                        gain_h = delta_h.where(delta_h > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-                                        loss_h = -delta_h.where(delta_h < 0, 0).ewm(alpha=1/14, adjust=False).mean()
-                                        rs_h = gain_h / (loss_h + 1e-9)
-                                        rsi_son = (100 - (100 / (1 + rs_h))).iloc[-1]
-                                        
-                                        if rsi_son < 35: 
-                                            firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"RSI: {round(rsi_son, 1)}", "Durum": "🟢 Aşırı Satım Bölgesinde"})
-                                    
-                                    elif "Hacim" in tarama_modu:
-                                        son_hacim = t_df['Volume'].iloc[-1]
-                                        hacim_ortalamasi = t_df['Volume'].iloc[-21:-1].mean()
-                                        
-                                        if son_hacim > (hacim_ortalamasi * 1.8):
-                                            kat_artisi = round(son_hacim / hacim_ortalamasi, 2)
-                                            firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"{kat_artisi}x Hacim", "Durum": "🔥 Olağanüstü Hacim Girişi"})
-                        except:
-                            pass
-                        
-                        ilerleme_cubugu.progress((i + 1) / len(bist30_hisseler))
-                        
-                    if firsatlar:
-                        st.success(f"✅ Tarama tamamlandı! {len(firsatlar)} adet hisse kriterlere uyuyor:")
-                        f_df = pd.DataFrame(firsatlar).set_index("Hisse Kodu")
-                        st.dataframe(f_df, use_container_width=True)
-                        
-                        st.markdown("---")
-                        st.markdown("### 📲 Radar Sonuçlarını Cebe Gönder")
-                        if st.button("📨 Bu Listeyi Telegram'a Uçur"):
-                            tg_mesaj = f"🚨 BİST RADAR RAPORU ({datetime.today().strftime('%d.%m.%Y')})\n\nMod: {tarama_modu}\n\n"
-                            for f in firsatlar:
-                                tg_mesaj += f"• {f['Hisse Kodu']} | Fiyat: {f['Fiyat']} TL | ({f['Değer']})\n"
-                            
-                            if telegram_gonder(tg_mesaj):
-                                st.success("🚀 Liste başarıyla Telegram kanalına fırlatıldı!")
-                            else:
-                                st.error("Telegram gönderimi başarısız. secrets ayarlarınızı kontrol edin.")
-                    else:
-                        st.warning(f"📉 Şu an için BİST'te seçilen kritere ({tarama_modu}) uyan bir varlık tespit edilemedi.")
-        else:
-            if st.button("Taramayı Başlat"):
-                st.success(f"{piyasa_tipi} taraması yapılıyor... Telegram bildirimleri aktif.")
 
     # TAB 6: ISI HARİTASI
     with tabs[5]:
@@ -481,7 +524,7 @@ if not df.empty:
         st.subheader("🛠️ Terminal Entegrasyon Durumu")
         st.success("🤖 Telegram API Bağlantısı: Doğrulandı")
         st.success("🐍 Python Sözdizimi & Pylance Hataları: %100 Temizlendi")
-        st.info("Terminal v21.0 (Değer Avcısı Sürümü) Kararlı Sürüm Modunda Çalışıyor.")
+        st.info("Terminal v51 (BİST Teknik Zirvesi Sürümü) Kararlı Sürüm Modunda Çalışıyor.")
             
     st.sidebar.divider()
     csv = df.to_csv().encode('utf-8')

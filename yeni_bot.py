@@ -296,7 +296,6 @@ if not df.empty:
             row=1,
             col=1,
         )
-
         if goster_vpvr:
             hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
             bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2

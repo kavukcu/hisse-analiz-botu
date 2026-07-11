@@ -1,36 +1,187 @@
-from datetime import datetime,timedelta
+"""
+config.py
+V101 Quantum AI Configuration
+"""
 
-APP_NAME="Quant Terminal v65"
+from dataclasses import dataclass
+from pathlib import Path
 
-DEFAULT_PERIOD_DAYS=730
+# ==========================================================
+# PROJE
+# ==========================================================
 
-CACHE_TTL=3600
+APP_NAME = "V101 Quantum AI"
+APP_VERSION = "1.0.0"
+AUTHOR = "Mehmet Kavukçu"
 
-DEFAULT_BIST=[
+BASE_DIR = Path(__file__).resolve().parent
+CACHE_DIR = BASE_DIR / "cache"
+LOG_DIR = BASE_DIR / "logs"
+EXPORT_DIR = BASE_DIR / "exports"
+
+CACHE_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(exist_ok=True)
+EXPORT_DIR.mkdir(exist_ok=True)
+
+# ==========================================================
+# VERİ
+# ==========================================================
+
+DEFAULT_PERIOD = "2y"
+DEFAULT_INTERVAL = "1d"
+
+CACHE_TTL = 300
+DOWNLOAD_RETRY = 5
+DOWNLOAD_TIMEOUT = 20
+
+# ==========================================================
+# EMA
+# ==========================================================
+
+EMA_FAST = 20
+EMA_MID = 50
+EMA_SLOW = 200
+
+# ==========================================================
+# RSI
+# ==========================================================
+
+RSI_PERIOD = 14
+RSI_OVERBOUGHT = 70
+RSI_OVERSOLD = 30
+
+# ==========================================================
+# MACD
+# ==========================================================
+
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+
+# ==========================================================
+# ATR
+# ==========================================================
+
+ATR_PERIOD = 14
+
+# ==========================================================
+# ADX
+# ==========================================================
+
+ADX_PERIOD = 14
+
+# ==========================================================
+# SUPERTREND
+# ==========================================================
+
+SUPERTREND_PERIOD = 10
+SUPERTREND_MULTIPLIER = 3.0
+
+# ==========================================================
+# BOLLINGER
+# ==========================================================
+
+BB_PERIOD = 20
+BB_STD = 2
+
+# ==========================================================
+# STOCHASTIC
+# ==========================================================
+
+STOCH_K = 14
+STOCH_D = 3
+
+# ==========================================================
+# SMART MONEY
+# ==========================================================
+
+FVG_LOOKAHEAD = 5
+ORDERBLOCK_LOOKBACK = 20
+SWING_LOOKBACK = 5
+
+# ==========================================================
+# AI
+# ==========================================================
+
+AI_RANDOM_STATE = 42
+AI_TEST_SIZE = 0.20
+AI_ESTIMATORS = 300
+AI_MAX_DEPTH = 12
+
+# ==========================================================
+# BACKTEST
+# ==========================================================
+
+INITIAL_CAPITAL = 100000
+COMMISSION = 0.001
+
+# ==========================================================
+# GRAFİK
+# ==========================================================
+
+CHART_HEIGHT = 900
+
+COLOR_UP = "#00ff66"
+COLOR_DOWN = "#ff4444"
+
+COLOR_FVG_BULL = "rgba(0,255,0,0.18)"
+COLOR_FVG_BEAR = "rgba(255,0,0,0.18)"
+
+# ==========================================================
+# WATCHLIST
+# ==========================================================
+
+DEFAULT_WATCHLIST = [
     "THYAO.IS",
     "ASELS.IS",
+    "KCHOL.IS",
+    "BIMAS.IS",
     "EREGL.IS",
+    "AKBNK.IS",
+    "ISCTR.IS",
+    "YKBNK.IS",
     "SISE.IS",
     "TUPRS.IS",
-    "KCHOL.IS",
-    "GARAN.IS",
-    "SASA.IS"
 ]
 
-DEFAULT_US=[
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "TSLA",
-    "AMZN",
-    "META",
-    "GOOGL"
-]
+# ==========================================================
+# ZAMAN DİLİMLERİ
+# ==========================================================
 
-DEFAULT_CRYPTO=[
-    "BTC-USD",
-    "ETH-USD",
-    "SOL-USD",
-    "BNB-USD",
-    "XRP-USD"
-]
+TIMEFRAMES = {
+    "15 Dakika": ("60d", "15m"),
+    "1 Saat": ("730d", "1h"),
+    "4 Saat": ("730d", "1h"),
+    "Günlük": ("5y", "1d"),
+    "Haftalık": ("10y", "1wk"),
+    "Aylık": ("max", "1mo"),
+}
+
+# ==========================================================
+# YAHOO
+# ==========================================================
+
+YF_AUTO_ADJUST = True
+YF_PROGRESS = False
+YF_THREADS = False
+
+# ==========================================================
+# LOG
+# ==========================================================
+
+LOG_LEVEL = "INFO"
+
+# ==========================================================
+# DATACLASS
+# ==========================================================
+
+@dataclass(frozen=True)
+class Settings:
+    app_name: str = APP_NAME
+    version: str = APP_VERSION
+    cache_ttl: int = CACHE_TTL
+    period: str = DEFAULT_PERIOD
+    interval: str = DEFAULT_INTERVAL
+
+
+settings = Settings()

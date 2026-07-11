@@ -16,8 +16,8 @@ oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
 
-st.set_page_config(layout="wide", page_title="God Mode Terminal v61")
-st.title("👁️ Pro Küresel Yatırım Terminali v61 (Veri Bilimi Sürümü)")
+st.set_page_config(layout="wide", page_title="God Mode Terminal v62")
+st.title("👁️ Pro Küresel Yatırım Terminali v62 (Price Action Sürümü)")
 
 # --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
@@ -41,6 +41,32 @@ def sirket_bilgisi_getir(ticker):
         return yf.Ticker(ticker, session=oturum).info
     except: 
         return {}
+
+# YENİ v62: MUM FORMASYONLARINI BULAN ALGORİTMA
+def mum_formasyonlarini_bul(df):
+    df_f = df.copy()
+    
+    # 1. Doji (Açılış ve Kapanış birbirine çok yakın)
+    govde = abs(df_f['Close'] - df_f['Open'])
+    mum_boyu = df_f['High'] - df_f['Low']
+    df_f['Doji'] = govde <= (mum_boyu * 0.1)
+    
+    # 2. Bullish Engulfing (Yutan Boğa)
+    df_f['Bullish_Engulfing'] = (df_f['Close'].shift(1) < df_f['Open'].shift(1)) & \
+                                (df_f['Open'] < df_f['Close'].shift(1)) & \
+                                (df_f['Close'] > df_f['Open'].shift(1))
+    
+    # 3. Bearish Engulfing (Yutan Ayı)
+    df_f['Bearish_Engulfing'] = (df_f['Close'].shift(1) > df_f['Open'].shift(1)) & \
+                                (df_f['Open'] > df_f['Close'].shift(1)) & \
+                                (df_f['Close'] < df_f['Open'].shift(1))
+                                
+    # 4. Hammer (Çekiç) - Alt gölge gövdenin en az 2 katı, üst gölge yok denecek kadar az
+    alt_golge = df_f[['Close', 'Open']].min(axis=1) - df_f['Low']
+    ust_golge = df_f['High'] - df_f[['Close', 'Open']].max(axis=1)
+    df_f['Hammer'] = (alt_golge > (govde * 2)) & (ust_golge < (govde * 0.2)) & (govde > 0)
+    
+    return df_f
 
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
@@ -101,21 +127,13 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     tarihler = [df_ml['Date'].iloc[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
 
-# --- YENİ: PYTHON İLERİ İSTATİSTİK MODÜLÜ ---
 def python_istatistik_analizi(df):
     df_stats = df.copy()
     df_stats['Log_Return'] = np.log(df_stats['Close'] / df_stats['Close'].shift(1))
-    
-    # 1. Yıllıklandırılmış Volatilite
     volatilite = df_stats['Log_Return'].std() * np.sqrt(252)
-    
-    # 2. Sharpe Oranı (Risk siz faizi %40 kabul edelim)
     getiri = df_stats['Log_Return'].mean() * 252
     sharpe = (getiri - 0.40) / volatilite
-    
-    # 3. Value at Risk (VaR) - %95 güven aralığı
     var_95 = np.percentile(df_stats['Log_Return'].dropna(), 5)
-    
     return {
         "Yıllık Volatilite": f"%{round(volatilite * 100, 2)}",
         "Sharpe Oranı": round(sharpe, 2),
@@ -153,19 +171,16 @@ if not df.empty:
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     
-    # Bollinger Bantları
     df['BB_Std'] = df['Close'].rolling(window=20).std()
     df['BB_Up'] = df['SMA_20'] + (df['BB_Std'] * 2)
     df['BB_Low'] = df['SMA_20'] - (df['BB_Std'] * 2)
     
-    # MACD
     df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
     df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
     
-    # RSI & Stoch RSI
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
     loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
@@ -178,14 +193,11 @@ if not df.empty:
     df['Stoch_RSI_K'] = df['Stoch_RSI'].rolling(window=3).mean() * 100
     df['Stoch_RSI_D'] = df['Stoch_RSI_K'].rolling(window=3).mean()
 
-    # --- İLERİ DÜZEY İNDİKATÖRLER ---
-    # 1. Ichimoku Bulutu
     df['Tenkan_Sen'] = (df['High'].rolling(window=9).max() + df['Low'].rolling(window=9).min()) / 2
     df['Kijun_Sen'] = (df['High'].rolling(window=26).max() + df['Low'].rolling(window=26).min()) / 2
     df['Senkou_Span_A'] = ((df['Tenkan_Sen'] + df['Kijun_Sen']) / 2).shift(26)
     df['Senkou_Span_B'] = ((df['High'].rolling(window=52).max() + df['Low'].rolling(window=52).min()) / 2).shift(26)
     
-    # 2. ATR (Average True Range)
     high_low = df['High'] - df['Low']
     high_close = np.abs(df['High'] - df['Close'].shift())
     low_close = np.abs(df['Low'] - df['Close'].shift())
@@ -193,18 +205,13 @@ if not df.empty:
     df['True_Range'] = np.max(ranges, axis=1)
     df['ATR_14'] = df['True_Range'].rolling(14).mean()
 
-    # --- YENİ: KURUMSAL İNDİKATÖRLER ---
-    # 3. EMA Ribbon (Gökkuşağı)
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_34'] = df['Close'].ewm(span=34, adjust=False).mean()
     df['EMA_55'] = df['Close'].ewm(span=55, adjust=False).mean()
     df['EMA_89'] = df['Close'].ewm(span=89, adjust=False).mean()
 
-    # 4. Donchian Kanalları (Dinamik Destek/Direnç)
     df['Donchian_High'] = df['High'].rolling(window=20).max()
     df['Donchian_Low'] = df['Low'].rolling(window=20).min()
-
-    # 5. VWAP (Hacim Ağırlıklı Ortalama Fiyat - 20 Günlük Rolling)
     df['VWAP_20'] = (df['Close'] * df['Volume']).rolling(20).sum() / df['Volume'].rolling(20).sum()
 
     tabs = st.tabs([
@@ -215,7 +222,7 @@ if not df.empty:
 
     # TAB 1: TEKNİK & AI TAHMİN
     with tabs[0]:
-        st.subheader("📈 İleri Düzey Teknik Grafik (VWAP & EMA Ribbon & Donchian)")
+        st.subheader("📈 İleri Düzey Teknik Grafik & Price Action")
         
         c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
         with c_ayar1:
@@ -226,6 +233,7 @@ if not df.empty:
             goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
         with c_ayar3:
             goster_ema_ribbon = st.checkbox("🌈 EMA Ribbon (Trend Gücü)", value=False)
+            goster_formasyon = st.checkbox("🕯️ Mum Formasyonlarını Göster (AI)", value=True)
             
         fig = make_subplots(
             rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, 
@@ -236,9 +244,7 @@ if not df.empty:
         # 1. SATIR: Fiyat
         fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
         
-        # Seçili İndikatörleri Çiz
         if not (goster_ichimoku or goster_ema_ribbon or goster_donchian or goster_vwap): 
-            # Hiçbiri seçili değilse klasik SMA'ları göster
             fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name="SMA 20", line=dict(color='cyan', width=1)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name="SMA 50", line=dict(color='yellow', width=2)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['BB_Up'], name="BB Üst", line=dict(color='gray', dash='dot')), row=1, col=1)
@@ -263,7 +269,22 @@ if not df.empty:
         if goster_vwap:
             fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
 
-        # Fibo ve AI
+        # YENİ v62: FORMASYON ÇİZİMLERİ
+        if goster_formasyon:
+            df_form = mum_formasyonlarini_bul(df)
+            
+            yutan_boga = df_form[df_form['Bullish_Engulfing']]
+            fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
+            
+            yutan_ayi = df_form[df_form['Bearish_Engulfing']]
+            fig.add_trace(go.Scatter(x=yutan_ayi.index, y=yutan_ayi['High'] * 1.02, mode='markers', marker=dict(symbol='triangle-down', color='#ff0000', size=12), name='Yutan Ayı'), row=1, col=1)
+            
+            cekic = df_form[df_form['Hammer']]
+            fig.add_trace(go.Scatter(x=cekic.index, y=cekic['Low'] * 0.96, mode='text', text='🔨', textposition='bottom center', name='Çekiç', showlegend=False), row=1, col=1)
+            
+            doji = df_form[df_form['Doji']]
+            fig.add_trace(go.Scatter(x=doji.index, y=doji['High'] * 1.03, mode='text', text='⭐', textposition='top center', name='Doji', showlegend=False), row=1, col=1)
+
         if goster_fibo:
             max_fiyat = df['High'].max()
             min_fiyat = df['Low'].min()
@@ -292,66 +313,7 @@ if not df.empty:
         fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        if piyasa_tipi == "Borsa İstanbul (BIST)":
-            st.markdown("---")
-            rc1, rc2 = st.columns(2)
-            
-            with rc1:
-                st.subheader("💵 Dolar (USD) Bazlı Fiyat")
-                usd_goster = st.checkbox(f"{hisse_kodu} USD Grafiği")
-                if usd_goster:
-                    with st.spinner("Kur Çekiliyor..."):
-                        kur_df = veri_yukle("TRY=X", baslangic, bitis)
-                        if not kur_df.empty:
-                            if isinstance(kur_df.columns, pd.MultiIndex): kur_df.columns = kur_df.columns.droplevel(1)
-                            ortak_index = df.index.intersection(kur_df.index)
-                            df_usd = df.loc[ortak_index].copy()
-                            df_usd['Close_USD'] = df_usd['Close'] / kur_df.loc[ortak_index, 'Close']
-                            fig_usd = go.Figure()
-                            fig_usd.add_trace(go.Scatter(x=df_usd.index, y=df_usd['Close_USD'], name="USD Fiyat", line=dict(color='#00ffcc', width=2)))
-                            fig_usd.update_layout(template="plotly_dark", height=350, xaxis_rangeslider_visible=False)
-                            st.plotly_chart(fig_usd, use_container_width=True)
-            
-            with rc2:
-                st.subheader("📊 Endeks & Sektör Rakibi Kıyaslaması")
-                bist_kiyasla = st.checkbox(f"{hisse_kodu} Göreceli Performans")
-                if bist_kiyasla:
-                    with st.spinner("Kıyaslama Verileri Çekiliyor..."):
-                        rakipler = {
-                            "THYAO.IS": "PGSUS.IS", "PGSUS.IS": "THYAO.IS",
-                            "AKBNK.IS": "GARAN.IS", "GARAN.IS": "AKBNK.IS",
-                            "ISCTR.IS": "YKBNK.IS", "YKBNK.IS": "ISCTR.IS",
-                            "FROTO.IS": "TOASO.IS", "TOASO.IS": "FROTO.IS",
-                            "EREGL.IS": "KRDMD.IS", "KRDMD.IS": "EREGL.IS",
-                            "TUPRS.IS": "PETKM.IS", "PETKM.IS": "TUPRS.IS",
-                            "BIMAS.IS": "SOKM.IS", "SOKM.IS": "BIMAS.IS",
-                            "KCHOL.IS": "SAHOL.IS", "SAHOL.IS": "KCHOL.IS"
-                        }
-                        rakip_kodu = rakipler.get(hisse_kodu, None)
-                        xu100 = veri_yukle("XU100.IS", baslangic, bitis)
-                        rakip_df = pd.DataFrame()
-                        if rakip_kodu:
-                            rakip_df = veri_yukle(rakip_kodu, baslangic, bitis)
-                            
-                        if not xu100.empty:
-                            if isinstance(xu100.columns, pd.MultiIndex): xu100.columns = xu100.columns.droplevel(1)
-                            ortak_bist = df.index.intersection(xu100.index)
-                            hisse_norm = (df.loc[ortak_bist, 'Close'] / df.loc[ortak_bist, 'Close'].iloc[0]) * 100
-                            xu100_norm = (xu100.loc[ortak_bist, 'Close'] / xu100.loc[ortak_bist, 'Close'].iloc[0]) * 100
-                            
-                            fig_rel = go.Figure()
-                            fig_rel.add_trace(go.Scatter(x=ortak_bist, y=hisse_norm, name=hisse_kodu, line=dict(color='magenta', width=2)))
-                            fig_rel.add_trace(go.Scatter(x=ortak_bist, y=xu100_norm, name="XU100", line=dict(color='gray', dash='dash')))
-                            
-                            if not rakip_df.empty:
-                                if isinstance(rakip_df.columns, pd.MultiIndex): rakip_df.columns = rakip_df.columns.droplevel(1)
-                                rakip_norm = (rakip_df.loc[ortak_bist, 'Close'] / rakip_df.loc[ortak_bist, 'Close'].iloc[0]) * 100
-                                fig_rel.add_trace(go.Scatter(x=ortak_bist, y=rakip_norm, name=f"Rakip: {rakip_kodu}", line=dict(color='orange')))
-                                
-                            fig_rel.update_layout(template="plotly_dark", height=350, yaxis_title="Göreli Getiri (Başlangıç=100)")
-                            st.plotly_chart(fig_rel, use_container_width=True)
-
-    # TAB 2: AKILLI TARAMA
+    # TAB 2: AKILLI TARAMA (YENİ RADAR EKLENDİ)
     with tabs[1]:
         st.subheader(f"🔍 {piyasa_tipi} Akıllı Multi-Radar")
         if piyasa_tipi == "Borsa İstanbul (BIST)":
@@ -360,7 +322,8 @@ if not df.empty:
                 "🔥 Hacim Patlaması Radarı (Balina Avcısı)",
                 "💼 Temel Analiz Radarı (Değer Avcısı - Düşük F/K ve PD/DD)",
                 "⭐ Stoch RSI Alım Fırsatı (Stoch RSI %K Yukarı Kesişim)",
-                "☁️ Ichimoku Kumo (Bulut) Yukarı Kırılımı (Trend Başlangıcı)"
+                "☁️ Ichimoku Kumo (Bulut) Yukarı Kırılımı (Trend Başlangıcı)",
+                "⚔️ Golden Cross (Uzun Vadeli Trend Dönüşü SMA50 > SMA200)"
             ])
             
             if st.button("🚀 Seçili BİST Radarını Çalıştır"):
@@ -381,7 +344,7 @@ if not df.empty:
                                     if 0 < fk < 10 and 0 < pddd < 3:
                                         firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_fiyat, "Değer": f"F/K: {round(fk, 2)} | PD/DD: {round(pddd, 2)}", "Durum": "💼 Ucuz Çarpanlar"})
                             else:
-                                t_df = veri_yukle(hisse, datetime.today() - timedelta(days=120), datetime.today())
+                                t_df = veri_yukle(hisse, datetime.today() - timedelta(days=365), datetime.today())
                                 if not t_df.empty and isinstance(t_df.columns, pd.MultiIndex): 
                                     t_df.columns = t_df.columns.droplevel(1)
                                 if len(t_df) > 52:
@@ -403,6 +366,12 @@ if not df.empty:
                                         dun_kapanis = t_df['Close'].iloc[-2]
                                         if dun_kapanis <= ust_bulut and son_kapanis > ust_bulut:
                                             firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": f"Kırılım Fiyatı: {son_kapanis}", "Durum": "☁️ Bulut Kırılımı"})
+                                    elif "Golden Cross" in tarama_modu:
+                                        if len(t_df) >= 200:
+                                            sma50 = t_df['Close'].rolling(50).mean()
+                                            sma200 = t_df['Close'].rolling(200).mean()
+                                            if sma50.iloc[-1] > sma200.iloc[-1] and sma50.iloc[-2] <= sma200.iloc[-2]:
+                                                firsatlar.append({"Hisse Kodu": temiz_ad, "Fiyat": son_kapanis, "Değer": "Kesişim Gerçekleşti", "Durum": "⚔️ Golden Cross Başladı"})
                                     elif "Stoch RSI" in tarama_modu:
                                         delta_s = t_df['Close'].diff()
                                         gain_s = delta_s.where(delta_s > 0, 0).ewm(alpha=1/14, adjust=False).mean()
@@ -439,7 +408,7 @@ if not df.empty:
                     else:
                         st.warning("📉 Şu an için seçilen kritere uyan bir varlık tespit edilemedi.")
 
-    # TAB 3, 4, 5, 6, 7, 8 (Diğer Araçlar)
+    # TAB 3-10: DİĞER SEKMELER (Değişiklik yapılmadı, modüler yapı korundu)
     with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])
@@ -534,9 +503,8 @@ if not df.empty:
     with tabs[8]:
         st.subheader("🛠️ Terminal Entegrasyon Durumu")
         st.success("🤖 Telegram API Bağlantısı: Doğrulandı")
-        st.info("Terminal v61 (Veri Bilimi Sürümü) Kararlı Modda Çalışıyor.")
+        st.info("Terminal v62 (Price Action Sürümü) Kararlı Modda Çalışıyor.")
 
-    # TAB 10: YENİ PYTHON İSTATİSTİK MODÜLÜ
     with tabs[9]:
         st.subheader("🧬 Python İleri İstatistik Analizi")
         if st.button("İstatistikleri Hesapla"):
@@ -546,7 +514,6 @@ if not df.empty:
                 col1.metric("Yıllık Volatilite", stats['Yıllık Volatilite'])
                 col2.metric("Sharpe Oranı", stats['Sharpe Oranı'])
                 col3.metric("VaR (%95)", stats['Günlük VaR (%95)'])
-                
                 st.info("Bu modül, Python'un vektörel hesaplama motorunu kullanarak gerçek risk değerlerini çıkartır.")
             
     st.sidebar.divider()

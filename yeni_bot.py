@@ -281,9 +281,22 @@ if not df.empty:
             goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
             
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
-        
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-        
+        fig.add_trace(
+            go.Candlestick(
+                x=df.index,
+                open=df["Open"],
+                high=df["High"],
+                low=df["Low"],
+                close=df["Close"],
+                name="Fiyat",
+                increasing_line_color="#00ff66",
+                decreasing_line_color="#ff4444",
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
+
         if goster_vpvr:
             hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
             bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
@@ -298,13 +311,44 @@ if not df.empty:
             poc_fiyat = bölüm_merkezleri[poc_index]
             fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
 
-        if goster_smc:
-            for i in range(2, len(df)):
-                if df['FVG_Bullish'].iloc[i]:
-                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[i+5], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-                elif df['FVG_Bearish'].iloc[i]:
-                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[i+5], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+if goster_smc:
 
+    son = len(df) - 1
+
+    for i in range(2, son + 1):
+
+        x0 = max(0, i - 2)
+        x1 = min(i + 5, son)
+
+        if bool(df["FVG_Bullish"].iloc[i]):
+
+            fig.add_shape(
+                type="rect",
+                x0=df.index[x0],
+                y0=float(df["High"].iloc[i-2]),
+                x1=df.index[x1],
+                y1=float(df["Low"].iloc[i]),
+                fillcolor="rgba(0,255,0,0.20)",
+                line=dict(width=0),
+                layer="below",
+                row=1,
+                col=1
+            )
+
+        elif bool(df["FVG_Bearish"].iloc[i]):
+
+            fig.add_shape(
+                type="rect",
+                x0=df.index[x0],
+                y0=float(df["Low"].iloc[i-2]),
+                x1=df.index[x1],
+                y1=float(df["High"].iloc[i]),
+                fillcolor="rgba(255,0,0,0.20)",
+                line=dict(width=0),
+                layer="below",
+                row=1,
+                col=1
+            )
         if goster_fibo:
             max_fiyat = df['High'].max()
             min_fiyat = df['Low'].min()

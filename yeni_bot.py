@@ -358,7 +358,8 @@ fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
 fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
 
 fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
-st.plotly_chart(fig, use_container_width=True)with tabs[1]:
+st.plotly_chart(fig, use_container_width=True)
+with tabs[1]:
         st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
         if piyasa_tipi == "Borsa İstanbul (BIST)":
             tarama_modu = st.radio("Tarama Modu Seçin:", [
@@ -487,22 +488,21 @@ with tabs[7]:
                 fig_sim.add_trace(go.Scatter(y=sim_verisi[:, i], mode='lines', line=dict(width=1), showlegend=False))
             fig_sim.update_layout(template="plotly_dark")
             st.plotly_chart(fig_sim, use_container_width=True)
-            with tabs[8]:
-        st.subheader("🛠️ Terminal Entegrasyon Durumu")
-        st.success("🤖 Multi-Threading Radar: Aktif")
-        st.success("🧠 Random Forest Engine: Yüklendi")
-        st.success("📉 İkili Tepe / Dip Algoritması: Aktif")
-        st.info("Terminal v64 (SMC, Fibo & Formasyon Sürümü) Kararlı Modda Çalışıyor.")
+with tabs[8]:
+            st.subheader("🛠️ Terminal Entegrasyon Durumu")
+            st.success("🤖 Multi-Threading Radar: Aktif")
+            st.success("🧠 Random Forest Engine: Yüklendi")
+            st.success("📉 İkili Tepe / Dip Algoritması: Aktif")
+            st.info("Terminal v64 (SMC, Fibo & Formasyon Sürümü) Kararlı Modda Çalışıyor.")
 with tabs[9]:
-        st.subheader("🧬 Python İleri İstatistik Analizi")
-        if st.button("İstatistikleri Hesapla"):
-            stats = python_istatistik_analizi(df)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Yıllık Volatilite", stats['Yıllık Volatilite'])
-            col2.metric("Sharpe Oranı", stats['Sharpe Oranı'])
-            col3.metric("VaR (%95)", stats['Günlük VaR (%95)'])
-            else:st.error("Veri çekilemedi. Kodunuzu kontrol edin.")
-# ===== v66.1 Indicators =====
+    st.subheader("🧬 Python İleri İstatistik Analizi")
+    if st.button("İstatistikleri Hesapla"):
+        stats = python_istatistik_analizi(df)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Yıllık Volatilite", stats['Yıllık Volatilite'])
+        col2.metric("Sharpe Oranı", stats['Sharpe Oranı'])
+        col3.metric("VaR (%95)", stats['Günlük VaR (%95)'])
+        # ===== v66.1 Indicators =====
 def calculate_adx(df, period=14):
     import pandas as pd
     import numpy as np

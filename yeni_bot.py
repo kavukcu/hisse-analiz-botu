@@ -371,6 +371,7 @@ with tabs[1]:
                 "💼 Temel Analiz Radarı (Düşük F/K)",
                 "☁️ Ichimoku Kumo Kırılımı",
                 "⚔️ Golden Cross"
+                "🚀 Ucuz & Yükseliş Başlamış (Dipten Dönüş)"
             ])
             
             def tek_hisse_tara(hisse, mod):
@@ -398,9 +399,43 @@ with tabs[1]:
                             elif "Hacim" in mod:
                                 if t_df['Volume'].iloc[-1] > (t_df['Volume'].iloc[-21:-1].mean() * 1.8):
                                     return {"Hisse Kodu": temiz_ad, "Fiyat": round(son_kap,2), "Değer": "Hacim Patlaması", "Durum": "🔥 Yüksek Hacim"}
-                            elif "Golden Cross" in mod and len(t_df) > 200:
-                                if t_df['Close'].rolling(50).mean().iloc[-1] > t_df['Close'].rolling(200).mean().iloc[-1] and t_df['Close'].rolling(50).mean().iloc[-2] <= t_df['Close'].rolling(200).mean().iloc[-2]:
-                                    return {"Hisse Kodu": temiz_ad, "Fiyat": round(son_kap,2), "Değer": "Kesişim", "Durum": "⚔️ Golden Cross"}
+                                elif "Yükseliş Başlamış" in mod:
+                                # Kısa vadeli trend (SMA 20)
+                                    sma20 = t_df['Close'].rolling(window=20).mean()
+                                
+                                # MACD Hesaplama
+                                ema12 = t_df['Close'].ewm(span=12, adjust=False).mean()
+                                ema26 = t_df['Close'].ewm(span=26, adjust=False).mean()
+                                macd = ema12 - ema26
+                                macd_signal = macd.ewm(span=9, adjust=False).mean()
+                                
+                                # RSI Hesaplama
+                                delta_y = t_df['Close'].diff()
+                                gain_y = delta_y.where(delta_y > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                                loss_y = -delta_y.where(delta_y < 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                                rs_y = gain_y / (loss_y + 1e-9)
+                                rsi_son = (100 - (100 / (1 + rs_y))).iloc[-1]
+
+                                son_fiyat = t_df['Close'].iloc[-1]
+                                
+                                # KRİTERLER:
+                                # 1. Fiyat SMA20'nin üzerinde (Kısa vadeli düşüş trendi kırılmış)
+                                # 2. MACD, Sinyal çizgisinin üzerinde (Momentum yukarı)
+                                # 3. RSI 40 ile 65 arasında (Dipten kurtulmuş ama henüz pahalılaşmamış)
+                                # 4. Kesişim Teyidi: Ya MACD ya da Fiyat(SMA20) son 2 gün içinde yukarı kesmiş olmalı (Hareket taze olmalı)
+                                
+                                taze_hareket = (macd.iloc[-2] <= macd_signal.iloc[-2]) or (t_df['Close'].iloc[-2] <= sma20.iloc[-2])
+                                
+                                if (son_fiyat > sma20.iloc[-1]) and \
+                                   (macd.iloc[-1] > macd_signal.iloc[-1]) and \
+                                   (40 < rsi_son < 65) and taze_hareket:
+                                    
+                                    return {
+                                        "Hisse Kodu": temiz_ad, 
+                                        "Fiyat": round(son_fiyat, 2), 
+                                        "Değer": f"RSI: {round(rsi_son, 1)}", 
+                                        "Durum": "🚀 Yükseliş Başlamış"
+                                    }
                 except: return None
                 return None
 

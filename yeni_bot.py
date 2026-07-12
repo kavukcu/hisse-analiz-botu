@@ -338,7 +338,7 @@ if goster_smc:
                 fig.add_annotation(x=dip[1], y=dip[3], text="📈 İkili Dip", showarrow=True, arrowhead=1, ax=0, ay=30, font=dict(color="green"), row=1, col=1)
                 if goster_vwap: fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
             if goster_formasyon: df_form = mum_formasyonlarini_bul(df)
-            yutan_boga = df_form[df_form['Bullish_Engulfing']]
+yutan_boga = df[df['Bullish_Engulfing']]
 fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
 if goster_ai:

@@ -171,7 +171,8 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     y = df_ml['Close']
     
     model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
+    # Eğitim sırasında .values kullanılarak isim kontrolü devre dışı bırakılır
+    model.fit(X.values, y) 
     
     tahminler = []
     son_satir = df_ml.iloc[-1]
@@ -188,7 +189,6 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
         
     tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
-
 
 
 def ema(series, period):
@@ -297,16 +297,16 @@ if not df.empty:
             poc_index = np.argmax(hacim_bölümleri)
             poc_fiyat = bölüm_merkezleri[poc_index]
             fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
-
-        if goster_smc:
+if goster_smc:
             for i in range(2, len(df)):
+                # Taşmayı önlemek için güvenli indeks hesaplaması
+                bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
+                
                 if df['FVG_Bullish'].iloc[i]:
-                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[i+5], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
                 elif df['FVG_Bearish'].iloc[i]:
-                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[i+5], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-
-        if goster_fibo:
-            max_fiyat = df['High'].max()
+                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+                    if goster_fibo: max_fiyat = df['High'].max()
             min_fiyat = df['Low'].min()
             fark = max_fiyat - min_fiyat
             seviyeler = {
@@ -326,47 +326,39 @@ if not df.empty:
                     fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
                 else:
                     fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
-
-        # YENİ EKLENEN GRAFİK FORMASYONLARI KODU (İkili Tepe & Dip)
-        if goster_grafik_formasyon:
+        # YENİ EKLENEN GRAFİK FORMASYONLARI KODU (İkili Tepe & Dip)if goster_grafik_formasyon:
             ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
-            
             # İkili Tepeleri Çiz (Ayı Formasyonu - Kırmızı Kesikli Çizgi)
             for tepe in ikili_tepeler:
                 fig.add_shape(type="line", x0=tepe[0], y0=tepe[2], x1=tepe[1], y1=tepe[3], line=dict(color="red", width=3, dash="dot"), row=1, col=1)
                 fig.add_annotation(x=tepe[1], y=tepe[3], text="📉 İkili Tepe", showarrow=True, arrowhead=1, ax=0, ay=-30, font=dict(color="red"), row=1, col=1)
-                
             # İkili Dipleri Çiz (Boğa Formasyonu - Yeşil Kesikli Çizgi)
             for dip in ikili_dipler:
                 fig.add_shape(type="line", x0=dip[0], y0=dip[2], x1=dip[1], y1=dip[3], line=dict(color="green", width=3, dash="dot"), row=1, col=1)
                 fig.add_annotation(x=dip[1], y=dip[3], text="📈 İkili Dip", showarrow=True, arrowhead=1, ax=0, ay=30, font=dict(color="green"), row=1, col=1)
-
-        if goster_vwap:
-            fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
-
-        if goster_formasyon:
-            df_form = mum_formasyonlarini_bul(df)
+                if goster_vwap: fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
+            if goster_formasyon: df_form = mum_formasyonlarini_bul(df)
             yutan_boga = df_form[df_form['Bullish_Engulfing']]
-            fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
+fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
-        if goster_ai:
-            tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
-            fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="RF Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
+if goster_ai:
+    tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
+    fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="RF Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
 
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
-        hist_colors = np.where(df['MACD_Hist'] < 0, '#ef5350', '#26a69a')
-        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Histogram", marker_color=hist_colors), row=2, col=1)
-        
-        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_K'], name="%K", line=dict(color='blue')), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_D'], name="%D", line=dict(color='orange')), row=3, col=1)
-        fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
-        fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
-        
-        fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
 
-    with tabs[1]:
+hist_colors = np.where(df['MACD_Hist'] < 0, '#ef5350', '#26a69a')
+fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Histogram", marker_color=hist_colors), row=2, col=1)
+
+fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_K'], name="%K", line=dict(color='blue')), row=3, col=1)
+fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_D'], name="%D", line=dict(color='orange')), row=3, col=1)
+
+fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
+fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
+
+fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
+st.plotly_chart(fig, use_container_width=True)with tabs[1]:
         st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
         if piyasa_tipi == "Borsa İstanbul (BIST)":
             tarama_modu = st.radio("Tarama Modu Seçin:", [
@@ -424,8 +416,7 @@ if not df.empty:
                         st.dataframe(pd.DataFrame(firsatlar).set_index("Hisse Kodu"), use_container_width=True)
                     else:
                         st.warning("📉 Şu an için seçilen kritere uyan bir varlık tespit edilemedi.")
-
-    with tabs[2]:
+with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])
         with c1:
@@ -453,21 +444,18 @@ if not df.empty:
             st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
             alarm_fiyat = st.number_input(f"{hisse_kodu} Tetikleme Fiyatı:", value=tavsiye_stop)
             if st.button("Alarmı Kur"): st.success("Alarm kuruldu!")
-
-    with tabs[3]:
+with tabs[3]:
         st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Veriler & Temettü")
         c1, c2, c3 = st.columns(3)
         c1.metric("F/K Oranı", info.get('trailingPE', '-'))
         c2.metric("PD/DD", info.get('priceToBook', '-'))
         c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
-
-    with tabs[4]:
+with tabs[4]:
         st.subheader("📰 Küresel Haber Duygu Analizi")
         for h in haber_duygu_analizi(hisse_kodu):
             with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
                 st.markdown(f"[Habere Git]({h['link']})")
-
-    with tabs[5]:
+with tabs[5]:
         st.subheader(f"📊 {piyasa_tipi} Korelasyon Matrisi")
         if st.button("Isı Haritasını Oluştur"):
             korelasyon_df = pd.DataFrame()
@@ -476,8 +464,7 @@ if not df.empty:
                 if isinstance(tmp_df.columns, pd.MultiIndex): tmp_df.columns = tmp_df.columns.droplevel(1)
                 if not tmp_df.empty: korelasyon_df[ticker] = tmp_df['Close']
             st.plotly_chart(px.imshow(korelasyon_df.corr(), text_auto=True, color_continuous_scale='RdBu_r'), use_container_width=True)
-
-    with tabs[6]:
+with tabs[6]:
         st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
         bt_sonuc = backtest_motoru(df)
         if not bt_sonuc.empty:
@@ -491,8 +478,7 @@ if not df.empty:
             fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)))
             fig_bt.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_bt, use_container_width=True)
-
-    with tabs[7]:
+with tabs[7]:
         st.subheader("🎲 Monte Carlo Risk Simülasyonu (Gelecek 30 Gün)")
         if st.button("Simülasyonu Başlat"):
             sim_verisi = monte_carlo_simulasyonu(df)
@@ -501,15 +487,13 @@ if not df.empty:
                 fig_sim.add_trace(go.Scatter(y=sim_verisi[:, i], mode='lines', line=dict(width=1), showlegend=False))
             fig_sim.update_layout(template="plotly_dark")
             st.plotly_chart(fig_sim, use_container_width=True)
-
-    with tabs[8]:
+            with tabs[8]:
         st.subheader("🛠️ Terminal Entegrasyon Durumu")
         st.success("🤖 Multi-Threading Radar: Aktif")
         st.success("🧠 Random Forest Engine: Yüklendi")
         st.success("📉 İkili Tepe / Dip Algoritması: Aktif")
         st.info("Terminal v64 (SMC, Fibo & Formasyon Sürümü) Kararlı Modda Çalışıyor.")
-
-    with tabs[9]:
+with tabs[9]:
         st.subheader("🧬 Python İleri İstatistik Analizi")
         if st.button("İstatistikleri Hesapla"):
             stats = python_istatistik_analizi(df)
@@ -517,9 +501,7 @@ if not df.empty:
             col1.metric("Yıllık Volatilite", stats['Yıllık Volatilite'])
             col2.metric("Sharpe Oranı", stats['Sharpe Oranı'])
             col3.metric("VaR (%95)", stats['Günlük VaR (%95)'])
-else:
-    st.error("Veri çekilemedi. Kodunuzu kontrol edin.")
-
+            else:st.error("Veri çekilemedi. Kodunuzu kontrol edin.")
 # ===== v66.1 Indicators =====
 def calculate_adx(df, period=14):
     import pandas as pd
@@ -2051,6 +2033,478 @@ def terminal_status_v93():
         "watchlist_engine": True,
         "market_monitor": True,
         "market_health": True,
+        "status": "READY"
+    }
+
+
+
+# ============================================================
+# v94 SCHEDULER & EVENT AUTOMATION ENGINE
+# ============================================================
+
+from datetime import datetime
+import time
+
+class SchedulerEngine:
+    """
+    Simple scheduler for repeated analysis tasks.
+    """
+
+    def __init__(self):
+        self.jobs = []
+
+    def add_job(self, name, interval_seconds, callback):
+        self.jobs.append({
+            "name": name,
+            "interval": interval_seconds,
+            "callback": callback,
+            "last_run": None
+        })
+
+    def run_pending(self):
+        now = time.time()
+
+        for job in self.jobs:
+            if job["last_run"] is None or now - job["last_run"] >= job["interval"]:
+                try:
+                    job["callback"]()
+                except Exception:
+                    pass
+                job["last_run"] = now
+
+    def status(self):
+        return {
+            "jobs": len(self.jobs),
+            "last_check": datetime.now().isoformat(timespec="seconds")
+        }
+
+
+def create_market_snapshot(symbol, df):
+    return {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "symbol": symbol,
+        "decision": institutional_decision(df),
+        "dashboard": build_dashboard_summary(df),
+        "alerts": generate_alerts(symbol, df)
+    }
+
+
+def terminal_status_v94():
+    return {
+        "version": "v94",
+        "scheduler_engine": True,
+        "event_automation": True,
+        "market_snapshot": True,
+        "status": "READY"
+    }
+
+
+
+# ============================================================
+# v95 CONFIGURATION & PLUGIN ENGINE
+# ============================================================
+
+import json
+
+class ConfigManager:
+    def __init__(self):
+        self.config = {}
+
+    def load(self, filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            self.config = json.load(f)
+        return self.config
+
+    def save(self, filename):
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(self.config, f, ensure_ascii=False, indent=2)
+
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+
+    def set(self, key, value):
+        self.config[key] = value
+
+
+class PluginManager:
+    def __init__(self):
+        self.plugins = {}
+
+    def register(self, name, func):
+        self.plugins[name] = func
+
+    def run(self, name, *args, **kwargs):
+        if name not in self.plugins:
+            raise KeyError(f"Plugin '{name}' not registered.")
+        return self.plugins[name](*args, **kwargs)
+
+    def list_plugins(self):
+        return sorted(self.plugins.keys())
+
+
+plugin_manager = PluginManager()
+
+try:
+    plugin_manager.register("analysis_pipeline", run_analysis_pipeline)
+    plugin_manager.register("institutional_dashboard", build_institutional_dashboard)
+    plugin_manager.register("ai_dashboard", ai_dashboard)
+    plugin_manager.register("market_snapshot", create_market_snapshot)
+except Exception:
+    pass
+
+
+def terminal_status_v95():
+    return {
+        "version": "v95",
+        "configuration_manager": True,
+        "plugin_engine": True,
+        "registered_plugins": len(plugin_manager.plugins),
+        "status": "READY"
+    }
+
+
+
+# ============================================================
+# v96 AUDIT LOG & SYSTEM METRICS ENGINE
+# ============================================================
+
+from datetime import datetime
+import platform
+import time
+
+class AuditLogger:
+    def __init__(self):
+        self.events = []
+
+    def log(self, event_type, message, level="INFO"):
+        self.events.append({
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "level": level,
+            "type": event_type,
+            "message": message
+        })
+
+    def last(self, limit=20):
+        return self.events[-limit:]
+
+    def stats(self):
+        return {
+            "events": len(self.events),
+            "errors": sum(1 for e in self.events if e["level"] == "ERROR"),
+            "warnings": sum(1 for e in self.events if e["level"] == "WARNING"),
+        }
+
+
+audit_logger = AuditLogger()
+
+
+def collect_system_metrics():
+    return {
+        "platform": platform.system(),
+        "python_version": platform.python_version(),
+        "processor": platform.processor(),
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "uptime_reference": time.time(),
+    }
+
+
+def health_check():
+    status = terminal_diagnostics()
+    metrics = collect_system_metrics()
+    return {
+        "diagnostics": status,
+        "system": metrics,
+        "audit": audit_logger.stats()
+    }
+
+
+def terminal_status_v96():
+    return {
+        "version": "v96",
+        "audit_logger": True,
+        "system_metrics": True,
+        "health_check": True,
+        "status": "READY"
+    }
+
+
+
+# ============================================================
+# v97 MODEL REGISTRY & EXPERIMENT TRACKER
+# ============================================================
+
+from datetime import datetime
+
+class ModelRegistry:
+    def __init__(self):
+        self.models = {}
+
+    def register(self, name, version, metadata=None):
+        self.models[name] = {
+            "version": version,
+            "registered_at": datetime.now().isoformat(timespec="seconds"),
+            "metadata": metadata or {}
+        }
+
+    def get(self, name):
+        return self.models.get(name)
+
+    def list_models(self):
+        return sorted(self.models.keys())
+
+
+class ExperimentTracker:
+    def __init__(self):
+        self.experiments = []
+
+    def log(self, name, metrics, notes=""):
+        self.experiments.append({
+            "name": name,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "metrics": metrics,
+            "notes": notes
+        })
+
+    def latest(self, limit=10):
+        return self.experiments[-limit:]
+
+
+model_registry = ModelRegistry()
+
+try:
+    model_registry.register(
+        "RandomForestPredictor",
+        "1.0",
+        {"engine": "RandomForest", "ensemble_ready": True}
+    )
+except Exception:
+    pass
+
+
+experiment_tracker = ExperimentTracker()
+
+
+def terminal_status_v97():
+    return {
+        "version": "v97",
+        "model_registry": True,
+        "experiment_tracker": True,
+        "registered_models": len(model_registry.models),
+        "tracked_experiments": len(experiment_tracker.experiments),
+        "status": "READY"
+    }
+
+
+
+# ============================================================
+# v98 ADVANCED TECHNICAL ANALYSIS ENGINE
+# ============================================================
+
+import numpy as np
+
+def advanced_technical_analysis(df):
+    """
+    Gelişmiş teknik analiz özeti.
+    Beklenen sütunlar:
+    Close, RSI, MACD, MACD_Signal, EMA20, EMA50, BB_Upper, BB_Lower
+    """
+    result = {}
+
+    close = float(df["Close"].iloc[-1])
+
+    # RSI
+    if "RSI" in df.columns:
+        rsi = float(df["RSI"].iloc[-1])
+        if rsi >= 70:
+            result["RSI"] = "OVERBOUGHT"
+        elif rsi <= 30:
+            result["RSI"] = "OVERSOLD"
+        else:
+            result["RSI"] = "NEUTRAL"
+
+    # MACD
+    if {"MACD", "MACD_Signal"}.issubset(df.columns):
+        macd = float(df["MACD"].iloc[-1])
+        sig = float(df["MACD_Signal"].iloc[-1])
+        result["MACD"] = "BULLISH" if macd > sig else "BEARISH"
+
+    # EMA Trend
+    if {"EMA20", "EMA50"}.issubset(df.columns):
+        e20 = float(df["EMA20"].iloc[-1])
+        e50 = float(df["EMA50"].iloc[-1])
+        result["EMA"] = "UPTREND" if e20 > e50 else "DOWNTREND"
+
+    # Bollinger
+    if {"BB_Upper", "BB_Lower"}.issubset(df.columns):
+        upper = float(df["BB_Upper"].iloc[-1])
+        lower = float(df["BB_Lower"].iloc[-1])
+
+        if close > upper:
+            result["BOLLINGER"] = "ABOVE_UPPER"
+        elif close < lower:
+            result["BOLLINGER"] = "BELOW_LOWER"
+        else:
+            result["BOLLINGER"] = "INSIDE"
+
+    bullish = sum(v in ("BULLISH", "UPTREND", "OVERSOLD") for v in result.values())
+    bearish = sum(v in ("BEARISH", "DOWNTREND", "OVERBOUGHT") for v in result.values())
+
+    if bullish > bearish:
+        overall = "BULLISH"
+    elif bearish > bullish:
+        overall = "BEARISH"
+    else:
+        overall = "NEUTRAL"
+
+    result["OVERALL"] = overall
+    return result
+
+
+def technical_score(df):
+    analysis = advanced_technical_analysis(df)
+
+    score = 50
+
+    if analysis.get("MACD") == "BULLISH":
+        score += 10
+    if analysis.get("EMA") == "UPTREND":
+        score += 15
+    if analysis.get("RSI") == "OVERSOLD":
+        score += 10
+    if analysis.get("RSI") == "OVERBOUGHT":
+        score -= 10
+    if analysis.get("BOLLINGER") == "ABOVE_UPPER":
+        score -= 5
+    if analysis.get("BOLLINGER") == "BELOW_LOWER":
+        score += 5
+
+    return max(0, min(100, score))
+
+
+def terminal_status_v98():
+    return {
+        "version": "v98",
+        "advanced_technical_analysis": True,
+        "technical_score": True,
+        "status": "READY"
+    }
+
+
+
+# ============================================================
+# v99 INSTITUTIONAL TECHNICAL CONFLUENCE ENGINE
+# ============================================================
+
+def technical_confluence(df):
+    tech=advanced_technical_analysis(df)
+    score=technical_score(df)
+    risk=calculate_risk_score(df) if "calculate_risk_score" in globals() else 50
+
+    signals=[]
+    for k,v in tech.items():
+        if k!="OVERALL":
+            signals.append({"indicator":k,"state":v})
+
+    confidence=max(0,min(100,round(score-(risk*0.2),2)))
+
+    if score>=80 and tech.get("OVERALL")=="BULLISH":
+        action="STRONG BUY"
+    elif score>=65:
+        action="BUY"
+    elif score>=45:
+        action="HOLD"
+    elif score>=30:
+        action="REDUCE"
+    else:
+        action="SELL"
+
+    return {
+        "technical_score":score,
+        "technical_bias":tech.get("OVERALL"),
+        "confidence":confidence,
+        "risk":risk,
+        "action":action,
+        "signals":signals
+    }
+
+def merge_ai_and_technical(symbol,df):
+    return {
+        "symbol":symbol,
+        "technical":technical_confluence(df),
+        "ai":ai_dashboard(symbol,df),
+        "dashboard":build_dashboard_summary(df)
+    }
+
+def terminal_status_v99():
+    return {
+        "version":"v99",
+        "technical_confluence":True,
+        "ai_technical_fusion":True,
+        "status":"READY"
+    }
+
+
+# ============================================================
+# v100 MASTER TERMINAL ENGINE
+# ============================================================
+
+from datetime import datetime
+
+def build_master_terminal(symbol, df, portfolio=None, journal=None):
+    """
+    Unified v100 master output.
+    """
+
+    master = {
+        "version": "v100",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "symbol": symbol,
+        "dashboard": build_dashboard_summary(df),
+        "institutional_dashboard": build_institutional_dashboard(
+            symbol, df, portfolio=portfolio, journal=journal
+        ),
+        "technical": technical_confluence(df),
+        "ai": ai_dashboard(symbol, df),
+        "merged_analysis": merge_ai_and_technical(symbol, df),
+        "strategy": strategy_report(df),
+        "alerts": generate_alerts(symbol, df),
+        "system_health": health_check(),
+        "terminal_status": {
+            "v90": terminal_status_v90(),
+            "v91": terminal_status_v91(),
+            "v92": terminal_status_v92(),
+            "v93": terminal_status_v93(),
+            "v94": terminal_status_v94(),
+            "v95": terminal_status_v95(),
+            "v96": terminal_status_v96(),
+            "v97": terminal_status_v97(),
+            "v98": terminal_status_v98(),
+            "v99": terminal_status_v99(),
+        }
+    }
+
+    return master
+
+
+def terminal_summary(master):
+    return {
+        "symbol": master["symbol"],
+        "version": master["version"],
+        "decision": master["technical"]["action"],
+        "technical_score": master["technical"]["technical_score"],
+        "technical_bias": master["technical"]["technical_bias"],
+        "ai_signal": master["ai"]["ensemble"]["signal"],
+        "dashboard_rating": master["dashboard"]["rating"],
+        "generated_at": master["generated_at"],
+    }
+
+
+def terminal_status_v100():
+    return {
+        "version": "v100",
+        "master_terminal": True,
+        "integrated_modules": 17,
+        "summary": True,
         "status": "READY"
     }
 

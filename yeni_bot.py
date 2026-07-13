@@ -10,7 +10,9 @@ import requests
 from sklearn.ensemble import RandomForestRegressor
 from concurrent.futures import ThreadPoolExecutor
 
-# 1. YAHOO FINANCE ENGELİNİ AŞMAK İÇİN ÖZEL OTURUM
+# ==============================================================================
+# 1. OTURUM VE APİ YAPILANDIRMALARI
+# ==============================================================================
 oturum = requests.Session()
 oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -19,7 +21,6 @@ oturum.headers.update({
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 st.title("👁️ Pro Küresel Yatırım Terminali (SMC, Fibo & YZ Motoru)")
 
-# --- TELEGRAM VE OTOMASYON ---
 def telegram_gonder(mesaj):
     try:
         token = st.secrets["TELEGRAM_TOKEN"]
@@ -30,7 +31,9 @@ def telegram_gonder(mesaj):
     except:
         return False
 
-# --- VERİ MOTORLARI VE FONKSİYONLAR ---
+# ==============================================================================
+# 2. TEMEL VERİ VE ANALİZ MOTORLARI
+# ==============================================================================
 @st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end):
     import time, logging
@@ -195,305 +198,9 @@ def python_istatistik_analizi(df):
         "Günlük VaR (%95)": f"%{round(var_95 * 100, 2)}"
     }
 
-# --- SİDEBAR VE PİYASA SEÇİMİ ---
-st.sidebar.header("🌍 Küresel Piyasa Ayarları")
-piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
-
-if piyasa_tipi == "Borsa İstanbul (BIST)":
-    varsayilan_hisse = "MIATK.IS"
-    tarama_listesi = ["THYAO.IS", "AKBNK.IS", "ASELS.IS", "SISE.IS", "TUPRS.IS", "KCHOL.IS", "GARAN.IS", "SASA.IS"]
-elif piyasa_tipi == "Amerikan Borsası (ABD)":
-    varsayilan_hisse = "AAPL"
-    tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]
-else:
-    varsayilan_hisse = "BTC-USD"
-    tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
-
-hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
-baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=730)) 
-bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
-
-with st.spinner('Kurumsal teknik analiz verileri hesaplanıyor...'):
-    df = veri_yukle(hisse_kodu, baslangic, bitis)
-    info = sirket_bilgisi_getir(hisse_kodu)
-
-if not df.empty:
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
-    
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    df['EMA_12'] = ema(df['Close'],12)
-    df['EMA_26'] = ema(df['Close'],26)
-    df['MACD'] = df['EMA_12'] - df['EMA_26']
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
-    
-    delta = df['Close'].diff()
-    gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-    loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
-    rs = gain / (loss + 1e-9)
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    min_val = df['RSI'].rolling(window=14).min()
-    max_val = df['RSI'].rolling(window=14).max()
-    df['Stoch_RSI'] = (df['RSI'] - min_val) / (max_val - min_val)
-    df['Stoch_RSI_K'] = df['Stoch_RSI'].rolling(window=3).mean() * 100
-    df['Stoch_RSI_D'] = df['Stoch_RSI_K'].rolling(window=3).mean()
-
-    df['True_Range'] = np.max(pd.concat([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift()), np.abs(df['Low'] - df['Close'].shift())], axis=1), axis=1)
-    df['ATR_14'] = df['True_Range'].rolling(14).mean()
-    df['VWAP_20'] = (df['Close'] * df['Volume']).rolling(20).sum() / df['Volume'].rolling(20).sum()
-
-    df = smc_hesapla(df)
-
-    # ---> YENİ SEKMEYİ BURAYA EKLİYORUZ <---
-    tabs = st.tabs([
-        "📈 SMC & Quant Fiyat Hareketi", "🔍 Akıllı Asenkron Radar", "💼 Cüzdan & Akıllı Stop", 
-        "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası", 
-        "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Durumu", "🧬 Python İstatistik",
-        "🤖 YZ Öneri Motoru"
-    ])
-
-    with tabs[0]:
-        st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
-        
-        c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
-        with c_ayar1:
-            goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
-            goster_smc = st.checkbox("🏦 FVG & Likidite Boşlukları (SMC)", value=True)
-            goster_fibo = st.checkbox("📐 Altın Oran (Fibonacci)", value=True)
-        with c_ayar2:
-            goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip (Makro)", value=True)
-            goster_formasyon = st.checkbox("🕯️ Mum Formasyonları (Mikro)", value=False)
-        with c_ayar3:
-            goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
-            goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
-            
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
-        
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-        
-        if goster_vpvr:
-            hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
-            bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
-            max_hacim = hacim_bölümleri.max()
-            sure_uzunlugu = df.index[-1] - df.index[0]
-            x_koordinatlari = [df.index[0] + sure_uzunlugu * 0.3 * (v / max_hacim) for v in hacim_bölümleri]
-            
-            for i in range(len(bölüm_merkezleri)):
-                fig.add_shape(type="line", x0=df.index[0], y0=bölüm_merkezleri[i], x1=x_koordinatlari[i], y1=bölüm_merkezleri[i], line=dict(color="rgba(100, 150, 255, 0.4)", width=4), row=1, col=1)
-            
-            poc_index = np.argmax(hacim_bölümleri)
-            poc_fiyat = bölüm_merkezleri[poc_index]
-            fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
-        
-        if goster_smc:
-            for i in range(2, len(df)):
-                bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
-                if df['FVG_Bullish'].iloc[i]:
-                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-                elif df['FVG_Bearish'].iloc[i]:
-                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-            
-        if goster_fibo:
-            max_fiyat = df['High'].max()
-            min_fiyat = df['Low'].min()
-            fark = max_fiyat - min_fiyat
-            seviyeler = {0: "100% (Tepe)", 0.236: "76.4%", 0.382: "61.8%", 0.5: "50%", 0.618: "38.2% (Altın Oran)", 0.786: "21.4%", 1: "0% (Dip)"}
-            renkler = ['#ff0000', '#ff9900', '#ffff00', '#33cc33', '#00ffcc', '#cc33ff', '#999999']
-            for i, (level, oran) in enumerate(seviyeler.items()):
-                fiyat_seviyesi = max_fiyat - (fark * level)
-                if level == 0.618:
-                    fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
-                else:
-                    fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
-        
-        if goster_grafik_formasyon:
-            ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
-            for tepe in ikili_tepeler:
-                fig.add_shape(type="line", x0=tepe[0], y0=tepe[2], x1=tepe[1], y1=tepe[3], line=dict(color="red", width=3, dash="dot"), row=1, col=1)
-                fig.add_annotation(x=tepe[1], y=tepe[3], text="📉 İkili Tepe", showarrow=True, arrowhead=1, ax=0, ay=-30, font=dict(color="red"), row=1, col=1)
-            for dip in ikili_dipler:
-                fig.add_shape(type="line", x0=dip[0], y0=dip[2], x1=dip[1], y1=dip[3], line=dict(color="green", width=3, dash="dot"), row=1, col=1)
-                fig.add_annotation(x=dip[1], y=dip[3], text="📈 İkili Dip", showarrow=True, arrowhead=1, ax=0, ay=30, font=dict(color="green"), row=1, col=1)
-                
-        if goster_vwap:
-            fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
-        
-        if goster_formasyon:
-            df_form = mum_formasyonlarini_bul(df)
-            yutan_boga = df_form[df_form['Bullish_Engulfing']]
-            fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
-
-        if goster_ai:
-            tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
-            fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="RF Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
-        hist_colors = np.where(df['MACD_Hist'] < 0, '#ef5350', '#26a69a')
-        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Histogram", marker_color=hist_colors), row=2, col=1)
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_K'], name="%K", line=dict(color='blue')), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_D'], name="%D", line=dict(color='orange')), row=3, col=1)
-
-        fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
-        fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
-
-        fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tabs[1]:
-        st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
-        st.info("Bu bölümde seçili piyasaya ait tarama listesi asenkron (çoklu iş parçacığı) olarak taranır ve YZ/Kurumsal Karar motorundan geçirilir.")
-        
-        if st.button("🚀 Akıllı Radarı Başlat"):
-            with st.spinner(f"Sistem {len(tarama_listesi)} varlığı aynı anda tarıyor, lütfen bekleyin..."):
-                
-                def tekli_tara(sembol):
-                    try:
-                        hisse = yf.Ticker(sembol)
-                        df_radar = hisse.history(period="6mo") 
-                        
-                        if df_radar.empty or len(df_radar) < 20: 
-                            return None
-                        
-                        if df_radar.index.tz is not None:
-                            df_radar.index = df_radar.index.tz_localize(None)
-
-                        # ATR İndikatörü
-                        df_radar['True_Range'] = np.max(pd.concat([
-                            df_radar['High'] - df_radar['Low'], 
-                            (df_radar['High'] - df_radar['Close'].shift()).abs(), 
-                            (df_radar['Low'] - df_radar['Close'].shift()).abs()
-                        ], axis=1), axis=1)
-                        df_radar['ATR_14'] = df_radar['True_Range'].rolling(14).mean()
-
-                        # İndikatörleri işlet
-                        df_radar = calculate_adx(df_radar)
-                        df_radar = calculate_supertrend(df_radar)
-                        df_radar = calculate_mfi(df_radar)
-                        df_radar = calculate_cci(df_radar)
-                        df_radar = detect_bos_choch(df_radar)
-                        
-                        karar = institutional_decision(df_radar)
-                        kapanis = round(float(df_radar['Close'].iloc[-1]), 2)
-                        
-                        return {
-                            "Sembol": sembol,
-                            "Fiyat": kapanis,
-                            "Sinyal": karar["decision"],
-                            "Güç Skoru": karar["score"],
-                            "Risk Skoru": karar["risk"],
-                            "Piyasa Rejimi": karar["regime"]
-                        }
-                    except Exception as e:
-                        return {
-                            "Sembol": sembol,
-                            "Fiyat": 0.0,
-                            "Sinyal": "HATA",
-                            "Güç Skoru": 0,
-                            "Risk Skoru": 0,
-                            "Piyasa Rejimi": f"Hata: {str(e)}"
-                        }
-
-                sonuclar = []
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    for sonuc in executor.map(tekli_tara, tarama_listesi):
-                        if sonuc is not None:
-                            sonuclar.append(sonuc)
-                
-                if sonuclar:
-                    df_sonuc = pd.DataFrame(sonuclar)
-                    df_sonuc = df_sonuc.sort_values(by="Güç Skoru", ascending=False).reset_index(drop=True)
-                    
-                    def renk_ver(val):
-                        if val in ["GÜÇLÜ AL", "AL"]:
-                            return 'color: #00ff00; font-weight: bold;'
-                        elif val in ["SAT", "GÜÇLÜ SAT", "AZALT"]:
-                            return 'color: #ff3333; font-weight: bold;'
-                        elif val == "TUT":
-                            return 'color: #ffff00; font-weight: bold;'
-                        elif val == "HATA":
-                            return 'color: white; background-color: #ff0000; font-weight: bold;'
-                        return ''
-                        
-                    st.success("Tüm taramalar başarıyla tamamlandı!")
-                    
-                    # Pandas sürüm çatışmasını engellemek için try-except koruması
-                    try:
-                        # Yeni nesil Pandas sürümü için (.map)
-                        st.dataframe(
-                            df_sonuc.style.map(renk_ver, subset=['Sinyal']), 
-                            use_container_width=True, 
-                            hide_index=True
-                        )
-                    except AttributeError:
-                        # Eski Pandas sürümü için yedek (.applymap)
-                        st.dataframe(
-                            df_sonuc.style.applymap(renk_ver, subset=['Sinyal']), 
-                            use_container_width=True, 
-                            hide_index=True
-                        )
-                else:
-                    st.warning("Hâlâ geçerli veri alınamadı. İnternet bağlantınızı veya sembol listesini kontrol edin.")    
-                    with tabs[2]:
-                        st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
-        c1, c2 = st.columns([2, 1])
-        with c2:
-            tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)
-            st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
-
-    with tabs[3]:
-        st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Veriler & Temettü")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("F/K Oranı", info.get('trailingPE', '-'))
-        c2.metric("PD/DD", info.get('priceToBook', '-'))
-        c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
-
-    with tabs[4]:
-        st.subheader("📰 Küresel Haber Duygu Analizi")
-        for h in haber_duygu_analizi(hisse_kodu):
-            with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
-                st.markdown(f"[Habere Git]({h['link']})")
-
-    with tabs[5]:
-        st.subheader(f"📊 {piyasa_tipi} Korelasyon Matrisi")
-        st.info("Korelasyon analizi için butona basarak işlemi başlatabilirsiniz.")
-
-    with tabs[6]:
-        st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
-        bt_sonuc = backtest_motoru(df)
-        if not bt_sonuc.empty:
-            son_piyasa = bt_sonuc['Piyasa_Kumulatif'].iloc[-1] - 100
-            son_strateji = bt_sonuc['Strateji_Kumulatif'].iloc[-1] - 100
-            c1, c2 = st.columns(2)
-            c1.metric("Alıp Bekleseydin", f"%{round(son_piyasa, 2)}")
-            c2.metric("Strateji ile Alsatsaydın", f"%{round(son_strateji, 2)}", delta=round(son_strateji - son_piyasa, 2))
-
-    with tabs[7]:
-        st.subheader("🎲 Monte Carlo Risk Simülasyonu (Gelecek 30 Gün)")
-
-    with tabs[8]:
-        st.subheader("🛠️ Terminal Entegrasyon Durumu")
-        st.success("🤖 YZ Öneri Motoru: Aktif")
-        st.info("Terminal v100 Kararlı Modda Çalışıyor.")
-
-    with tabs[9]:
-        st.subheader("🧬 Python İleri İstatistik Analizi")
-        if st.button("İstatistikleri Hesapla"):
-            stats = python_istatistik_analizi(df)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Yıllık Volatilite", stats['Yıllık Volatilite'])
-            col2.metric("Sharpe Oranı", stats['Sharpe Oranı'])
-            col3.metric("VaR (%95)", stats['Günlük VaR (%95)'])
-
 # ==============================================================================
-# ALTYAPI FONKSİYONLARI (v66'dan v100'e kadar) 
-# YZ Motorunun beslendiği temel kod blokları 
+# 3. ADVANCED QUANT & YZ MOTORU ALTYAPISI (Hiyerarşik Olarak Yukarı Taşındı)
 # ==============================================================================
-
 def calculate_adx(df, period=14):
     high=df["High"]; low=df["Low"]; close=df["Close"]
     plus_dm=high.diff()
@@ -666,7 +373,6 @@ def institutional_decision(df):
 
 def advanced_technical_analysis(df):
     result = {}
-    close = float(df["Close"].iloc[-1])
     if "RSI" in df.columns:
         rsi = float(df["RSI"].iloc[-1])
         if rsi >= 70: result["RSI"] = "AŞIRI ALIM"
@@ -716,7 +422,7 @@ def build_master_terminal(symbol, df):
         "alerts": generate_alerts(symbol, df)
     }
 
-def terminal_summary(master):
+def terminal_summary(master, df_current):
     rf = master["ai"]["ensemble"]["rf_prediction"]
     lc = master["ai"]["ensemble"]["last_close"]
     return {
@@ -724,20 +430,303 @@ def terminal_summary(master):
         "technical_score": master["technical"]["technical_score"],
         "technical_bias": master["technical"]["signals"].get("MACD", "NÖTR"),
         "ai_signal": "YÜKSELİŞ" if rf > lc else "DÜŞÜŞ",
-        "dashboard_rating": calculate_total_score(df)["rating"] if not df.empty else "N/A"
+        "dashboard_rating": calculate_total_score(df_current)["rating"] if not df_current.empty else "N/A"
     }
 
-# ============================================================
-# YAPAY ZEKA ÖNERİ MOTORU ARAYÜZÜ (TAB 10)
-# ============================================================
+# ==============================================================================
+# 4. SİDEBAR VE PİYASA SEÇİMİ
+# ==============================================================================
+st.sidebar.header("🌍 Küresel Piyasa Ayarları")
+piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
+
+if piyasa_tipi == "Borsa İstanbul (BIST)":
+    varsayilan_hisse = "MIATK.IS"
+    tarama_listesi = ["THYAO.IS", "AKBNK.IS", "ASELS.IS", "SISE.IS", "TUPRS.IS", "KCHOL.IS", "GARAN.IS", "SASA.IS"]
+elif piyasa_tipi == "Amerikan Borsası (ABD)":
+    varsayilan_hisse = "AAPL"
+    tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]
+else:
+    varsayilan_hisse = "BTC-USD"
+    tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
+
+hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
+baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=730)) 
+bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
+
+with st.spinner('Kurumsal teknik analiz verileri hesaplanıyor...'):
+    df = veri_yukle(hisse_kodu, baslangic, bitis)
+    info = sirket_bilgisi_getir(hisse_kodu)
+
+# ==============================================================================
+# 5. ANA SEKMELER VE GRAFİK ARABİRİMLERİ
+# ==============================================================================
 if not df.empty:
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
+    
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean()
+    df['EMA_12'] = ema(df['Close'],12)
+    df['EMA_26'] = ema(df['Close'],26)
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+    
+    delta = df['Close'].diff()
+    gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+    loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
+    rs = gain / (loss + 1e-9)
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    min_val = df['RSI'].rolling(window=14).min()
+    max_val = df['RSI'].rolling(window=14).max()
+    df['Stoch_RSI'] = (df['RSI'] - min_val) / (max_val - min_val)
+    df['Stoch_RSI_K'] = df['Stoch_RSI'].rolling(window=3).mean() * 100
+    df['Stoch_RSI_D'] = df['Stoch_RSI_K'].rolling(window=3).mean()
+
+    df['True_Range'] = np.max(pd.concat([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift()), np.abs(df['Low'] - df['Close'].shift())], axis=1), axis=1)
+    df['ATR_14'] = df['True_Range'].rolling(14).mean()
+    df['VWAP_20'] = (df['Close'] * df['Volume']).rolling(20).sum() / df['Volume'].rolling(20).sum()
+
+    df = smc_hesapla(df)
+
+    tabs = st.tabs([
+        "📈 SMC & Quant Fiyat Hareketi", "🔍 Akıllı Asenkron Radar", "💼 Cüzdan & Akıllı Stop", 
+        "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası", 
+        "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Durumu", "🧬 Python İstatistik",
+        "🤖 YZ Öneri Motoru"
+    ])
+
+    # TAB 0: ANALİZ VE GRAFİKLER
+    with tabs[0]:
+        st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
+        c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
+        with c_ayar1:
+            goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
+            goster_smc = st.checkbox("🏦 FVG & Likidite Boşlukları (SMC)", value=True)
+            goster_fibo = st.checkbox("📐 Altın Oran (Fibonacci)", value=True)
+        with c_ayar2:
+            goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip (Makro)", value=True)
+            goster_formasyon = st.checkbox("🕯️ Mum Formasyonları (Mikro)", value=False)
+        with c_ayar3:
+            goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
+            goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
+            
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
+        
+        if goster_vpvr:
+            hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
+            bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
+            max_hacim = hacim_bölümleri.max()
+            sure_uzunlugu = df.index[-1] - df.index[0]
+            x_koordinatlari = [df.index[0] + sure_uzunlugu * 0.3 * (v / max_hacim) for v in hacim_bölümleri]
+            
+            for i in range(len(bölüm_merkezleri)):
+                fig.add_shape(type="line", x0=df.index[0], y0=bölüm_merkezleri[i], x1=x_koordinatlari[i], y1=bölüm_merkezleri[i], line=dict(color="rgba(100, 150, 255, 0.4)", width=4), row=1, col=1)
+            
+            poc_index = np.argmax(hacim_bölümleri)
+            poc_fiyat = bölüm_merkezleri[poc_index]
+            fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
+        
+        if goster_smc:
+            for i in range(2, len(df)):
+                bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
+                if df['FVG_Bullish'].iloc[i]:
+                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+                elif df['FVG_Bearish'].iloc[i]:
+                    fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+            
+        if goster_fibo:
+            max_fiyat = df['High'].max()
+            min_fiyat = df['Low'].min()
+            fark = max_fiyat - min_fiyat
+            seviyeler = {0: "100% (Tepe)", 0.236: "76.4%", 0.382: "61.8%", 0.5: "50%", 0.618: "38.2% (Altın Oran)", 0.786: "21.4%", 1: "0% (Dip)"}
+            renkler = ['#ff0000', '#ff9900', '#ffff00', '#33cc33', '#00ffcc', '#cc33ff', '#999999']
+            for i, (level, oran) in enumerate(seviyeler.items()):
+                fiyat_seviyesi = max_fiyat - (fark * level)
+                if level == 0.618:
+                    fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
+                else:
+                    fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
+        
+        if goster_grafik_formasyon:
+            ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
+            for tepe in ikili_tepeler:
+                fig.add_shape(type="line", x0=tepe[0], y0=tepe[2], x1=tepe[1], y1=tepe[3], line=dict(color="red", width=3, dash="dot"), row=1, col=1)
+                fig.add_annotation(x=tepe[1], y=tepe[3], text="📉 İkili Tepe", showarrow=True, arrowhead=1, ax=0, ay=-30, font=dict(color="red"), row=1, col=1)
+            for dip in ikili_dipler:
+                fig.add_shape(type="line", x0=dip[0], y0=dip[2], x1=dip[1], y1=dip[3], line=dict(color="green", width=3, dash="dot"), row=1, col=1)
+                fig.add_annotation(x=dip[1], y=dip[3], text="📈 İkili Dip", showarrow=True, arrowhead=1, ax=0, ay=30, font=dict(color="green"), row=1, col=1)
+                
+        if goster_vwap:
+            fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
+        
+        if goster_formasyon:
+            df_form = mum_formasyonlarini_bul(df)
+            yutan_boga = df_form[df_form['Bullish_Engulfing']]
+            fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
+
+        if goster_ai:
+            tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
+            fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="RF Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
+
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
+        hist_colors = np.where(df['MACD_Hist'] < 0, '#ef5350', '#26a69a')
+        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Histogram", marker_color=hist_colors), row=2, col=1)
+
+        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_K'], name="%K", line=dict(color='blue')), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['Stoch_RSI_D'], name="%D", line=dict(color='orange')), row=3, col=1)
+        fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
+        fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
+        fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # TAB 1: AKILLI ASENKRON RADAR (SORUNSUZ ÇALIŞAN GÜNCEL HALİ)
+    with tabs[1]:
+        st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
+        st.info("Bu bölümde seçili piyasaya ait tarama listesi asenkron (çoklu iş parçacığı) olarak taranır ve YZ/Kurumsal Karar motorundan geçirilir.")
+        
+        if st.button("🚀 Akıllı Radarı Başlat"):
+            with st.spinner(f"Sistem {len(tarama_listesi)} varlığı aynı anda tarıyor, lütfen bekleyin..."):
+                
+                def tekli_tara(sembol):
+                    try:
+                        hisse_obj = yf.Ticker(sembol)
+                        df_radar = hisse_obj.history(period="6mo") 
+                        
+                        if df_radar.empty or len(df_radar) < 20: 
+                            return None
+                        
+                        if df_radar.index.tz is not None:
+                            df_radar.index = df_radar.index.tz_localize(None)
+
+                        # ATR İndikatör Hesaplaması
+                        df_radar['True_Range'] = np.max(pd.concat([
+                            df_radar['High'] - df_radar['Low'], 
+                            (df_radar['High'] - df_radar['Close'].shift()).abs(), 
+                            (df_radar['Low'] - df_radar['Close'].shift()).abs()
+                        ], axis=1), axis=1)
+                        df_radar['ATR_14'] = df_radar['True_Range'].rolling(14).mean()
+
+                        # Altyapı İndikatörleri
+                        df_radar = calculate_adx(df_radar)
+                        df_radar = calculate_supertrend(df_radar)
+                        df_radar = calculate_mfi(df_radar)
+                        df_radar = calculate_cci(df_radar)
+                        df_radar = detect_bos_choch(df_radar)
+                        
+                        karar = institutional_decision(df_radar)
+                        kapanis = round(float(df_radar['Close'].iloc[-1]), 2)
+                        
+                        return {
+                            "Sembol": sembol,
+                            "Fiyat": kapanis,
+                            "Sinyal": karar["decision"],
+                            "Güç Skoru": karar["score"],
+                            "Risk Skoru": karar["risk"],
+                            "Piyasa Rejimi": karar["regime"]
+                        }
+                    except Exception as e:
+                        return {
+                            "Sembol": sembol,
+                            "Fiyat": 0.0,
+                            "Sinyal": "HATA",
+                            "Güç Skoru": 0,
+                            "Risk Skoru": 0,
+                            "Piyasa Rejimi": f"Hata: {str(e)}"
+                        }
+
+                sonuclar = []
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    for sonuc in executor.map(tekli_tara, tarama_listesi):
+                        if sonuc is not None:
+                            sonuclar.append(sonuc)
+                
+                if sonuclar:
+                    df_sonuc = pd.DataFrame(sonuclar)
+                    df_sonuc = df_sonuc.sort_values(by="Güç Skoru", ascending=False).reset_index(drop=True)
+                    
+                    def renk_ver(val):
+                        if val in ["GÜÇLÜ AL", "AL"]:
+                            return 'color: #00ff00; font-weight: bold;'
+                        elif val in ["SAT", "GÜÇLÜ SAT", "AZALT"]:
+                            return 'color: #ff3333; font-weight: bold;'
+                        elif val == "TUT":
+                            return 'color: #ffff00; font-weight: bold;'
+                        elif val == "HATA":
+                            return 'color: white; background-color: #ff0000; font-weight: bold;'
+                        return ''
+                        
+                    st.success("Tüm taramalar başarıyla tamamlandı!")
+                    
+                    try:
+                        st.dataframe(df_sonuc.style.map(renk_ver, subset=['Sinyal']), use_container_width=True, hide_index=True)
+                    except AttributeError:
+                        st.dataframe(df_sonuc.style.applymap(renk_ver, subset=['Sinyal']), use_container_width=True, hide_index=True)
+                else:
+                    st.warning("Hâlâ geçerli veri alınamadı. İnternet bağlantınızı veya sembol listesini kontrol edin.")
+
+    # Diğer Standart Sekmeler
+    with tabs[2]:
+        st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
+        c1, c2 = st.columns([2, 1])
+        with c2:
+            tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)
+            st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
+
+    with tabs[3]:
+        st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Veriler & Temettü")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("F/K Oranı", info.get('trailingPE', '-'))
+        c2.metric("PD/DD", info.get('priceToBook', '-'))
+        c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
+
+    with tabs[4]:
+        st.subheader("📰 Küresel Haber Duygu Analizi")
+        for h in haber_duygu_analizi(hisse_kodu):
+            with st.expander(f"{h['duygu']} | {h['baslik']} ({h['kaynak']})"):
+                st.markdown(f"[Habere Git]({h['link']})")
+
+    with tabs[5]:
+        st.subheader(f"📊 {piyasa_tipi} Korelasyon Matrisi")
+        st.info("Korelasyon analizi için butona basarak işlemi başlatabilirsiniz.")
+
+    with tabs[6]:
+        st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
+        bt_sonuc = backtest_motoru(df)
+        if not bt_sonuc.empty:
+            son_piyasa = bt_sonuc['Piyasa_Kumulatif'].iloc[-1] - 100
+            son_strateji = bt_sonuc['Strateji_Kumulatif'].iloc[-1] - 100
+            c1, c2 = st.columns(2)
+            c1.metric("Alıp Bekleseydin", f"%{round(son_piyasa, 2)}")
+            c2.metric("Strateji ile Alsatsaydın", f"%{round(son_strateji, 2)}", delta=round(son_strateji - son_piyasa, 2))
+
+    with tabs[7]:
+        st.subheader("🎲 Monte Carlo Risk Simülasyonu (Gelecek 30 Gün)")
+
+    with tabs[8]:
+        st.subheader("🛠️ Terminal Entegrasyon Durumu")
+        st.success("🤖 YZ Öneri Motoru: Aktif")
+        st.info("Terminal v100 Kararlı Modda Çalışıyor.")
+
+    with tabs[9]:
+        st.subheader("🧬 Python İleri İstatistik Analizi")
+        if st.button("İstatistikleri Hesapla"):
+            stats = python_istatistik_analizi(df)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Yıllık Volatilite", stats['Yıllık Volatilite'])
+            col2.metric("Sharpe Oranı", stats['Sharpe Oranı'])
+            col3.metric("VaR (%95)", stats['Günlük VaR (%95)'])
+
+    # TAB 10: YAPAY ZEKA ÖNERİ MOTORU
     with tabs[10]:
         st.subheader("🤖 Yapay Zeka ve Kurumsal Karar Motoru Önerileri")
         st.markdown("Bu modül, arka planda çalışan **v100 Master Terminal Engine**, **Random Forest** ve **Smart Money** algoritmalarını harmanlayarak nihai alım/satım tavsiyesi üretir.")
 
         with st.spinner("Yapay Zeka Analizleri Tamamlıyor..."):
             try:
-                # Motorların gereksinim duyduğu indikatörleri DataFrame'e ekle
                 df_ai = df.copy()
                 df_ai = calculate_adx(df_ai)
                 df_ai = calculate_supertrend(df_ai)
@@ -745,9 +734,8 @@ if not df.empty:
                 df_ai = calculate_cci(df_ai)
                 df_ai = detect_bos_choch(df_ai)
 
-                # Master Terminal raporunu çek
                 master_rapor = build_master_terminal(hisse_kodu, df_ai)
-                ozet = terminal_summary(master_rapor)
+                ozet = terminal_summary(master_rapor, df_ai)
 
                 st.markdown("### 🎯 Yapay Zeka Nihai Sinyali")
                 c1, c2, c3, c4 = st.columns(4)
@@ -793,4 +781,3 @@ if not df.empty:
 
             except Exception as e:
                 st.error(f"Yapay Zeka Karar Motoru hesaplanırken bir hata oluştu: {str(e)}")
-                st.warning("İpucu: AI indikatörlerinin (ADX, MFI vb.) hesaplanabilmesi için tarih aralığını biraz daha genişletmeyi (en az 60 gün geriden başlatmayı) deneyin.")

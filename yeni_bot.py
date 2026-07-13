@@ -212,8 +212,23 @@ st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
 
 if piyasa_tipi == "Borsa İstanbul (BIST)":
-    varsayilan_hisse = "THYAO.IS"
-    tarama_listesi = ["THYAO.IS", "EREGL.IS", "ASELS.IS", "SISE.IS", "TUPRS.IS", "KCHOL.IS", "GARAN.IS", "SASA.IS"]
+    varsayilan_hisse = "MIATK.IS"
+    tarama_listesi = ["THYAO.IS", "THYAO.IS",
+"AEFES.IS", 
+"AKBNK.IS", 
+"AKSA.IS", 
+"AKSEN.IS", 
+"ALARK.IS", 
+"ALTNY.IS", 
+"ANSGR.IS", 
+"ARCLK.IS", 
+"ASELS.IS", 
+"ASTOR.IS", 
+"BALSU.IS", 
+"BERA.IS", 
+"BIMAS.IS", 
+"BRSAN.IS", 
+"BRYAT.IS", "EREGL.IS", "ASELS.IS", "SISE.IS", "TUPRS.IS", "KCHOL.IS", "GARAN.IS", "SASA.IS"]
 elif piyasa_tipi == "Amerikan Borsası (ABD)":
     varsayilan_hisse = "AAPL"
     tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]

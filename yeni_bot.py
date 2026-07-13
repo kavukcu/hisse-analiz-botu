@@ -343,7 +343,6 @@ if not df.empty:
 
         fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
-
     with tabs[1]:
         st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
         st.info("Bu bölümde seçili piyasaya ait tarama listesi asenkron (çoklu iş parçacığı) olarak taranır ve YZ/Kurumsal Karar motorundan geçirilir.")
@@ -351,21 +350,43 @@ if not df.empty:
         if st.button("🚀 Akıllı Radarı Başlat"):
             with st.spinner(f"Sistem {len(tarama_listesi)} varlığı aynı anda tarıyor, lütfen bekleyin..."):
                 
-                # Tek bir hisseyi tarayan yardımcı fonksiyon
+                # Arka plan iş parçacıkları için güvenli, önbelleksiz tarama fonksiyonu
                 def tekli_tara(sembol):
                     try:
-                        # Radar için son 100 günlük veri analize yeterlidir (hız kazanmak için)
-                        df_radar = veri_yukle(sembol, datetime.today() - timedelta(days=100), datetime.today())
-                        if df_radar.empty: return None
+                        # Önbellek hatasını engellemek için doğrudan yf.download çağırıyoruz
+                        df_radar = yf.download(
+                            sembol,
+                            start=(datetime.today() - timedelta(days=120)).strftime('%Y-%m-%d'),
+                            end=datetime.today().strftime('%Y-%m-%d'),
+                            session=oturum,
+                            progress=False,
+                            auto_adjust=True
+                        )
+                        
+                        if isinstance(df_radar.columns, pd.MultiIndex):
+                            df_radar.columns = df_radar.columns.droplevel(1)
+                            
+                        if df_radar.empty or len(df_radar) < 20: 
+                            return None
+                            
+                        df_radar = df_radar.dropna()
 
-                        # İndikatörleri radar verisine işlet
+                        # Risk motorunun doğru çalışması için ATR hesaplamasını ekliyoruz
+                        df_radar['True_Range'] = np.max(pd.concat([
+                            df_radar['High'] - df_radar['Low'], 
+                            (df_radar['High'] - df_radar['Close'].shift()).abs(), 
+                            (df_radar['Low'] - df_radar['Close'].shift()).abs()
+                        ], axis=1), axis=1)
+                        df_radar['ATR_14'] = df_radar['True_Range'].rolling(14).mean()
+
+                        # İndikatör zincirini radar verisine işlet
                         df_radar = calculate_adx(df_radar)
                         df_radar = calculate_supertrend(df_radar)
                         df_radar = calculate_mfi(df_radar)
                         df_radar = calculate_cci(df_radar)
                         df_radar = detect_bos_choch(df_radar)
                         
-                        # Kurumsal karar motorunu çağır
+                        # Kurumsal karar mekanizmasını çalıştır
                         karar = institutional_decision(df_radar)
                         kapanis = round(float(df_radar['Close'].iloc[-1]), 2)
                         
@@ -381,19 +402,17 @@ if not df.empty:
                         return None
 
                 sonuclar = []
-                # ThreadPoolExecutor ile çoklu işlem (Asenkron Tarama)
+                # 10 iş parçacığı ile asenkron paralel sorgu
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     for sonuc in executor.map(tekli_tara, tarama_listesi):
                         if sonuc is not None:
                             sonuclar.append(sonuc)
                 
-                # Sonuçları ekrana yazdır
+                # Sonuç ekranını bas
                 if sonuclar:
                     df_sonuc = pd.DataFrame(sonuclar)
-                    # En yüksek puanlıları en üste al
                     df_sonuc = df_sonuc.sort_values(by="Güç Skoru", ascending=False).reset_index(drop=True)
                     
-                    # Sinyallere göre tabloyu renklendir
                     def renk_ver(val):
                         if val in ["GÜÇLÜ AL", "AL"]:
                             return 'color: #00ff00; font-weight: bold;'
@@ -410,7 +429,7 @@ if not df.empty:
                         hide_index=True
                     )
                 else:
-                    st.warning("Tarama sonucunda geçerli veri alınamadı. Yahoo Finance bağlantısını kontrol edin.")
+                    st.warning("Tarama listesindeki varlıklardan veri çekilemedi. Lütfen tarih aralığını veya sembol formatlarını kontrol edin.")
     with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])

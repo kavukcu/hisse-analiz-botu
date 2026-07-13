@@ -346,8 +346,71 @@ if not df.empty:
 
     with tabs[1]:
         st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
-        st.info("Bu bölümde radar işlemleri çalıştırılır. Seçiminizi yapıp taramayı başlatın.")
+        st.info("Bu bölümde seçili piyasaya ait tarama listesi asenkron (çoklu iş parçacığı) olarak taranır ve YZ/Kurumsal Karar motorundan geçirilir.")
+        
+        if st.button("🚀 Akıllı Radarı Başlat"):
+            with st.spinner(f"Sistem {len(tarama_listesi)} varlığı aynı anda tarıyor, lütfen bekleyin..."):
+                
+                # Tek bir hisseyi tarayan yardımcı fonksiyon
+                def tekli_tara(sembol):
+                    try:
+                        # Radar için son 100 günlük veri analize yeterlidir (hız kazanmak için)
+                        df_radar = veri_yukle(sembol, datetime.today() - timedelta(days=100), datetime.today())
+                        if df_radar.empty: return None
 
+                        # İndikatörleri radar verisine işlet
+                        df_radar = calculate_adx(df_radar)
+                        df_radar = calculate_supertrend(df_radar)
+                        df_radar = calculate_mfi(df_radar)
+                        df_radar = calculate_cci(df_radar)
+                        df_radar = detect_bos_choch(df_radar)
+                        
+                        # Kurumsal karar motorunu çağır
+                        karar = institutional_decision(df_radar)
+                        kapanis = round(float(df_radar['Close'].iloc[-1]), 2)
+                        
+                        return {
+                            "Sembol": sembol,
+                            "Fiyat": kapanis,
+                            "Sinyal": karar["decision"],
+                            "Güç Skoru": karar["score"],
+                            "Risk Skoru": karar["risk"],
+                            "Piyasa Rejimi": karar["regime"]
+                        }
+                    except Exception as e:
+                        return None
+
+                sonuclar = []
+                # ThreadPoolExecutor ile çoklu işlem (Asenkron Tarama)
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    for sonuc in executor.map(tekli_tara, tarama_listesi):
+                        if sonuc is not None:
+                            sonuclar.append(sonuc)
+                
+                # Sonuçları ekrana yazdır
+                if sonuclar:
+                    df_sonuc = pd.DataFrame(sonuclar)
+                    # En yüksek puanlıları en üste al
+                    df_sonuc = df_sonuc.sort_values(by="Güç Skoru", ascending=False).reset_index(drop=True)
+                    
+                    # Sinyallere göre tabloyu renklendir
+                    def renk_ver(val):
+                        if val in ["GÜÇLÜ AL", "AL"]:
+                            return 'color: #00ff00; font-weight: bold;'
+                        elif val in ["SAT", "GÜÇLÜ SAT", "AZALT"]:
+                            return 'color: #ff3333; font-weight: bold;'
+                        elif val == "TUT":
+                            return 'color: #ffff00; font-weight: bold;'
+                        return ''
+                        
+                    st.success("Tüm taramalar başarıyla tamamlandı!")
+                    st.dataframe(
+                        df_sonuc.style.applymap(renk_ver, subset=['Sinyal']), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                else:
+                    st.warning("Tarama sonucunda geçerli veri alınamadı. Yahoo Finance bağlantısını kontrol edin.")
     with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])

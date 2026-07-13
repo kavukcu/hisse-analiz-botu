@@ -161,52 +161,53 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
 
 # RANDOM FOREST MAKİNE ÖĞRENMESİ
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
-    df_ml = df[['Close']].copy()
+    df_ml = df[['Close', 'Volume']].copy()
+    
+    # BIST için kritik özellikler (Features)
     df_ml['Lag1'] = df_ml['Close'].shift(1)
     df_ml['Lag2'] = df_ml['Close'].shift(2)
     df_ml['SMA_10'] = df_ml['Close'].rolling(window=10).mean()
+    df_ml['Hacim_Degisim'] = df_ml['Volume'].pct_change()
+    
+    # RSI Hesaplaması (ML Modeli için)
+    delta = df_ml['Close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+    rs = gain / (loss + 1e-9)
+    df_ml['RSI_14'] = 100 - (100 / (1 + rs))
+    
     df_ml.dropna(inplace=True)
     
-    X = df_ml[['Lag1', 'Lag2', 'SMA_10']]
+    X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
     y = df_ml['Close']
     
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    # Eğitim sırasında .values kullanılarak isim kontrolü devre dışı bırakılır
-    model.fit(X.values, y) 
+    # Model ağaç sayısını 200'e çıkarıp, aşırı öğrenmeyi (overfitting) engelliyoruz
+    model = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
+    model.fit(X.values, y.values) 
     
     tahminler = []
     son_satir = df_ml.iloc[-1]
+    
     lag1 = son_satir['Close']
     lag2 = son_satir['Lag1']
     sma_10 = son_satir['SMA_10']
+    hacim_deg = son_satir['Hacim_Degisim'] if not np.isnan(son_satir['Hacim_Degisim']) else 0
+    rsi_14 = son_satir['RSI_14'] if not np.isnan(son_satir['RSI_14']) else 50
     
     for _ in range(gelecek_gun):
-        pred = model.predict([[lag1, lag2, sma_10]])[0]
+        pred = model.predict([[lag1, lag2, sma_10, hacim_deg, rsi_14]])[0]
         tahminler.append(pred)
+        
+        # Gelecek iterasyon için değerleri kaydır
         lag2 = lag1
         lag1 = pred
         sma_10 = (sma_10 * 9 + pred) / 10
+        # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
+        hacim_deg = 0.0 
+        rsi_14 = 50.0 
         
     tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
-
-
-def ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
-
-def python_istatistik_analizi(df):
-    df_stats = df.copy()
-    df_stats['Log_Return'] = np.log(df_stats['Close'] / df_stats['Close'].shift(1))
-    volatilite = df_stats['Log_Return'].std() * np.sqrt(252)
-    getiri = df_stats['Log_Return'].mean() * 252
-    sharpe = (getiri - 0.40) / volatilite
-    var_95 = np.percentile(df_stats['Log_Return'].dropna(), 5)
-    return {
-        "Yıllık Volatilite": f"%{round(volatilite * 100, 2)}",
-        "Sharpe Oranı": round(sharpe, 2),
-        "Günlük VaR (%95)": f"%{round(var_95 * 100, 2)}"
-    }
-
 # --- SİDEBAR VE PİYASA SEÇİMİ ---
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
@@ -283,7 +284,26 @@ if not df.empty:
 
     df = smc_hesapla(df)
 
-    tabs = st.tabs([
+    tabs = st.tabs([])
+with tabs[8]: # veya oluşturduğunuz yeni sekme indeksi
+    st.subheader("🧠 v85 AI Ensemble & Kurumsal Karar Motoru (BIST Özel)")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### 🤖 Yapay Zeka Kararı")
+        ai_sonuc = ensemble_prediction(df)
+        
+        st.metric("Yapay Zeka Kararı", ai_sonuc["signal"])
+        st.metric("Makine Öğrenmesi Tahmini (Kısa Vade)", f"{ai_sonuc['rf_prediction']} TL")
+        st.progress(ai_sonuc["confidence"] / 100, text=f"Yapay Zeka Güven Skoru: %{ai_sonuc['confidence']}")
+        
+    with c2:
+        st.markdown("### 🏢 Kurumsal SMC & Risk Motoru")
+        kurumsal_sonuc = institutional_decision(df)
+        
+        st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
+        st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
+        st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")
         "📈 SMC & Quant Fiyat Hareketi", "🔍 Akıllı Asenkron Radar", "💼 Cüzdan & Akıllı Stop", 
         "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası", 
         "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Durumu", "🧬 Python İstatistik"
@@ -464,7 +484,51 @@ with tabs[1]:
                 return None
 
             if st.button("🚀 Hızlı Asenkron Radarı Çalıştır"):
-                with st.spinner("🚀 BİST Hisseleri Multi-Threading (Asenkron) ile Taranıyor. Bu işlem saniyeler sürecektir..."):
+                if st.button("🚀 BİST Yapay Zeka Fırsat Radarını Çalıştır"):
+    with st.spinner("🚀 BİST30 Hisseleri AI Ensemble & Kurumsal Karar Motoru ile Taranıyor..."):
+        # Terminal v89 AI Radar Pipeline entegrasyonu
+        bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS"] 
+        
+        def ai_hisse_tara(ticker):
+            try:
+                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=365), end=datetime.today(), progress=False, session=oturum)
+                if t_df.empty: return None
+                if isinstance(t_df.columns, pd.MultiIndex): t_df.columns = t_df.columns.droplevel(1)
+                
+                # Sinyal kalitesi, teknik analiz ve risk skorunu birleştiren fonksiyonunuz
+                karar = institutional_decision(t_df)
+                ai_tahmin = ensemble_prediction(t_df)
+                fiyat = float(t_df['Close'].iloc[-1])
+                
+                return {
+                    "Hisse": ticker.replace(".IS", ""),
+                    "Fiyat": round(fiyat, 2),
+                    "AI Kararı": ai_tahmin["signal"],
+                    "Kurumsal Karar": karar["decision"],
+                    "Trend Rejimi": karar["regime"],
+                    "Genel Skor": karar["score"]
+                }
+            except:
+                return None
+
+        firsatlar = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            sonuclar = executor.map(ai_hisse_tara, bist30_hisseler)
+            for sonuc in sonuclar:
+                if sonuc is not None:
+                    firsatlar.append(sonuc)
+            
+        if firsatlar:
+            # En yüksek skora göre sırala
+            df_firsatlar = pd.DataFrame(firsatlar).sort_values(by="Genel Skor", ascending=False).set_index("Hisse")
+            st.success(f"✅ AI Taraması tamamlandı! En yüksek potansiyelli BIST hisseleri:")
+            st.dataframe(df_firsatlar, use_container_width=True)
+            
+            # En yüksek skorlu hisseyi Bar Chart ile göster
+            st.bar_chart(df_firsatlar["Genel Skor"])
+        else:
+            st.warning("📉 Tarama yapılamadı veya kriterlere uyan hisse bulunamadı.")
+with st.spinner("🚀 BİST Hisseleri Multi-Threading (Asenkron) ile Taranıyor. Bu işlem saniyeler sürecektir..."):
                     bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS", "ENKAI.IS", "KRDMD.IS", "PETKM.IS"] 
                     
                     firsatlar = []

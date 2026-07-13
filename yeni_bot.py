@@ -343,6 +343,7 @@ if not df.empty:
 
         fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
+    
     with tabs[1]:
         st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
         st.info("Bu bölümde seçili piyasaya ait tarama listesi asenkron (çoklu iş parçacığı) olarak taranır ve YZ/Kurumsal Karar motorundan geçirilir.")
@@ -350,28 +351,21 @@ if not df.empty:
         if st.button("🚀 Akıllı Radarı Başlat"):
             with st.spinner(f"Sistem {len(tarama_listesi)} varlığı aynı anda tarıyor, lütfen bekleyin..."):
                 
-                # Arka plan iş parçacıkları için güvenli, önbelleksiz tarama fonksiyonu
                 def tekli_tara(sembol):
                     try:
-                        # Önbellek hatasını engellemek için doğrudan yf.download çağırıyoruz
-                        df_radar = yf.download(
-                            sembol,
-                            start=(datetime.today() - timedelta(days=120)).strftime('%Y-%m-%d'),
-                            end=datetime.today().strftime('%Y-%m-%d'),
-                            session=oturum,
-                            progress=False,
-                            auto_adjust=True
-                        )
+                        # 1. ÇÖZÜM: Thread-safe (İş parçacığı güvenli) veri çekme
+                        # Ortak 'oturum' nesnesi yerine her hisse için bağımsız history çekiyoruz
+                        hisse = yf.Ticker(sembol)
+                        df_radar = hisse.history(period="6mo") 
                         
-                        if isinstance(df_radar.columns, pd.MultiIndex):
-                            df_radar.columns = df_radar.columns.droplevel(1)
-                            
                         if df_radar.empty or len(df_radar) < 20: 
                             return None
-                            
-                        df_radar = df_radar.dropna()
+                        
+                        # Saat dilimi (timezone) çökmelerini engelle
+                        if df_radar.index.tz is not None:
+                            df_radar.index = df_radar.index.tz_localize(None)
 
-                        # Risk motorunun doğru çalışması için ATR hesaplamasını ekliyoruz
+                        # 2. ATR İndikatörü (Risk motoru için şart)
                         df_radar['True_Range'] = np.max(pd.concat([
                             df_radar['High'] - df_radar['Low'], 
                             (df_radar['High'] - df_radar['Close'].shift()).abs(), 
@@ -379,14 +373,14 @@ if not df.empty:
                         ], axis=1), axis=1)
                         df_radar['ATR_14'] = df_radar['True_Range'].rolling(14).mean()
 
-                        # İndikatör zincirini radar verisine işlet
+                        # 3. YZ Motoru İndikatörleri
                         df_radar = calculate_adx(df_radar)
                         df_radar = calculate_supertrend(df_radar)
                         df_radar = calculate_mfi(df_radar)
                         df_radar = calculate_cci(df_radar)
                         df_radar = detect_bos_choch(df_radar)
                         
-                        # Kurumsal karar mekanizmasını çalıştır
+                        # 4. Kurumsal Karar Modülü
                         karar = institutional_decision(df_radar)
                         kapanis = round(float(df_radar['Close'].iloc[-1]), 2)
                         
@@ -399,16 +393,25 @@ if not df.empty:
                             "Piyasa Rejimi": karar["regime"]
                         }
                     except Exception as e:
-                        return None
+                        # ÇÖZÜM 2: Gizli hataları tabloya yansıtıyoruz
+                        # Eğer bir hata olursa ekrandan kaybolmak yerine tabloda "HATA" uyarısını ve sebebini göreceğiz.
+                        return {
+                            "Sembol": sembol,
+                            "Fiyat": 0.0,
+                            "Sinyal": "HATA",
+                            "Güç Skoru": 0,
+                            "Risk Skoru": 0,
+                            "Piyasa Rejimi": f"Hata: {str(e)}"
+                        }
 
                 sonuclar = []
-                # 10 iş parçacığı ile asenkron paralel sorgu
-                with ThreadPoolExecutor(max_workers=10) as executor:
+                # Çok fazla thread Yahoo Finance'in engellemesine (Rate Limit) takılabilir, 5 güvenlidir.
+                with ThreadPoolExecutor(max_workers=5) as executor:
                     for sonuc in executor.map(tekli_tara, tarama_listesi):
                         if sonuc is not None:
                             sonuclar.append(sonuc)
                 
-                # Sonuç ekranını bas
+                # Tabloyu Bastır
                 if sonuclar:
                     df_sonuc = pd.DataFrame(sonuclar)
                     df_sonuc = df_sonuc.sort_values(by="Güç Skoru", ascending=False).reset_index(drop=True)
@@ -420,6 +423,8 @@ if not df.empty:
                             return 'color: #ff3333; font-weight: bold;'
                         elif val == "TUT":
                             return 'color: #ffff00; font-weight: bold;'
+                        elif val == "HATA":
+                            return 'color: white; background-color: #ff0000; font-weight: bold;' # Hata kırmızısı
                         return ''
                         
                     st.success("Tüm taramalar başarıyla tamamlandı!")
@@ -429,13 +434,7 @@ if not df.empty:
                         hide_index=True
                     )
                 else:
-                    st.warning("Tarama listesindeki varlıklardan veri çekilemedi. Lütfen tarih aralığını veya sembol formatlarını kontrol edin.")
-    with tabs[2]:
-        st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
-        c1, c2 = st.columns([2, 1])
-        with c2:
-            tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)
-            st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
+                    st.warning("Hâlâ geçerli veri alınamadı. İnternet bağlantınızı veya sembol listesini kontrol edin.")
 
     with tabs[3]:
         st.subheader(f"🏢 {info.get('longName', hisse_kodu)} Temel Veriler & Temettü")

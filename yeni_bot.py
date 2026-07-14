@@ -566,106 +566,59 @@ fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
 fig.update_layout(template="plotly_dark", height=1000, xaxis_rangeslider_visible=False)
 st.plotly_chart(fig, use_container_width=True)
 with tabs[1]:
-        st.subheader(f"⚡ {piyasa_tipi} Multi-Threading Hızlı Radar")
-        if piyasa_tipi == "Borsa İstanbul (BIST)":
-            tarama_modu = st.radio("Tarama Modu Seçin:", [
-                "🟢 Aşırı Satım Radarı (RSI < 35)", 
-                "🔥 Hacim Patlaması Radarı",
-                "💼 Temel Analiz Radarı (Düşük F/K)",
-                "☁️ Ichimoku Kumo Kırılımı",
-                "⚔️ Golden Cross"
-                "🚀 Ucuz & Yükseliş Başlamış (Dipten Dönüş)"
-            ])
-            
-            def tek_hisse_tara(hisse, mod):
-                try:
-                    temiz_ad = hisse.replace(".IS", "")
-                    if "Temel Analiz" in mod:
-                        s_info = sirket_bilgisi_getir(hisse)
-                        fk = s_info.get('trailingPE', 999)
-                        pddd = s_info.get('priceToBook', 999)
-                        if isinstance(fk, (int, float)) and 0 < fk < 10 and 0 < pddd < 3:
-                            return {"Hisse Kodu": temiz_ad, "Fiyat": s_info.get('currentPrice', 0), "Değer": f"F/K: {round(fk, 2)}", "Durum": "💼 Ucuz Çarpanlar"}
-                    else:
-                        t_df = yf.download(hisse, start=datetime.today() - timedelta(days=365), end=datetime.today(), progress=False, session=oturum)
-                        if t_df.empty: return None
-                        if isinstance(t_df.columns, pd.MultiIndex): t_df.columns = t_df.columns.droplevel(1)
-                        if len(t_df) > 52:
-                            son_kap = float(t_df['Close'].iloc[-1])
-                            if "Aşırı Satım" in mod:
-                                delta_h = t_df['Close'].diff()
-                                gain_h = delta_h.where(delta_h > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-                                loss_h = -delta_h.where(delta_h < 0, 0).ewm(alpha=1/14, adjust=False).mean()
-                                rs_h = gain_h / (loss_h + 1e-9)
-                                rsi_son = (100 - (100 / (1 + rs_h))).iloc[-1]
-                                if rsi_son < 35: return {"Hisse Kodu": temiz_ad, "Fiyat": round(son_kap,2), "Değer": f"RSI: {round(rsi_son, 1)}", "Durum": "🟢 Aşırı Satım"}
-                            elif "Hacim" in mod:
-                                if t_df['Volume'].iloc[-1] > (t_df['Volume'].iloc[-21:-1].mean() * 1.8):
-                                    return {"Hisse Kodu": temiz_ad, "Fiyat": round(son_kap,2), "Değer": "Hacim Patlaması", "Durum": "🔥 Yüksek Hacim"}
-                                elif "Yükseliş Başlamış" in mod:
-                                # Kısa vadeli trend (SMA 20)
-                                    sma20 = t_df['Close'].rolling(window=20).mean()
-                                
-                                # MACD Hesaplama
-                                ema12 = t_df['Close'].ewm(span=12, adjust=False).mean()
-                                ema26 = t_df['Close'].ewm(span=26, adjust=False).mean()
-                                macd = ema12 - ema26
-                                macd_signal = macd.ewm(span=9, adjust=False).mean()
-                                
-                                # RSI Hesaplama
-                                delta_y = t_df['Close'].diff()
-                                gain_y = delta_y.where(delta_y > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-                                loss_y = -delta_y.where(delta_y < 0, 0).ewm(alpha=1/14, adjust=False).mean()
-                                rs_y = gain_y / (loss_y + 1e-9)
-                                rsi_son = (100 - (100 / (1 + rs_y))).iloc[-1]
+    st.subheader("🔍 Akıllı Asenkron Radar & Momentum")
+    
+    # Seçili hissenin stokastik analizi
+    df = stokastik_hesapla(df)
+    
+    son_k = df['Stoch_K'].iloc[-1]
+    son_d = df['Stoch_D'].iloc[-1]
 
-                                son_fiyat = t_df['Close'].iloc[-1]
-                                
-                                # KRİTERLER:
-                                # 1. Fiyat SMA20'nin üzerinde (Kısa vadeli düşüş trendi kırılmış)
-                                # 2. MACD, Sinyal çizgisinin üzerinde (Momentum yukarı)
-                                # 3. RSI 40 ile 65 arasında (Dipten kurtulmuş ama henüz pahalılaşmamış)
-                                # 4. Kesişim Teyidi: Ya MACD ya da Fiyat(SMA20) son 2 gün içinde yukarı kesmiş olmalı (Hareket taze olmalı)
-                                
-                                taze_hareket = (macd.iloc[-2] <= macd_signal.iloc[-2]) or (t_df['Close'].iloc[-2] <= sma20.iloc[-2])
-                                
-                                if (son_fiyat > sma20.iloc[-1]) and \
-                                   (macd.iloc[-1] > macd_signal.iloc[-1]) and \
-                                   (40 < rsi_son < 65) and taze_hareket:
-                                    
-                                    return {
-                                        "Hisse Kodu": temiz_ad, 
-                                        "Fiyat": round(son_fiyat, 2), 
-                                        "Değer": f"RSI: {round(rsi_son, 1)}", 
-                                        "Durum": "🚀 Yükseliş Başlamış"
-                                    }
-                except: return None
-                return None
+    stoch_sinyal = "NÖTR"
+    sinyal_rengi = "normal"
 
-            if st.button("🚀 Hızlı Asenkron Radarı Çalıştır"):
-                if st.button("🚀 BİST Yapay Zeka Fırsat Radarını Çalıştır"):
-                    bist30_hisseler = [
-            "AKBNK.IS", "ALARK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", 
-            "BRSAN.IS", "DOAS.IS", "ENKAI.IS", "EREGL.IS", "FROTO.IS", 
-            "GARAN.IS", "GUBRF.IS", "HEKTS.IS", "ISCTR.IS", "KCHOL.IS", 
-            "KONTR.IS", "KOZAL.IS", "KRDMD.IS", "ODAS.IS", "PGSUS.IS", 
-            "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", 
-            "TOASO.IS", "TUPRS.IS", "YKBNK.IS"
-        ]
+    if son_k < 20 and son_k > son_d:
+        stoch_sinyal = "🚀 AŞIRI SATIM (AL SİNYALİ)"
+        sinyal_rengi = "off"
+    elif son_k > 80 and son_k < son_d:
+        stoch_sinyal = "⚠️ AŞIRI ALIM (SAT SİNYALİ)"
+        sinyal_rengi = "inverse"
         
+    st.markdown("### 🌊 Seçili Hisse Anlık Stokastik (Momentum)")
+    c_stoch1, c_stoch2, c_stoch3 = st.columns(3)
+
+    with c_stoch1:
+        st.metric(label="Stoch %K (Hızlı)", value=f"{son_k:.2f}")
+    with c_stoch2:
+        st.metric(label="Stoch %D (Yavaş)", value=f"{son_d:.2f}")
+    with c_stoch3:
+        st.metric(label="Stoch Durumu", value=stoch_sinyal, delta="Trend Dönüşü Beklentisi" if "AŞIRI" in stoch_sinyal else None, delta_color=sinyal_rengi)
+        
+    st.divider()
+
+    bist30_hisseler = [
+        "AKBNK.IS", "ALARK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", 
+        "BRSAN.IS", "DOAS.IS", "ENKAI.IS", "EREGL.IS", "FROTO.IS", 
+        "GARAN.IS", "GUBRF.IS", "HEKTS.IS", "ISCTR.IS", "KCHOL.IS", 
+        "KONTR.IS", "KOZAL.IS", "KRDMD.IS", "ODAS.IS", "PGSUS.IS", 
+        "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", 
+        "TOASO.IS", "TUPRS.IS", "YKBNK.IS"
+    ]
+
+    if st.button("🚀 BİST Yapay Zeka Fırsat Radarını Çalıştır"):
         progress_text = st.empty()
         progress_bar = st.progress(0)
         
         def ai_hisse_tara(ticker):
             try:
                 t_df = yf.download(ticker, start=datetime.today() - timedelta(days=365), end=datetime.today(), progress=False)
-                if t_df.empty: return None
-                if isinstance(t_df.columns, pd.MultiIndex): t_df.columns = t_df.columns.droplevel(1)
+                if t_df.empty: 
+                    return None
+                if isinstance(t_df.columns, pd.MultiIndex): 
+                    t_df.columns = t_df.columns.droplevel(1)
                 
-                # --- YENİ: Stokastik hesaplamasını radar içine entegre ettik ---
                 t_df = stokastik_hesapla(t_df)
-                son_k = float(t_df['Stoch_K'].iloc[-1])
-                # ---------------------------------------------------------------
+                son_k_degeri = float(t_df['Stoch_K'].iloc[-1])
                 
                 karar = institutional_decision(t_df)
                 ai_tahmin = ensemble_prediction(t_df)
@@ -679,13 +632,13 @@ with tabs[1]:
                     "Anlık Fiyat": round(fiyat, 2),
                     "Hedef Fiyat (AI)": round(hedef_fiyat, 2),
                     "Potansiyel (%)": round(getiri_potansiyeli, 2),
-                    "Stoch %K": round(son_k, 2), # <--- YENİ SÜTUN BURADA
+                    "Stoch %K": round(son_k_degeri, 2), 
                     "AI Sinyali": ai_tahmin["signal"],
                     "Kurumsal Karar": karar["decision"],
                     "AI Güven Skoru": ai_tahmin["confidence"],
                     "Genel Puan": karar["score"]
                 }
-            except:
+            except Exception as e:
                 return None
 
         firsatlar = []
@@ -711,21 +664,22 @@ with tabs[1]:
         progress_text.empty() 
         
         if firsatlar:
-            # Sütun sırasını belirleyip Stoch %K'yı daha öne alalım
             df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef Fiyat (AI)", "Potansiyel (%)", "Stoch %K", "AI Sinyali", "Kurumsal Karar", "AI Güven Skoru", "Genel Puan"]]
             df_firsatlar = df_firsatlar.sort_values(by="Genel Puan", ascending=False).set_index("Hisse")
             
             st.success("✅ AI Fırsat Taraması Tamamlandı!")
             
-            # --- YENİ: Renklendirme mantığına Stokastik'i ekledik ---
             def color_signals(val):
                 if isinstance(val, str):
-                    if 'AL' in val.upper() or 'ACCUMULATION' in val.upper(): return 'color: #00FF00; font-weight: bold'
-                    if 'SAT' in val.upper() or 'DISTRIBUTION' in val.upper(): return 'color: #FF0000; font-weight: bold'
+                    if 'AL' in val.upper() or 'ACCUMULATION' in val.upper(): 
+                        return 'color: #00FF00; font-weight: bold'
+                    if 'SAT' in val.upper() or 'DISTRIBUTION' in val.upper(): 
+                        return 'color: #FF0000; font-weight: bold'
                 elif isinstance(val, (int, float)):
-                    # Yeni Stoch Kuralı:
-                    if val < 20: return 'color: #00FF00; font-weight: bold' # 20 altı yeşil (Dipten dönüş)
-                    if val > 80: return 'color: #FF0000; font-weight: bold' # 80 üstü kırmızı (Tepe noktası)
+                    if val < 20: 
+                        return 'color: #00FF00; font-weight: bold' 
+                    if val > 80: 
+                        return 'color: #FF0000; font-weight: bold' 
                 return ''
 
             st.dataframe(df_firsatlar.style.applymap(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'Stoch %K']), use_container_width=True)
@@ -733,59 +687,9 @@ with tabs[1]:
             st.markdown("### 🏆 En Yüksek Getiri Potansiyeline Sahip Top 5")
             top_5 = df_firsatlar.nlargest(5, 'Potansiyel (%)')
             st.bar_chart(top_5['Potansiyel (%)'])
+            
         else:
             st.error("❌ Tarama yapılamadı veya internet bağlantınızda sorun var.")
-            st.warning("📉 Tarama yapılamadı veya kriterlere uyan hisse bulunamadı.")
-with st.spinner("🚀 BİST Hisseleri Multi-Threading (Asenkron) ile Taranıyor. Bu işlem saniyeler sürecektir..."):
-                    bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS", "ENKAI.IS", "KRDMD.IS", "PETKM.IS"] 
-                    
-                    firsatlar = []
-                    with ThreadPoolExecutor(max_workers=10) as executor:
-                        sonuclar = executor.map(lambda h: tek_hisse_tara(h, tarama_modu), bist30_hisseler)
-                        for sonuc in sonuclar:
-                            if sonuc is not None:
-                                firsatlar.append(sonuc)
-                        
-                    if firsatlar:
-                        st.success(f"✅ Tarama ışık hızında tamamlandı! {len(firsatlar)} adet hisse bulundu:")
-                        st.dataframe(pd.DataFrame(firsatlar).set_index("Hisse Kodu"), use_container_width=True)
-                    else:
-                        st.warning("📉 Şu an için seçilen kritere uyan bir varlık tespit edilemedi.")
-with tabs[1]:
-    st.subheader("🔍 Akıllı Asenkron Radar & Momentum")
-    
-    # --- 1. KISIM: SEÇİLİ HİSSE İÇİN STOKASTİK GÖSTERGESİ ---
-    df = stokastik_hesapla(df) # Hata veren kodu ait olduğu güvenli yere aldık
-    
-    son_k = df['Stoch_K'].iloc[-1]
-    son_d = df['Stoch_D'].iloc[-1]
-
-    stoch_sinyal = "NÖTR"
-    sinyal_rengi = "normal"
-
-    if son_k < 20 and son_k > son_d:
-        stoch_sinyal = "🚀 AŞIRI SATIM (AL SİNYALİ)"
-        sinyal_rengi = "off"
-    elif son_k > 80 and son_k < son_d:
-        stoch_sinyal = "⚠️ AŞIRI ALIM (SAT SİNYALİ)"
-        sinyal_rengi = "inverse"
-        
-    st.markdown("### 🌊 Seçili Hisse Anlık Stokastik (Momentum)")
-    c_stoch1, c_stoch2, c_stoch3 = st.columns(3)
-
-    with c_stoch1:
-        st.metric(label="Stoch %K (Hızlı)", value=f"{son_k:.2f}")
-    with c_stoch2:
-        st.metric(label="Stoch %D (Yavaş)", value=f"{son_d:.2f}")
-    with c_stoch3:
-        st.metric(label="Stoch Durumu", value=stoch_sinyal, delta="Trend Dönüşü Beklentisi" if "AŞIRI" in stoch_sinyal else None, delta_color=sinyal_rengi)
-        
-    st.divider() # Araya şık bir ayırıcı çizgi çeker
-    
-    # --- 2. KISIM: MEVCUT RADAR KODLARINIZ ---
-    # Bu çizginin altında daha önce yazdığımız şu kodlar kalmaya devam etmeli:
-    # if st.button("🚀 BİST Yapay Zeka Fırsat Radarını Çalıştır"):
-    #     ...
 with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])

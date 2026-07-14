@@ -218,29 +218,42 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
 
 # RANDOM FOREST MAKİNE ÖĞRENMESİ
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
+    # Orijinal df'i bozmamak için kopyasını alıyoruz
     df_ml = df[['Close', 'Volume']].copy()
     
-    # BIST için kritik özellikler (Features)
+    # Özellikleri (Features) hesaplıyoruz
     df_ml['Lag1'] = df_ml['Close'].shift(1)
     df_ml['Lag2'] = df_ml['Close'].shift(2)
     df_ml['SMA_10'] = df_ml['Close'].rolling(window=10).mean()
     df_ml['Hacim_Degisim'] = df_ml['Volume'].pct_change()
     
-    # RSI Hesaplaması (ML Modeli için)
+    # RSI Hesaplaması
     delta = df_ml['Close'].diff()
     gain = delta.where(delta > 0, 0).rolling(window=14).mean()
     loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
     rs = gain / (loss + 1e-9)
     df_ml['RSI_14'] = 100 - (100 / (1 + rs))
     
+    # 🎯 KRİTİK ADIM 1: Sonsuz (inf / -inf) değerleri NaN ile değiştiriyoruz
+    df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
+    
+    # 🎯 KRİTİK ADIM 2: Şimdi tüm NaN değerlerini güvenle temizleyebiliriz
     df_ml.dropna(inplace=True)
     
+    # 🎯 KRİTİK ADIM 3: Veri seti boş mu veya çok mu yetersiz kontrolü
+    if len(df_ml) < 15:
+        # Eğer yeterli veri yoksa eğitim yapmadan basit bir projeksiyon döndür (Uygulamanın çökmesini önler)
+        son_fiyat = float(df['Close'].iloc[-1])
+        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+        tahminler = [son_fiyat * (1 + (i * 0.001)) for i in range(1, gelecek_gun + 1)] # Ufak bir trend simülasyonu
+        return tarihler, tahminler
+
+    # Veriler temiz olduğuna göre eğitime geçebiliriz
     X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
     y = df_ml['Close']
     
-    # Model ağaç sayısını 200'e çıkarıp, aşırı öğrenmeyi (overfitting) engelliyoruz
     model = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
-    model.fit(X.values, y.values) 
+    model.fit(X.values, y.values) # Artık burada hata vermeyecektir!
     
     tahminler = []
     son_satir = df_ml.iloc[-1]
@@ -248,20 +261,27 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     lag1 = son_satir['Close']
     lag2 = son_satir['Lag1']
     sma_10 = son_satir['SMA_10']
-    hacim_deg = son_satir['Hacim_Degisim'] if not np.isnan(son_satir['Hacim_Degisim']) else 0
-    rsi_14 = son_satir['RSI_14'] if not np.isnan(son_satir['RSI_14']) else 50
+    hacim_deg = son_satir['Hacim_Degisim']
+    rsi_14 = son_satir['RSI_14']
     
     for _ in range(gelecek_gun):
         pred = model.predict([[lag1, lag2, sma_10, hacim_deg, rsi_14]])[0]
         tahminler.append(pred)
         
-        # Gelecek iterasyon için değerleri kaydır
+        # Gelecek iterasyon için değerleri kaydır (Döngünün İÇİNDE olmalı)
         lag2 = lag1
         lag1 = pred
         sma_10 = (sma_10 * 9 + pred) / 10
         # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
         hacim_deg = 0.0 
         rsi_14 = 50.0 
+        
+    # Döngü bittikten sonra tarihleri hesapla ve sonucu dön (Döngünün DIŞINDA olmalı)
+    tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+    return tarihler, tahminler
+        # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
+    hacim_deg = 0.0 
+    rsi_14 = 50.0 
         
     tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler

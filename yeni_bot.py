@@ -620,6 +620,21 @@ with tabs[1]:
                 return None
 
         firsatlar = []
+        # Bu listeyi executor satırından hemen önce tanımlayın:
+        bist30_hisseler = [
+            "AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", 
+            "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", 
+            "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", 
+            "TUPRS.IS", "YKBNK.IS"
+        ]
+        
+        firsatlar = []
+        # Listenin altındaki mevcut kodunuz:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            sonuclar = executor.map(ai_hisse_tara, bist30_hisseler) # Artık bu satır listeyi tanıyacak!
+            for sonuc in sonuclar:
+                if sonuc is not None:
+                    firsatlar.append(sonuc)
         with ThreadPoolExecutor(max_workers=10) as executor:
             sonuclar = executor.map(ai_hisse_tara, bist30_hisseler)
             for sonuc in sonuclar:

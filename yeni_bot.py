@@ -682,7 +682,7 @@ with tabs[1]:
                         return 'color: #FF0000; font-weight: bold' 
                 return ''
 
-            st.dataframe(df_firsatlar.style.applymap(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'Stoch %K']), use_container_width=True)
+            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'Stoch %K']), use_container_width=True)
             
             st.markdown("### 🏆 En Yüksek Getiri Potansiyeline Sahip Top 5")
             top_5 = df_firsatlar.nlargest(5, 'Potansiyel (%)')

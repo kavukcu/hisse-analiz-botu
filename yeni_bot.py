@@ -391,6 +391,34 @@ with tabs[0]:
 # ... (Diğer mevcut sekmeleriniz tabs[1], tabs[2] vb. şeklinde burada yer alacak) ...
 
 # === Sekme 10: Yeni Yapay Zeka Modülümüz ===
+# Veriyi önce stokastik fonksiyondan geçiriyoruz
+df = stokastik_hesapla(df)
+
+# Güncel (en son) değerleri alıyoruz
+son_k = df['Stoch_K'].iloc[-1]
+son_d = df['Stoch_D'].iloc[-1]
+
+# Stoch sinyali üretme mantığı
+stoch_sinyal = "NÖTR"
+sinyal_rengi = "normal"
+
+if son_k < 20 and son_k > son_d:
+    stoch_sinyal = "🚀 AŞIRI SATIM (AL SİNYALİ)"
+    sinyal_rengi = "off" # Streamlit metriklerinde yeşil etki için 
+elif son_k > 80 and son_k < son_d:
+    stoch_sinyal = "⚠️ AŞIRI ALIM (SAT SİNYALİ)"
+    sinyal_rengi = "inverse" # Kırmızı etki için
+    
+# Arayüzde gösterme (İstediğiniz bir sekmenin içine, örneğin with tabs[0]: altına koyabilirsiniz)
+st.markdown("### 🌊 Stokastik Osilatör (Momentum)")
+c_stoch1, c_stoch2, c_stoch3 = st.columns(3)
+
+with c_stoch1:
+    st.metric(label="Stoch %K (Hızlı)", value=f"{son_k:.2f}")
+with c_stoch2:
+    st.metric(label="Stoch %D (Yavaş)", value=f"{son_d:.2f}")
+with c_stoch3:
+    st.metric(label="Stoch Durumu", value=stoch_sinyal, delta="Trend Dönüşü Olabilir" if "AŞIRI" in stoch_sinyal else None, delta_color=sinyal_rengi)
 with tabs[10]:
     st.subheader("🧠 v85 AI Ensemble & Kurumsal Karar Motoru (BIST Özel)")
     
@@ -774,7 +802,25 @@ def calculate_adx(df, period=14):
     df["MINUS_DI"]=minus_di
     df["ADX"]=adx
     return df
-
+def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
+    """Hisse verisi üzerinden Stochastic Oscillator (%K ve %D) hesaplar."""
+    try:
+        # En düşük 'Low' ve en yüksek 'High' değerlerini bul
+        low_min = df['Low'].rolling(window=k_periyot).min()
+        high_max = df['High'].rolling(window=k_periyot).max()
+        
+        # %K Çizgisi (Hızlı Çizgi)
+        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
+        
+        # %D Çizgisi (Yavaş Çizgi - %K'nın 3 günlük hareketli ortalaması)
+        df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
+        
+        return df
+    except Exception as e:
+        # Herhangi bir veri hatasında (örneğin High/Low sütunu yoksa) boş dönme
+        df['Stoch_K'] = 50.0
+        df['Stoch_D'] = 50.0
+        return df
 def calculate_supertrend(df, period=10, multiplier=3):
     hl2=(df["High"]+df["Low"])/2
     tr=pd.concat([

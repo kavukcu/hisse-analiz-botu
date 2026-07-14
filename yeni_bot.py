@@ -617,8 +617,18 @@ with tabs[1]:
                 if isinstance(t_df.columns, pd.MultiIndex): 
                     t_df.columns = t_df.columns.droplevel(1)
                 
+                # --- STOKASTİK HESAPLAMA ---
                 t_df = stokastik_hesapla(t_df)
                 son_k_degeri = float(t_df['Stoch_K'].iloc[-1])
+                
+                # --- YENİ: RSI HESAPLAMA (Güvenli ve Hızlı Yöntem) ---
+                delta = t_df['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                rs = gain / loss
+                t_df['RSI'] = 100 - (100 / (1 + rs))
+                son_rsi = float(t_df['RSI'].iloc[-1])
+                # -----------------------------------------------------
                 
                 karar = institutional_decision(t_df)
                 ai_tahmin = ensemble_prediction(t_df)
@@ -632,6 +642,7 @@ with tabs[1]:
                     "Anlık Fiyat": round(fiyat, 2),
                     "Hedef Fiyat (AI)": round(hedef_fiyat, 2),
                     "Potansiyel (%)": round(getiri_potansiyeli, 2),
+                    "Anlık RSI": round(son_rsi, 2), # <--- YENİ SÜTUN EKLENDİ
                     "Stoch %K": round(son_k_degeri, 2), 
                     "AI Sinyali": ai_tahmin["signal"],
                     "Kurumsal Karar": karar["decision"],
@@ -664,7 +675,8 @@ with tabs[1]:
         progress_text.empty() 
         
         if firsatlar:
-            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef Fiyat (AI)", "Potansiyel (%)", "Stoch %K", "AI Sinyali", "Kurumsal Karar", "AI Güven Skoru", "Genel Puan"]]
+            # Anlık RSI Sütunu sıralamaya dahil edildi
+            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef Fiyat (AI)", "Potansiyel (%)", "Anlık RSI", "Stoch %K", "AI Sinyali", "Kurumsal Karar", "AI Güven Skoru", "Genel Puan"]]
             df_firsatlar = df_firsatlar.sort_values(by="Genel Puan", ascending=False).set_index("Hisse")
             
             st.success("✅ AI Fırsat Taraması Tamamlandı!")
@@ -676,13 +688,16 @@ with tabs[1]:
                     if 'SAT' in val.upper() or 'DISTRIBUTION' in val.upper(): 
                         return 'color: #FF0000; font-weight: bold'
                 elif isinstance(val, (int, float)):
-                    if val < 20: 
+                    # RSI (30 altı) ve Stoch (20 altı) için yeşil; RSI (70 üstü) ve Stoch (80 üstü) için kırmızı.
+                    # 30 ve 70 her iki osilatör için de genel destek/direnç mantığına uygundur.
+                    if val < 30: 
                         return 'color: #00FF00; font-weight: bold' 
-                    if val > 80: 
+                    if val > 70: 
                         return 'color: #FF0000; font-weight: bold' 
                 return ''
 
-            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'Stoch %K']), use_container_width=True)
+            # 'applymap' yerine 'map' kullanıldı ve renklendirme filtresine 'Anlık RSI' eklendi!
+            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'Stoch %K', 'Anlık RSI']), use_container_width=True)
             
             st.markdown("### 🏆 En Yüksek Getiri Potansiyeline Sahip Top 5")
             top_5 = df_firsatlar.nlargest(5, 'Potansiyel (%)')

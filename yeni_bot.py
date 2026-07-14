@@ -9,7 +9,34 @@ from datetime import datetime, timedelta
 import requests
 from sklearn.ensemble import RandomForestRegressor
 from concurrent.futures import ThreadPoolExecutor
-import numpy as np # Eğer yukarıda ekli değilse bunu da import listesine ekleyin
+import numpy as np 
+def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
+    try:
+        low_min = df['Low'].rolling(window=k_periyot).min()
+        high_max = df['High'].rolling(window=k_periyot).max()
+        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
+        df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
+        return df
+    except Exception as e:
+        df['Stoch_K'] = 50.0
+        df['Stoch_D'] = 50.0
+        return df
+    except Exception as e: # <--- BU KISIM EKSİK! Bunu try ile aynı hizaya ekleyin
+        df['Stoch_K'] = 50.0
+        df['Stoch_D'] = 50.0
+        return df
+        
+        # En düşük 'Low' ve en yüksek 'High' değerlerini bul
+        low_min = df['Low'].rolling(window=k_periyot).min()
+        high_max = df['High'].rolling(window=k_periyot).max()
+        
+        # %K Çizgisi (Hızlı Çizgi)
+        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
+        
+        # %D Çizgisi (Yavaş Çizgi - %K'nın 3 günlük hareketli ortalaması)
+        df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
+        
+        return df
 
 # --- İSTATİSTİKSEL ANALİZ FONKSİYONU ---
 def python_istatistik_analizi(df):
@@ -365,6 +392,7 @@ if not df.empty:
 
 # 1. ADIM: Önce sekmeleri (tabs) tanımlıyoruz.
 tabs = st.tabs([
+    "df = stokastik_hesapla(df)"
     "📈 SMC & Quant Fiyat Hareketi", 
     "🔍 Akıllı Asenkron Radar", 
     "💼 Cüzdan & Akıllı Stop", 
@@ -388,10 +416,6 @@ with tabs[0]:
     with c_ayar1:
         pass # Buradan itibaren mevcut tabs[0] kodlarınız devam edecek...
 
-# ... (Diğer mevcut sekmeleriniz tabs[1], tabs[2] vb. şeklinde burada yer alacak) ...
-
-# === Sekme 10: Yeni Yapay Zeka Modülümüz ===
-# Veriyi önce stokastik fonksiyondan geçiriyoruz
 df = stokastik_hesapla(df)
 
 # Güncel (en son) değerleri alıyoruz
@@ -802,25 +826,6 @@ def calculate_adx(df, period=14):
     df["MINUS_DI"]=minus_di
     df["ADX"]=adx
     return df
-def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
-    """Hisse verisi üzerinden Stochastic Oscillator (%K ve %D) hesaplar."""
-    try:
-        # En düşük 'Low' ve en yüksek 'High' değerlerini bul
-        low_min = df['Low'].rolling(window=k_periyot).min()
-        high_max = df['High'].rolling(window=k_periyot).max()
-        
-        # %K Çizgisi (Hızlı Çizgi)
-        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
-        
-        # %D Çizgisi (Yavaş Çizgi - %K'nın 3 günlük hareketli ortalaması)
-        df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
-        
-        return df
-    except Exception as e:
-        # Herhangi bir veri hatasında (örneğin High/Low sütunu yoksa) boş dönme
-        df['Stoch_K'] = 50.0
-        df['Stoch_D'] = 50.0
-        return df
 def calculate_supertrend(df, period=10, multiplier=3):
     hl2=(df["High"]+df["Low"])/2
     tr=pd.concat([

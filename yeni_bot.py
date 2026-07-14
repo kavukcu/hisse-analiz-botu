@@ -69,18 +69,74 @@ def python_istatistik_analizi(df):
         }
 # --- YAPAY ZEKA VE KURUMSAL MOTOR FONKSİYONLARI (KODUN ÜST KISMINA EKLENECEK) ---
 
+from sklearn.ensemble import RandomForestRegressor
+import numpy as np
+
 def ensemble_prediction(df):
-    """Basit bir Ensemble AI Karar Simülasyonu / Hesaplaması"""
     try:
-        son_fiyat = float(df['Close'].iloc[-1])
-        # Gerçek modelinizi buraya entegre edebilirsiniz, şimdilik UI test için:
+        # 1. EĞİTİM VERİLERİNİ (FEATURES) HAZIRLA
+        # Hata olmaması için Stoch ve RSI'ı fonksiyon içinde de garanti altına alıyoruz
+        t_df = stokastik_hesapla(df.copy())
+        
+        delta = t_df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / loss
+        t_df['RSI'] = 100 - (100 / (1 + rs))
+
+        # Ekstra güç için basit hareketli ortalamalar
+        t_df['SMA_10'] = t_df['Close'].rolling(window=10).mean()
+        t_df['SMA_50'] = t_df['Close'].rolling(window=50).mean()
+
+        # 2. YAPAY ZEKA ARTIK BU GÖSTERGELERİ KULLANARAK EĞİTİLECEK!
+        features = ['Close', 'Volume', 'RSI', 'Stoch_K', 'Stoch_D', 'SMA_10', 'SMA_50']
+        
+        # Hedef (Target): 5 gün sonraki kapanış fiyatını tahmin etmeye çalışsın
+        t_df['Target'] = t_df['Close'].shift(-5)
+        
+        # NaN (boş) verileri temizle ki yapay zeka hata vermesin
+        ml_df = t_df.dropna()
+
+        # Yeterli veri yoksa güvenlik çıkışı
+        if len(ml_df) < 50:
+            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0}
+
+        X = ml_df[features]
+        y = ml_df['Target']
+
+        # Tahmin edilecek 'Bugünün' verisi
+        son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
+
+        # 3. MODELİ EĞİT (RandomForest)
+        # N_estimators: Ormandaki ağaç sayısı.
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X, y)
+
+        # 4. GELECEĞİ TAHMİN ET
+        hedef_fiyat = model.predict(son_veri)[0]
+        anlik_fiyat = t_df['Close'].iloc[-1]
+        
+        # 5. SİNYAL VE GÜVEN SKORU ÜRETİMİ
+        getiri_potansiyeli = ((hedef_fiyat - anlik_fiyat) / anlik_fiyat) * 100
+        
+        sinyal = "NÖTR"
+        if getiri_potansiyeli > 2.5:
+            sinyal = "🚀 GÜÇLÜ AL"
+        elif getiri_potansiyeli < -2.0:
+            sinyal = "⚠️ SAT"
+
+        # Modelin tahminine göre dinamik güven skoru (0-100 arası)
+        guven_skoru = min(abs(getiri_potansiyeli) * 8 + 55, 99.0)
+
         return {
-            "signal": "GÜÇLÜ AL" if df['Close'].iloc[-1] > df['Close'].rolling(20).mean().iloc[-1] else "TUT / SAT",
-            "rf_prediction": round(son_fiyat * 1.02, 2), # %2'lik kısa vade tahmini
-            "confidence": 85
+            "rf_prediction": hedef_fiyat,
+            "signal": sinyal,
+            "confidence": round(guven_skoru, 1)
         }
-    except:
-        return {"signal": "NÖTR", "rf_prediction": 0.0, "confidence": 50}
+    except Exception as e:
+        # Hata durumunda varsayılan güvenli değerler
+        anlik = df['Close'].iloc[-1] if not df.empty else 0
+        return {"rf_prediction": anlik, "signal": "HATA", "confidence": 0}
 
 def institutional_decision(df):
     """SMC & Kurumsal Risk Motoru"""

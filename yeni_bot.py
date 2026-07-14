@@ -319,8 +319,8 @@ if not df.empty:
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    df['EMA_12'] = ema(df['Close'],12)
-    df['EMA_26'] = ema(df['Close'],26)
+    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()   
+    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()    
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']

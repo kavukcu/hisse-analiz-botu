@@ -392,7 +392,6 @@ if not df.empty:
 
 # 1. ADIM: Önce sekmeleri (tabs) tanımlıyoruz.
 tabs = st.tabs([
-    "df = stokastik_hesapla(df)"
     "📈 SMC & Quant Fiyat Hareketi", 
     "🔍 Akıllı Asenkron Radar", 
     "💼 Cüzdan & Akıllı Stop", 
@@ -645,63 +644,97 @@ with tabs[1]:
 
             if st.button("🚀 Hızlı Asenkron Radarı Çalıştır"):
                 if st.button("🚀 BİST Yapay Zeka Fırsat Radarını Çalıştır"):
-                    with st.spinner("🚀 BİST30 Hisseleri AI Ensemble & Kurumsal Karar Motoru ile Taranıyor..."):
-        # Terminal v89 AI Radar Pipeline entegrasyonu
-                        bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS"] 
+                    bist30_hisseler = [
+            "AKBNK.IS", "ALARK.IS", "ASELS.IS", "ASTOR.IS", "BIMAS.IS", 
+            "BRSAN.IS", "DOAS.IS", "ENKAI.IS", "EREGL.IS", "FROTO.IS", 
+            "GARAN.IS", "GUBRF.IS", "HEKTS.IS", "ISCTR.IS", "KCHOL.IS", 
+            "KONTR.IS", "KOZAL.IS", "KRDMD.IS", "ODAS.IS", "PGSUS.IS", 
+            "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", 
+            "TOASO.IS", "TUPRS.IS", "YKBNK.IS"
+        ]
+        
+        progress_text = st.empty()
+        progress_bar = st.progress(0)
         
         def ai_hisse_tara(ticker):
             try:
-                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=365), end=datetime.today(), progress=False, session=oturum)
+                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=365), end=datetime.today(), progress=False)
                 if t_df.empty: return None
                 if isinstance(t_df.columns, pd.MultiIndex): t_df.columns = t_df.columns.droplevel(1)
                 
-                # Sinyal kalitesi, teknik analiz ve risk skorunu birleştiren fonksiyonunuz
+                # --- YENİ: Stokastik hesaplamasını radar içine entegre ettik ---
+                t_df = stokastik_hesapla(t_df)
+                son_k = float(t_df['Stoch_K'].iloc[-1])
+                # ---------------------------------------------------------------
+                
                 karar = institutional_decision(t_df)
                 ai_tahmin = ensemble_prediction(t_df)
+                
                 fiyat = float(t_df['Close'].iloc[-1])
+                hedef_fiyat = float(ai_tahmin["rf_prediction"])
+                getiri_potansiyeli = ((hedef_fiyat - fiyat) / fiyat) * 100
                 
                 return {
                     "Hisse": ticker.replace(".IS", ""),
-                    "Fiyat": round(fiyat, 2),
-                    "AI Kararı": ai_tahmin["signal"],
+                    "Anlık Fiyat": round(fiyat, 2),
+                    "Hedef Fiyat (AI)": round(hedef_fiyat, 2),
+                    "Potansiyel (%)": round(getiri_potansiyeli, 2),
+                    "Stoch %K": round(son_k, 2), # <--- YENİ SÜTUN BURADA
+                    "AI Sinyali": ai_tahmin["signal"],
                     "Kurumsal Karar": karar["decision"],
-                    "Trend Rejimi": karar["regime"],
-                    "Genel Skor": karar["score"]
+                    "AI Güven Skoru": ai_tahmin["confidence"],
+                    "Genel Puan": karar["score"]
                 }
             except:
                 return None
 
         firsatlar = []
-        # Bu listeyi executor satırından hemen önce tanımlayın:
-        bist30_hisseler = [
-            "AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", 
-            "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", 
-            "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", 
-            "TUPRS.IS", "YKBNK.IS"
-        ]
+        toplam_hisse = len(bist30_hisseler)
         
-        firsatlar = []
-        # Listenin altındaki mevcut kodunuz:
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            sonuclar = executor.map(ai_hisse_tara, bist30_hisseler) # Artık bu satır listeyi tanıyacak!
-            for sonuc in sonuclar:
-                if sonuc is not None:
-                    firsatlar.append(sonuc)
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            sonuclar = executor.map(ai_hisse_tara, bist30_hisseler)
-            for sonuc in sonuclar:
-                if sonuc is not None:
-                    firsatlar.append(sonuc)
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            gelecek_sonuclar = {executor.submit(ai_hisse_tara, hisse): hisse for hisse in bist30_hisseler}
             
+            tamamlanan = 0
+            for gelecek in concurrent.futures.as_completed(gelecek_sonuclar):
+                hisse_adi = gelecek_sonuclar[gelecek].replace('.IS', '')
+                tamamlanan += 1
+                
+                yuzde = int((tamamlanan / toplam_hisse) * 100)
+                progress_bar.progress(yuzde)
+                progress_text.info(f"⏳ Taranıyor: {hisse_adi} ({tamamlanan}/{toplam_hisse})")
+                
+                sonuc = gelecek.result()
+                if sonuc is not None:
+                    firsatlar.append(sonuc)
+                    
+        progress_text.empty() 
+        
         if firsatlar:
-            # En yüksek skora göre sırala
-            df_firsatlar = pd.DataFrame(firsatlar).sort_values(by="Genel Skor", ascending=False).set_index("Hisse")
-            st.success(f"✅ AI Taraması tamamlandı! En yüksek potansiyelli BIST hisseleri:")
-            st.dataframe(df_firsatlar, use_container_width=True)
+            # Sütun sırasını belirleyip Stoch %K'yı daha öne alalım
+            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef Fiyat (AI)", "Potansiyel (%)", "Stoch %K", "AI Sinyali", "Kurumsal Karar", "AI Güven Skoru", "Genel Puan"]]
+            df_firsatlar = df_firsatlar.sort_values(by="Genel Puan", ascending=False).set_index("Hisse")
             
-            # En yüksek skorlu hisseyi Bar Chart ile göster
-            st.bar_chart(df_firsatlar["Genel Skor"])
+            st.success("✅ AI Fırsat Taraması Tamamlandı!")
+            
+            # --- YENİ: Renklendirme mantığına Stokastik'i ekledik ---
+            def color_signals(val):
+                if isinstance(val, str):
+                    if 'AL' in val.upper() or 'ACCUMULATION' in val.upper(): return 'color: #00FF00; font-weight: bold'
+                    if 'SAT' in val.upper() or 'DISTRIBUTION' in val.upper(): return 'color: #FF0000; font-weight: bold'
+                elif isinstance(val, (int, float)):
+                    # Yeni Stoch Kuralı:
+                    if val < 20: return 'color: #00FF00; font-weight: bold' # 20 altı yeşil (Dipten dönüş)
+                    if val > 80: return 'color: #FF0000; font-weight: bold' # 80 üstü kırmızı (Tepe noktası)
+                return ''
+
+            st.dataframe(df_firsatlar.style.applymap(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'Stoch %K']), use_container_width=True)
+            
+            st.markdown("### 🏆 En Yüksek Getiri Potansiyeline Sahip Top 5")
+            top_5 = df_firsatlar.nlargest(5, 'Potansiyel (%)')
+            st.bar_chart(top_5['Potansiyel (%)'])
         else:
+            st.error("❌ Tarama yapılamadı veya internet bağlantınızda sorun var.")
             st.warning("📉 Tarama yapılamadı veya kriterlere uyan hisse bulunamadı.")
 with st.spinner("🚀 BİST Hisseleri Multi-Threading (Asenkron) ile Taranıyor. Bu işlem saniyeler sürecektir..."):
                     bist30_hisseler = ["AKBNK.IS", "ASELS.IS", "BIMAS.IS", "EREGL.IS", "FROTO.IS", "GARAN.IS", "ISCTR.IS", "KCHOL.IS", "PGSUS.IS", "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", "TOASO.IS", "TUPRS.IS", "YKBNK.IS", "ENKAI.IS", "KRDMD.IS", "PETKM.IS"] 
@@ -718,6 +751,41 @@ with st.spinner("🚀 BİST Hisseleri Multi-Threading (Asenkron) ile Taranıyor.
                         st.dataframe(pd.DataFrame(firsatlar).set_index("Hisse Kodu"), use_container_width=True)
                     else:
                         st.warning("📉 Şu an için seçilen kritere uyan bir varlık tespit edilemedi.")
+with tabs[1]:
+    st.subheader("🔍 Akıllı Asenkron Radar & Momentum")
+    
+    # --- 1. KISIM: SEÇİLİ HİSSE İÇİN STOKASTİK GÖSTERGESİ ---
+    df = stokastik_hesapla(df) # Hata veren kodu ait olduğu güvenli yere aldık
+    
+    son_k = df['Stoch_K'].iloc[-1]
+    son_d = df['Stoch_D'].iloc[-1]
+
+    stoch_sinyal = "NÖTR"
+    sinyal_rengi = "normal"
+
+    if son_k < 20 and son_k > son_d:
+        stoch_sinyal = "🚀 AŞIRI SATIM (AL SİNYALİ)"
+        sinyal_rengi = "off"
+    elif son_k > 80 and son_k < son_d:
+        stoch_sinyal = "⚠️ AŞIRI ALIM (SAT SİNYALİ)"
+        sinyal_rengi = "inverse"
+        
+    st.markdown("### 🌊 Seçili Hisse Anlık Stokastik (Momentum)")
+    c_stoch1, c_stoch2, c_stoch3 = st.columns(3)
+
+    with c_stoch1:
+        st.metric(label="Stoch %K (Hızlı)", value=f"{son_k:.2f}")
+    with c_stoch2:
+        st.metric(label="Stoch %D (Yavaş)", value=f"{son_d:.2f}")
+    with c_stoch3:
+        st.metric(label="Stoch Durumu", value=stoch_sinyal, delta="Trend Dönüşü Beklentisi" if "AŞIRI" in stoch_sinyal else None, delta_color=sinyal_rengi)
+        
+    st.divider() # Araya şık bir ayırıcı çizgi çeker
+    
+    # --- 2. KISIM: MEVCUT RADAR KODLARINIZ ---
+    # Bu çizginin altında daha önce yazdığımız şu kodlar kalmaya devam etmeli:
+    # if st.button("🚀 BİST Yapay Zeka Fırsat Radarını Çalıştır"):
+    #     ...
 with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])

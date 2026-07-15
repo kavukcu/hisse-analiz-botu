@@ -70,18 +70,63 @@ def python_istatistik_analizi(df):
 # --- YAPAY ZEKA VE KURUMSAL MOTOR FONKSİYONLARI (KODUN ÜST KISMINA EKLENECEK) ---
 
 def ensemble_prediction(df):
-    """Basit bir Ensemble AI Karar Simülasyonu / Hesaplaması"""
     try:
-        son_fiyat = float(df['Close'].iloc[-1])
-        # Gerçek modelinizi buraya entegre edebilirsiniz, şimdilik UI test için:
-        return {
-            "signal": "GÜÇLÜ AL" if df['Close'].iloc[-1] > df['Close'].rolling(20).mean().iloc[-1] else "TUT / SAT",
-            "rf_prediction": round(son_fiyat * 1.02, 2), # %2'lik kısa vade tahmini
-            "confidence": 85
-        }
-    except:
-        return {"signal": "NÖTR", "rf_prediction": 0.0, "confidence": 50}
+        t_df = stokastik_hesapla(df.copy())
+        
+        delta = t_df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / loss
+        t_df['RSI'] = 100 - (100 / (1 + rs))
 
+        t_df['SMA_10'] = t_df['Close'].rolling(window=10).mean()
+        t_df['SMA_50'] = t_df['Close'].rolling(window=50).mean()
+
+        features = ['Close', 'Volume', 'RSI', 'Stoch_K', 'Stoch_D', 'SMA_10', 'SMA_50']
+        t_df['Target'] = t_df['Close'].shift(-5)
+        
+        ml_df = t_df.dropna()
+
+        if len(ml_df) < 50:
+            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
+
+        X = ml_df[features]
+        y = ml_df['Target']
+
+        son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
+
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X, y)
+
+        hedef_fiyat = model.predict(son_veri)[0]
+        anlik_fiyat = t_df['Close'].iloc[-1]
+        
+        getiri_potansiyeli = ((hedef_fiyat - anlik_fiyat) / anlik_fiyat) * 100
+        
+        sinyal = "NÖTR"
+        if getiri_potansiyeli > 2.5:
+            sinyal = "🚀 GÜÇLÜ AL"
+        elif getiri_potansiyeli < -2.0:
+            sinyal = "⚠️ SAT"
+
+        guven_skoru = min(abs(getiri_potansiyeli) * 8 + 55, 99.0)
+
+        # İŞTE BURAYA "expected_return_pct" ANAHTARINI EKLEDİK!
+        return {
+            "rf_prediction": round(hedef_fiyat, 2),
+            "signal": sinyal,
+            "confidence": round(guven_skoru, 1),
+            "expected_return_pct": round(getiri_potansiyeli, 2) 
+        }
+    except Exception as e:
+        anlik = df['Close'].iloc[-1] if not df.empty else 0
+        # Hata durumundaki listeye de güvenli varsayılan değerini ekledik
+        return {
+            "rf_prediction": anlik, 
+            "signal": "HATA", 
+            "confidence": 0,
+            "expected_return_pct": 0.0
+        }
 def institutional_decision(df):
     """SMC & Kurumsal Risk Motoru"""
     try:

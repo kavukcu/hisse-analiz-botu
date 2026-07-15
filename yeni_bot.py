@@ -75,11 +75,13 @@ import pandas as pd
 
 def ensemble_prediction(df):
     try:
+        import numpy as np
+        import pandas as pd
+        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+        
         t_df = stokastik_hesapla(df.copy())
         
-        # =========================================================
-        # 1. MEVCUT VE TEMEL GÖSTERGELER (Momentum & Trend)
-        # =========================================================
+        # --- 1. GÖSTERGELER ---
         # RSI
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
@@ -94,43 +96,35 @@ def ensemble_prediction(df):
         macd_signal = macd.ewm(span=9, adjust=False).mean()
         t_df['MACD_Hist'] = macd - macd_signal
 
-        # Bollinger Bantları Konumu
+        # Bollinger Bantları (Sıfıra bölünme korumalı)
         bb_orta = t_df['Close'].rolling(window=20).mean()
         bb_std = t_df['Close'].rolling(window=20).std()
         bb_ust = bb_orta + (bb_std * 2)
         bb_alt = bb_orta - (bb_std * 2)
-        t_df['BB_Pozisyon'] = (t_df['Close'] - bb_alt) / (bb_ust - bb_alt)
+        bb_fark = (bb_ust - bb_alt).replace(0, 0.0001) # Fark sıfırsa küçük bir sayı ata
+        t_df['BB_Pozisyon'] = (t_df['Close'] - bb_alt) / bb_fark
 
-        # =========================================================
-        # 2. YENİ: PROFESYONEL QUANT GÖSTERGELERİ
-        # =========================================================
-        # YENİ: ATR (Average True Range) - Hisse ne kadar oynak?
+        # ATR (Güvenli Pandas Yöntemi)
         high_low = t_df['High'] - t_df['Low']
-        high_close = np.abs(t_df['High'] - t_df['Close'].shift())
-        low_close = np.abs(t_df['Low'] - t_df['Close'].shift())
+        high_close = (t_df['High'] - t_df['Close'].shift()).abs()
+        low_close = (t_df['Low'] - t_df['Close'].shift()).abs()
         ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = np.max(ranges, axis=1)
-        t_df['ATR'] = true_range.rolling(14).mean()
+        t_df['ATR'] = ranges.max(axis=1).rolling(14).mean()
 
-        # YENİ: OBV (On-Balance Volume) - Kurumsal Para Girişi var mı?
-        # Fiyat artarken hacim yükseliyorsa akıllı para içeri giriyordur!
+        # OBV ve Hacim
         obv = (np.sign(t_df['Close'].diff()) * t_df['Volume']).fillna(0).cumsum()
         obv_ema = obv.ewm(span=10).mean()
         t_df['OBV_Trend'] = np.where(obv > obv_ema, 1, -1) 
-
-        # Hacim İvmesi (Bir önceki güne göre hacim değişimi)
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
 
-        # =========================================================
-        # 3. YAPAY ZEKA HEDEF MÜHENDİSLİĞİ (Target Engineering)
-        # =========================================================
-        # KÜÇÜK AMA DAHİYANE DEĞİŞİKLİK: AI artık FİYATI tahmin etmiyor.
-        # "Bu hisse 5 gün sonra % kaç yükselir/düşer?" bunu tahmin ediyor!
+        # Hedef Getiri
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        # AI'ın bakacağı nihai karnesi
         features = ['RSI', 'Stoch_K', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'OBV_Trend', 'Vol_Change']
         
+        # --- 2. HAYATİ FİLTRE: Sonsuz Değerleri Temizle ---
+        # pct_change ve bölme işlemlerinden gelebilecek 'inf' değerlerini 'NaN' yapar, sonra siler.
+        t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
         if len(ml_df) < 60:
@@ -140,40 +134,26 @@ def ensemble_prediction(df):
         y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # =========================================================
-        # 4. YÜKSEK KONSEY: VOTING REGRESSOR ENSEMBLE
-        # =========================================================
-        # Model 1: Sağlamcı (Dengeli öğrenme)
+        # --- 3. ÇİFT MOTORLU YAPAY ZEKA (Voting) ---
         rf = RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=4, random_state=42)
-        # Model 2: Avcı (Hatalara odaklanan agresif öğrenme)
         gb = GradientBoostingRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42)
         
-        # YENİ: Modelleri kapıştırıp ortak karar aldıran Sklearn konseyi
         ensemble = VotingRegressor(estimators=[('rf', rf), ('gb', gb)])
         ensemble.fit(X, y)
 
-        # Tahmin edilen değer artık bir YÜZDE (Örn: 4.2 veya -1.5)
-        beklenen_getiri_pct = ensemble.predict(son_veri)[0]
-        
-        # Yüzdelik beklentiyi yeniden fiyata çevir (Ekranda hedef fiyat görmek için)
-        anlik_fiyat = t_df['Close'].iloc[-1]
+        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
+        anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
-        # =========================================================
-        # 5. ÜÇLÜ TEYİT VE SİNYAL MEKANİZMASI
-        # =========================================================
-        # AI yükselecek dese bile, teknik olarak mantıklı mı?
+        # --- 4. SİNYAL ÜRETİMİ ---
         macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
         para_girisi = t_df['OBV_Trend'].iloc[-1] == 1
         bb_ucuz = t_df['BB_Pozisyon'].iloc[-1] < 0.35
         
-        # Kaç farklı gösterge "AL" diyor?
         teyit_skoru = sum([macd_pozitif, para_girisi, bb_ucuz])
-
         sinyal = "NÖTR"
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
 
-        # GÜÇLÜ AL Kuralı: AI en az %2.5 getiri bekleyecek VE en az 2 teknik gösterge onaylayacak!
         if beklenen_getiri_pct > 2.5 and teyit_skoru >= 2:
             sinyal = "🚀 GÜÇLÜ AL"
             guven_skoru = min(guven_skoru + 20, 99.0)
@@ -190,11 +170,11 @@ def ensemble_prediction(df):
             "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
     except Exception as e:
-        anlik = df['Close'].iloc[-1] if not df.empty else 0
+        anlik = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         return {
             "rf_prediction": anlik, 
             "signal": "HATA", 
-            "confidence": 0,
+            "confidence": 0.0,
             "expected_return_pct": 0.0
         }
 def institutional_decision(df):

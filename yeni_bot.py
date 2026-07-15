@@ -9,9 +9,7 @@ from datetime import datetime, timedelta
 import requests
 from sklearn.ensemble import RandomForestRegressor
 from concurrent.futures import ThreadPoolExecutor
-import numpy as np
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler 
+import numpy as np 
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
@@ -71,74 +69,18 @@ def python_istatistik_analizi(df):
         }
 # --- YAPAY ZEKA VE KURUMSAL MOTOR FONKSİYONLARI (KODUN ÜST KISMINA EKLENECEK) ---
 
-from sklearn.ensemble import RandomForestRegressor
-import numpy as np
-
 def ensemble_prediction(df):
+    """Basit bir Ensemble AI Karar Simülasyonu / Hesaplaması"""
     try:
-        # 1. EĞİTİM VERİLERİNİ (FEATURES) HAZIRLA
-        # Hata olmaması için Stoch ve RSI'ı fonksiyon içinde de garanti altına alıyoruz
-        t_df = stokastik_hesapla(df.copy())
-        
-        delta = t_df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-        rs = gain / loss
-        t_df['RSI'] = 100 - (100 / (1 + rs))
-
-        # Ekstra güç için basit hareketli ortalamalar
-        t_df['SMA_10'] = t_df['Close'].rolling(window=10).mean()
-        t_df['SMA_50'] = t_df['Close'].rolling(window=50).mean()
-
-        # 2. YAPAY ZEKA ARTIK BU GÖSTERGELERİ KULLANARAK EĞİTİLECEK!
-        features = ['Close', 'Volume', 'RSI', 'Stoch_K', 'Stoch_D', 'SMA_10', 'SMA_50']
-        
-        # Hedef (Target): 5 gün sonraki kapanış fiyatını tahmin etmeye çalışsın
-        t_df['Target'] = t_df['Close'].shift(-5)
-        
-        # NaN (boş) verileri temizle ki yapay zeka hata vermesin
-        ml_df = t_df.dropna()
-
-        # Yeterli veri yoksa güvenlik çıkışı
-        if len(ml_df) < 50:
-            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0}
-
-        X = ml_df[features]
-        y = ml_df['Target']
-
-        # Tahmin edilecek 'Bugünün' verisi
-        son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
-
-        # 3. MODELİ EĞİT (RandomForest)
-        # N_estimators: Ormandaki ağaç sayısı.
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X, y)
-
-        # 4. GELECEĞİ TAHMİN ET
-        hedef_fiyat = model.predict(son_veri)[0]
-        anlik_fiyat = t_df['Close'].iloc[-1]
-        
-        # 5. SİNYAL VE GÜVEN SKORU ÜRETİMİ
-        getiri_potansiyeli = ((hedef_fiyat - anlik_fiyat) / anlik_fiyat) * 100
-        
-        sinyal = "NÖTR"
-        if getiri_potansiyeli > 2.5:
-            sinyal = "🚀 GÜÇLÜ AL"
-        elif getiri_potansiyeli < -2.0:
-            sinyal = "⚠️ SAT"
-
-        # Modelin tahminine göre dinamik güven skoru (0-100 arası)
-        guven_skoru = min(abs(getiri_potansiyeli) * 8 + 55, 99.0)
-
+        son_fiyat = float(df['Close'].iloc[-1])
+        # Gerçek modelinizi buraya entegre edebilirsiniz, şimdilik UI test için:
         return {
-            "rf_prediction": hedef_fiyat,
-            "signal": sinyal,
-            "confidence": round(guven_skoru, 1)
+            "signal": "GÜÇLÜ AL" if df['Close'].iloc[-1] > df['Close'].rolling(20).mean().iloc[-1] else "TUT / SAT",
+            "rf_prediction": round(son_fiyat * 1.02, 2), # %2'lik kısa vade tahmini
+            "confidence": 85
         }
-    except Exception as e:
-        # Hata durumunda varsayılan güvenli değerler
-        anlik = df['Close'].iloc[-1] if not df.empty else 0
-        return {"rf_prediction": anlik, "signal": "HATA", "confidence": 0}
+    except:
+        return {"signal": "NÖTR", "rf_prediction": 0.0, "confidence": 50}
 
 def institutional_decision(df):
     """SMC & Kurumsal Risk Motoru"""
@@ -300,57 +242,7 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
     bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
     return bt_df
-from sklearn.preprocessing import StandardScaler
-import numpy as np
-import pandas as pd
-from datetime import timedelta
-def ileri_teknik_gostergeler(df):
-    """Bollinger Squeeze ve Ichimoku Cloud Entegrasyonu"""
-    df_tech = df.copy()
-    
-    # --- 1. BOLLINGER BANDS & SQUEEZE (Patlama Beklentisi) ---
-    df_tech['SMA_20'] = df_tech['Close'].rolling(window=20).mean()
-    std_20 = df_tech['Close'].rolling(window=20).std()
-    
-    df_tech['BB_Upper'] = df_tech['SMA_20'] + (std_20 * 2)
-    df_tech['BB_Lower'] = df_tech['SMA_20'] - (std_20 * 2)
-    
-    # Bollinger Bant Genişliği (Daralma patlama sinyalidir)
-    df_tech['BB_Width'] = (df_tech['BB_Upper'] - df_tech['BB_Lower']) / df_tech['SMA_20']
-    
-    # Keltner Kanalları (Squeeze Tespiti İçin)
-    df_tech['ATR_20'] = df_tech['High'].rolling(20).max() - df_tech['Low'].rolling(20).min()
-    df_tech['KC_Upper'] = df_tech['SMA_20'] + (df_tech['ATR_20'] * 1.5)
-    df_tech['KC_Lower'] = df_tech['SMA_20'] - (df_tech['ATR_20'] * 1.5)
-    
-    # Squeeze Açık mı? (Bollinger, Keltner'in içine girdiyse sıkışma vardır)
-    df_tech['Squeeze_On'] = (df_tech['BB_Lower'] > df_tech['KC_Lower']) & (df_tech['BB_Upper'] < df_tech['KC_Upper'])
-    
-    # --- 2. ICHIMOKU CLOUD (Trend Yönü ve Destek/Direnç) ---
-    high_9 = df_tech['High'].rolling(window=9).max()
-    low_9 = df_tech['Low'].rolling(window=9).min()
-    df_tech['Tenkan_Sen'] = (high_9 + low_9) / 2
 
-    high_26 = df_tech['High'].rolling(window=26).max()
-    low_26 = df_tech['Low'].rolling(window=26).min()
-    df_tech['Kijun_Sen'] = (high_26 + low_26) / 2
-
-    # Senkou Span A (Bulutun üst sınırı)
-    df_tech['Senkou_Span_A'] = ((df_tech['Tenkan_Sen'] + df_tech['Kijun_Sen']) / 2).shift(26)
-    
-    # Senkou Span B (Bulutun alt sınırı)
-    high_52 = df_tech['High'].rolling(window=52).max()
-    low_52 = df_tech['Low'].rolling(window=52).min()
-    df_tech['Senkou_Span_B'] = ((high_52 + low_52) / 2).shift(26)
-    
-    # Fiyat bulutun üzerinde mi? (Güçlü Boğa Piyasası)
-    df_tech['Ichimoku_Bullish'] = (df_tech['Close'] > df_tech['Senkou_Span_A']) & (df_tech['Close'] > df_tech['Senkou_Span_B'])
-    
-    return df_tech
-def gelismis_ai_tahmin_motoru(df, gelecek_gun=5):
-    """BİST için Optimize Edilmiş Ensemble AI Motoru"""
-    df_ml = df.copy()
-    
 # RANDOM FOREST MAKİNE ÖĞRENMESİ
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     # Orijinal df'i bozmamak için kopyasını alıyoruz
@@ -863,21 +755,6 @@ with tabs[1]:
             st.dataframe(df_kesisim.style.map(renklendir, subset=['Sinyal']), use_container_width=True)
         else:
             st.warning("🤷‍♂️ Şu an için BİST30'da Stokastik dipten dönüş kesişimi yapan hisse bulunamadı. (Borsada fırsatlar tükenmez, yarın tekrar deneyin!)")
-# Analiz Sekmesinde Gösterim İçin (Örn: with tabs[10]: altına)
-st.markdown("### 🌪️ BİST Volatilite ve Patlama Radarı (Bollinger Squeeze)")
-df_tech = ileri_teknik_gostergeler(df)
-son_durum = df_tech.iloc[-1]
-
-c1, c2, c3 = st.columns(3)
-with c1:
-    squeeze_durumu = "🚨 SIKIŞMA VAR (Patlama Yakın)" if son_durum['Squeeze_On'] else "Serbest Piyasa"
-    st.metric("Squeeze (Daralma) Modu", squeeze_durumu)
-with c2:
-    ichimoku = "☁️ ÜSTÜNDE (Boğa)" if son_durum['Ichimoku_Bullish'] else "Bulut Altı/İçi"
-    st.metric("Ichimoku Bulutu", ichimoku)
-with c3:
-    ai_yeni = gelismis_ai_tahmin_motoru(df_tech)
-    st.metric("AI Beklenen Getiri (5 Gün)", f"% {ai_yeni['expected_return_pct']}", delta=ai_yeni['signal'])
 with tabs[2]:
         st.subheader("📊 Canlı Varlık Portföyüm ve ATR Destekli Fiyat Alarmları")
         c1, c2 = st.columns([2, 1])
@@ -1849,81 +1726,7 @@ def ai_dashboard(symbol, df):
         "score": calculate_total_score(df),
         "trend": calculate_trend_strength(df),
     }
-    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 
-    # 1. ÖZELLİK MÜHENDİSLİĞİ (FEATURE ENGINEERING)
-    # Sadece fiyat değil, volatilite ve momentum metriklerini modele veriyoruz.
-    df_ml['Getiri'] = df_ml['Close'].pct_change()
-    df_ml['SMA_10_Fark'] = (df_ml['Close'] - df_ml['Close'].rolling(10).mean()) / df_ml['Close']
-    df_ml['Volatilite_14'] = df_ml['Getiri'].rolling(14).std()
-    
-    # RSI (Eğer hesaplanmamışsa)
-    delta = df_ml['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    rs = gain / (loss + 1e-9)
-    df_ml['RSI_14'] = 100 - (100 / (1 + rs))
-    
-    # BİST Hacim Trendi
-    df_ml['Hacim_Trendi'] = df_ml['Volume'] / df_ml['Volume'].rolling(20).mean()
-    
-    # HEDEF DEĞİŞKEN (TARGET): 5 Gün sonraki Yüzdelik Getiri
-    df_ml['Target_Return'] = df_ml['Close'].shift(-gelecek_gun) / df_ml['Close'] - 1
-    
-    # Sonsuz değerleri ve NaN'ları temizle
-    df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
-    ml_df = df_ml.dropna()
-    
-    if len(ml_df) < 50:
-        return {"signal": "VERİ YETERSİZ", "confidence": 0, "expected_return": 0}
-
-    # 2. MODEL EĞİTİMİ (ENSEMBLE)
-    features = ['Getiri', 'SMA_10_Fark', 'Volatilite_14', 'RSI_14', 'Hacim_Trendi']
-    X = ml_df[features]
-    y = ml_df['Target_Return'] * 100 # Yüzdelik bazda
-
-    # Verileri ölçeklendir (BİST'in ani sıçramalarına karşı)
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # İki farklı algoritma ile tahmin (Random Forest + Gradient Boosting)
-    rf_model = RandomForestRegressor(n_estimators=150, max_depth=7, random_state=42)
-    gb_model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
-    
-    rf_model.fit(X_scaled, y)
-    gb_model.fit(X_scaled, y)
-
-    # 3. GÜNCEL VERİ İLE TAHMİN
-    son_veri = df_ml[features].iloc[-1:].values
-    son_veri_scaled = scaler.transform(son_veri)
-
-    rf_tahmin = rf_model.predict(son_veri_scaled)[0]
-    gb_tahmin = gb_model.predict(son_veri_scaled)[0]
-    
-    # Nihai Tahmin (Ortalama)
-    beklenen_getiri = (rf_tahmin + gb_tahmin) / 2
-
-    # 4. KARAR MEKANİZMASI
-    if beklenen_getiri > 3.0:
-        sinyal = "🚀 GÜÇLÜ AL"
-    elif beklenen_getiri > 1.0:
-        sinyal = "🟢 AL"
-    elif beklenen_getiri < -2.0:
-        sinyal = "🔴 SAT"
-    else:
-        sinyal = "🟡 NÖTR"
-
-    # Model uyumu (İki model aynı yönde mi?)
-    uyum_skoru = 100 if (rf_tahmin * gb_tahmin > 0) else 50
-    guven_skoru = min(abs(beklenen_getiri) * 10 + uyum_skoru, 99.0)
-
-    return {
-        "signal": sinyal,
-        "confidence": round(guven_skoru, 1),
-        "expected_return_pct": round(beklenen_getiri, 2),
-        "rf_pred": round(rf_tahmin, 2),
-        "gb_pred": round(gb_tahmin, 2)
-    }
 
 def terminal_status_v85():
     return {

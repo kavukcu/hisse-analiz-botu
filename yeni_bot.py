@@ -69,91 +69,125 @@ def python_istatistik_analizi(df):
         }
 # --- YAPAY ZEKA VE KURUMSAL MOTOR FONKSİYONLARI (KODUN ÜST KISMINA EKLENECEK) ---
 
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
 import numpy as np
+import pandas as pd
 
 def ensemble_prediction(df):
     try:
         t_df = stokastik_hesapla(df.copy())
         
-        # --- 1. TEKNİK GÖSTERGELER (AI İÇİN ÖZELLİK MÜHENDİSLİĞİ) ---
-        # RSI Hesaplama
+        # =========================================================
+        # 1. MEVCUT VE TEMEL GÖSTERGELER (Momentum & Trend)
+        # =========================================================
+        # RSI
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
         rs = gain / loss
         t_df['RSI'] = 100 - (100 / (1 + rs))
 
-        # YENİ: MACD (Trend Gücü ve Yönü)
+        # MACD
         exp1 = t_df['Close'].ewm(span=12, adjust=False).mean()
         exp2 = t_df['Close'].ewm(span=26, adjust=False).mean()
-        t_df['MACD'] = exp1 - exp2
-        t_df['MACD_Signal'] = t_df['MACD'].ewm(span=9, adjust=False).mean()
-        t_df['MACD_Hist'] = t_df['MACD'] - t_df['MACD_Signal']
+        macd = exp1 - exp2
+        macd_signal = macd.ewm(span=9, adjust=False).mean()
+        t_df['MACD_Hist'] = macd - macd_signal
 
-        # YENİ: Bollinger Bantları (Volatilite ve Sıkışma)
-        t_df['BB_Orta'] = t_df['Close'].rolling(window=20).mean()
-        t_df['BB_Std'] = t_df['Close'].rolling(window=20).std()
-        t_df['BB_Ust'] = t_df['BB_Orta'] + (t_df['BB_Std'] * 2)
-        t_df['BB_Alt'] = t_df['BB_Orta'] - (t_df['BB_Std'] * 2)
+        # Bollinger Bantları Konumu
+        bb_orta = t_df['Close'].rolling(window=20).mean()
+        bb_std = t_df['Close'].rolling(window=20).std()
+        bb_ust = bb_orta + (bb_std * 2)
+        bb_alt = bb_orta - (bb_std * 2)
+        t_df['BB_Pozisyon'] = (t_df['Close'] - bb_alt) / (bb_ust - bb_alt)
+
+        # =========================================================
+        # 2. YENİ: PROFESYONEL QUANT GÖSTERGELERİ
+        # =========================================================
+        # YENİ: ATR (Average True Range) - Hisse ne kadar oynak?
+        high_low = t_df['High'] - t_df['Low']
+        high_close = np.abs(t_df['High'] - t_df['Close'].shift())
+        low_close = np.abs(t_df['Low'] - t_df['Close'].shift())
+        ranges = pd.concat([high_low, high_close, low_close], axis=1)
+        true_range = np.max(ranges, axis=1)
+        t_df['ATR'] = true_range.rolling(14).mean()
+
+        # YENİ: OBV (On-Balance Volume) - Kurumsal Para Girişi var mı?
+        # Fiyat artarken hacim yükseliyorsa akıllı para içeri giriyordur!
+        obv = (np.sign(t_df['Close'].diff()) * t_df['Volume']).fillna(0).cumsum()
+        obv_ema = obv.ewm(span=10).mean()
+        t_df['OBV_Trend'] = np.where(obv > obv_ema, 1, -1) 
+
+        # Hacim İvmesi (Bir önceki güne göre hacim değişimi)
+        t_df['Vol_Change'] = t_df['Volume'].pct_change()
+
+        # =========================================================
+        # 3. YAPAY ZEKA HEDEF MÜHENDİSLİĞİ (Target Engineering)
+        # =========================================================
+        # KÜÇÜK AMA DAHİYANE DEĞİŞİKLİK: AI artık FİYATI tahmin etmiyor.
+        # "Bu hisse 5 gün sonra % kaç yükselir/düşer?" bunu tahmin ediyor!
+        t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        # AI için kritik veri: Fiyat Bollinger Bandının neresinde? (0 = Dipte, 1 = Tepede)
-        t_df['BB_Pozisyon'] = (t_df['Close'] - t_df['BB_Alt']) / (t_df['BB_Ust'] - t_df['BB_Alt'])
-
-        # --- 2. YAPAY ZEKA VERİ SETİ ---
-        # AI artık sadece fiyata değil; trende (MACD), hacme (Volume), momentum (RSI, Stoch) ve sıkışmaya (BB) bakıyor!
-        features = ['RSI', 'Stoch_K', 'Stoch_D', 'MACD_Hist', 'BB_Pozisyon', 'Volume']
-        t_df['Target'] = t_df['Close'].shift(-5) # Hedef: 5 gün sonraki fiyat
+        # AI'ın bakacağı nihai karnesi
+        features = ['RSI', 'Stoch_K', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'OBV_Trend', 'Vol_Change']
         
         ml_df = t_df.dropna()
 
-        if len(ml_df) < 50:
+        if len(ml_df) < 60:
             return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
-        y = ml_df['Target']
+        y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # --- 3. ÇİFT MOTORLU YAPAY ZEKA (GERÇEK ENSEMBLE) ---
-        # Model 1: Random Forest (Ağaçların Bilgeliği - Dengeli Tahmin)
-        rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
-        rf_model.fit(X, y)
-        rf_tahmin = rf_model.predict(son_veri)[0]
+        # =========================================================
+        # 4. YÜKSEK KONSEY: VOTING REGRESSOR ENSEMBLE
+        # =========================================================
+        # Model 1: Sağlamcı (Dengeli öğrenme)
+        rf = RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=4, random_state=42)
+        # Model 2: Avcı (Hatalara odaklanan agresif öğrenme)
+        gb = GradientBoostingRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42)
+        
+        # YENİ: Modelleri kapıştırıp ortak karar aldıran Sklearn konseyi
+        ensemble = VotingRegressor(estimators=[('rf', rf), ('gb', gb)])
+        ensemble.fit(X, y)
 
-        # Model 2: Gradient Boosting (Hatalardan Öğrenen - Agresif Tahmin)
-        gb_model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
-        gb_model.fit(X, y)
-        gb_tahmin = gb_model.predict(son_veri)[0]
-
-        # İki modelin güçlerini birleştir (Ortalama)
-        hedef_fiyat = (rf_tahmin + gb_tahmin) / 2
+        # Tahmin edilen değer artık bir YÜZDE (Örn: 4.2 veya -1.5)
+        beklenen_getiri_pct = ensemble.predict(son_veri)[0]
+        
+        # Yüzdelik beklentiyi yeniden fiyata çevir (Ekranda hedef fiyat görmek için)
         anlik_fiyat = t_df['Close'].iloc[-1]
+        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
-        getiri_potansiyeli = ((hedef_fiyat - anlik_fiyat) / anlik_fiyat) * 100
+        # =========================================================
+        # 5. ÜÇLÜ TEYİT VE SİNYAL MEKANİZMASI
+        # =========================================================
+        # AI yükselecek dese bile, teknik olarak mantıklı mı?
+        macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
+        para_girisi = t_df['OBV_Trend'].iloc[-1] == 1
+        bb_ucuz = t_df['BB_Pozisyon'].iloc[-1] < 0.35
         
-        # --- 4. TEKNİK & YAPAY ZEKA MELEZ SİNYALİ ---
-        # Sadece AI'ın getiri beklemesi yetmez, Teknik taraf da onaylamalı!
-        macd_al = t_df['MACD_Hist'].iloc[-1] > 0
-        bb_dipte = t_df['BB_Pozisyon'].iloc[-1] < 0.25 # Fiyat alt banda yakın mı?
-        
-        sinyal = "NÖTR"
-        if getiri_potansiyeli > 3.0 and macd_al:
-            sinyal = "🚀 GÜÇLÜ AL"
-        elif getiri_potansiyeli > 1.5:
-            sinyal = "🟢 AL"
-        elif getiri_potansiyeli < -2.0:
-            sinyal = "⚠️ SAT"
+        # Kaç farklı gösterge "AL" diyor?
+        teyit_skoru = sum([macd_pozitif, para_girisi, bb_ucuz])
 
-        # Teknik göstergeler AI'ı onaylıyorsa Güven Skoru artar
-        guven_skoru = min(abs(getiri_potansiyeli) * 8 + 60, 99.0)
-        if macd_al and bb_dipte and "AL" in sinyal:
-            guven_skoru = min(guven_skoru + 15, 99.0) 
+        sinyal = "NÖTR"
+        guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
+
+        # GÜÇLÜ AL Kuralı: AI en az %2.5 getiri bekleyecek VE en az 2 teknik gösterge onaylayacak!
+        if beklenen_getiri_pct > 2.5 and teyit_skoru >= 2:
+            sinyal = "🚀 GÜÇLÜ AL"
+            guven_skoru = min(guven_skoru + 20, 99.0)
+        elif beklenen_getiri_pct > 1.5 and teyit_skoru >= 1:
+            sinyal = "🟢 AL"
+            guven_skoru = min(guven_skoru + 10, 99.0)
+        elif beklenen_getiri_pct < -2.0:
+            sinyal = "⚠️ SAT"
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": round(guven_skoru, 1),
-            "expected_return_pct": round(getiri_potansiyeli, 2) 
+            "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
     except Exception as e:
         anlik = df['Close'].iloc[-1] if not df.empty else 0

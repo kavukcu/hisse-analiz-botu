@@ -745,7 +745,7 @@ with tabs[1]:
                 t_df['RSI'] = 100 - (100 / (1 + rs))
                 son_rsi = float(t_df['RSI'].iloc[-1])
 
-                # YENİ: MACD Hesaplaması
+                # MACD Hesaplaması
                 exp1 = t_df['Close'].ewm(span=12, adjust=False).mean()
                 exp2 = t_df['Close'].ewm(span=26, adjust=False).mean()
                 macd = exp1 - exp2
@@ -754,7 +754,7 @@ with tabs[1]:
                 son_macd = float(macd_hist.iloc[-1])
                 macd_durum = "📈 POZİTİF" if son_macd > 0 else "📉 NEGATİF"
 
-                # YENİ: Bollinger Bantları (BB) Konumu
+                # Bollinger Bantları (BB) Konumu
                 bb_orta = t_df['Close'].rolling(window=20).mean()
                 bb_std = t_df['Close'].rolling(window=20).std()
                 bb_ust = bb_orta + (bb_std * 2)
@@ -770,6 +770,12 @@ with tabs[1]:
                     bb_durum = "🔴 TEPEDE (Şişik)"
                 else:
                     bb_durum = "⚪ NÖTR"
+                    
+                # YENİ: OBV (On-Balance Volume) - Para Akışı
+                import numpy as np
+                obv = (np.sign(t_df['Close'].diff()) * t_df['Volume']).fillna(0).cumsum()
+                obv_ema = obv.ewm(span=10).mean()
+                obv_durum = "💸 GİRİŞ VAR" if obv.iloc[-1] > obv_ema.iloc[-1] else "🩸 ÇIKIŞ VAR"
                 
                 # Yapay Zeka ve Kurumsal Karar Tahminleri
                 karar = institutional_decision(t_df)
@@ -782,15 +788,16 @@ with tabs[1]:
                 return {
                     "Hisse": ticker.replace(".IS", ""),
                     "Anlık Fiyat": round(fiyat, 2),
-                    "Hedef Fiyat (AI)": round(hedef_fiyat, 2),
-                    "Potansiyel (%)": round(getiri_potansiyeli, 2),
-                    "Anlık RSI": round(son_rsi, 2),
-                    "Stoch %K": round(son_k_degeri, 2), 
-                    "MACD Trend": macd_durum,       # <--- YENİ EKLENDİ
-                    "BB Konumu": bb_durum,          # <--- YENİ EKLENDİ
+                    "Hedef (AI)": round(hedef_fiyat, 2),
+                    "Potansiyel %": round(getiri_potansiyeli, 2),
                     "AI Sinyali": ai_tahmin["signal"],
-                    "Kurumsal Karar": karar["decision"],
-                    "Genel Puan": karar["score"]
+                    "Kurumsal": karar["decision"],
+                    "Para Akışı (OBV)": obv_durum,      # <--- YENİ EKLENDİ
+                    "MACD Trend": macd_durum,
+                    "BB Konumu": bb_durum,
+                    "RSI": round(son_rsi, 2),
+                    "Stoch %K": round(son_k_degeri, 2), 
+                    "Puan": karar["score"]
                 }
             except Exception as e:
                 return None
@@ -812,22 +819,21 @@ with tabs[1]:
         progress_bar.empty()
         
         if firsatlar:
-            # Sütunları daha mantıklı bir okuma sırasına göre dizdik
-            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef Fiyat (AI)", "Potansiyel (%)", "AI Sinyali", "Kurumsal Karar", "MACD Trend", "BB Konumu", "Anlık RSI", "Stoch %K", "Genel Puan"]]
-            df_firsatlar = df_firsatlar.sort_values(by="Genel Puan", ascending=False).set_index("Hisse")
+            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef (AI)", "Potansiyel %", "AI Sinyali", "Kurumsal", "Para Akışı (OBV)", "MACD Trend", "BB Konumu", "RSI", "Stoch %K", "Puan"]]
+            df_firsatlar = df_firsatlar.sort_values(by="Puan", ascending=False).set_index("Hisse")
             
             def color_signals(val):
                 if isinstance(val, str):
-                    if any(x in val.upper() for x in ['AL', 'ACCUMULATION', 'POZİTİF', 'DİPTE']): 
+                    if any(x in val.upper() for x in ['AL', 'ACCUMULATION', 'POZİTİF', 'DİPTE', 'GİRİŞ']): 
                         return 'color: #00FF00; font-weight: bold'
-                    if any(x in val.upper() for x in ['SAT', 'DISTRIBUTION', 'NEGATİF', 'TEPEDE']): 
+                    if any(x in val.upper() for x in ['SAT', 'DISTRIBUTION', 'NEGATİF', 'TEPEDE', 'ÇIKIŞ']): 
                         return 'color: #FF0000; font-weight: bold'
                 elif isinstance(val, (int, float)):
                     if val < 30: return 'color: #00FF00; font-weight: bold' 
                     if val > 70: return 'color: #FF0000; font-weight: bold' 
                 return ''
 
-            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'MACD Trend', 'BB Konumu', 'Anlık RSI', 'Stoch %K']), use_container_width=True)
+            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal', 'Para Akışı (OBV)', 'MACD Trend', 'BB Konumu', 'RSI', 'Stoch %K']), use_container_width=True)
 
     st.divider()
 

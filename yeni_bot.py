@@ -912,7 +912,6 @@ with tabs[5]:
                 if isinstance(tmp_df.columns, pd.MultiIndex): tmp_df.columns = tmp_df.columns.droplevel(1)
                 if not tmp_df.empty: korelasyon_df[ticker] = tmp_df['Close']
             st.plotly_chart(px.imshow(korelasyon_df.corr(), text_auto=True, color_continuous_scale='RdBu_r'), use_container_width=True)
-with tabs[6]:
         st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
         bt_sonuc = backtest_motoru(df)
         if not bt_sonuc.empty:
@@ -926,6 +925,127 @@ with tabs[6]:
             fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)))
             fig_bt.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_bt, use_container_width=True)
+with tabs[6]:
+    st.subheader("⚙️ Strateji Backtest Makinesi")
+    st.markdown("Bu modül, geliştirdiğimiz **'Stokastik Dipten Dönüş & Aşırı Satım (RSI)'** stratejisini seçili hissenin geçmiş verilerinde günbegün test eder ve ne kadar kâr/zarar ettiğini kanıtlar.")
+
+    # Kullanıcıdan başlangıç parası isteyelim
+    baslangic_bakiye = st.number_input("Başlangıç Bakiyesi (TL)", min_value=1000, value=100000, step=10000)
+
+    if st.button("🚀 Seçili Hisse İçin Backtesti Başlat"):
+        try:
+            # İşlem yapacağımız kopyayı alıp göstergeleri hesaplayalım
+            b_df = df.copy()
+            b_df = stokastik_hesapla(b_df)
+
+            # RSI Hesaplama
+            delta = b_df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+            loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+            rs = gain / loss
+            b_df['RSI'] = 100 - (100 / (1 + rs))
+
+            b_df = b_df.dropna()
+
+            # Backtest Cüzdanı
+            bakiye = baslangic_bakiye
+            elindeki_lot = 0
+            alim_fiyati = 0
+            islem_gecmisi = []
+            basarili_islem = 0
+            hatali_islem = 0
+
+            # GEÇMİŞTE ZAMAN YOLCULUĞU BAŞLIYOR...
+            for i in range(1, len(b_df)):
+                fiyat = float(b_df['Close'].iloc[i])
+                tarih = b_df.index[i].strftime("%Y-%m-%d")
+
+                k_bugun = b_df['Stoch_K'].iloc[i]
+                d_bugun = b_df['Stoch_D'].iloc[i]
+                k_dun = b_df['Stoch_K'].iloc[i-1]
+                d_dun = b_df['Stoch_D'].iloc[i-1]
+                rsi = b_df['RSI'].iloc[i]
+
+                # 🟢 ALIM KURALI: Stoch < 30 bölgesinde Kesişim + RSI 50'nin altındayken (Ucuzken topla)
+                if elindeki_lot == 0:
+                    if (k_dun < d_dun) and (k_bugun > d_bugun) and (k_bugun < 30) and (rsi < 50):
+                        alabilecegi_lot = int(bakiye // fiyat)
+                        if alabilecegi_lot > 0:
+                            maliyet = alabilecegi_lot * fiyat
+                            bakiye -= maliyet
+                            elindeki_lot += alabilecegi_lot
+                            alim_fiyati = fiyat
+                            islem_gecmisi.append({"Tarih": tarih, "İşlem": "🟢 AL", "Fiyat": round(fiyat, 2), "Lot": alabilecegi_lot, "Kar/Zarar (%)": 0.0})
+
+                # 🔴 SATIM KURALI: Stoch > 70 bölgesinde ters kesişim VEYA %5 Stop-Loss patlaması
+                elif elindeki_lot > 0:
+                    guncel_kar_zarar_pct = ((fiyat - alim_fiyati) / alim_fiyati) * 100
+                    sat_sinyali = False
+                    
+                    # 1. Kural: Tepe noktasında sat
+                    if (k_dun > d_dun) and (k_bugun < d_bugun) and (k_bugun > 70):
+                        sat_sinyali = True 
+                    # 2. Kural: İşler ters giderse %5 zararda kol kes (Stop-Loss)
+                    elif guncel_kar_zarar_pct <= -5: 
+                        sat_sinyali = True
+
+                    if sat_sinyali:
+                        satis_tutari = elindeki_lot * fiyat
+                        bakiye += satis_tutari
+
+                        if fiyat > alim_fiyati:
+                            basarili_islem += 1
+                        else:
+                            hatali_islem += 1
+
+                        islem_gecmisi.append({"Tarih": tarih, "İşlem": "🔴 SAT", "Fiyat": round(fiyat, 2), "Lot": elindeki_lot, "Kar/Zarar (%)": round(guncel_kar_zarar_pct, 2)})
+                        elindeki_lot = 0
+                        alim_fiyati = 0
+
+            # Test bittiğinde (bugüne geldiğinde) hala elinde lot varsa güncel fiyattan nakde çevir
+            if elindeki_lot > 0:
+                son_fiyat = float(b_df['Close'].iloc[-1])
+                bakiye += elindeki_lot * son_fiyat
+                guncel_kar_zarar_pct = ((son_fiyat - alim_fiyati) / alim_fiyati) * 100
+                if son_fiyat > alim_fiyati:
+                    basarili_islem += 1
+                else:
+                    hatali_islem += 1
+                islem_gecmisi.append({"Tarih": b_df.index[-1].strftime("%Y-%m-%d"), "İşlem": "🔵 KAPANIS (Mevcut)", "Fiyat": round(son_fiyat, 2), "Lot": elindeki_lot, "Kar/Zarar (%)": round(guncel_kar_zarar_pct, 2)})
+
+            # --- SONUÇLARI HESAPLA VE EKRANA BAS ---
+            toplam_islem = basarili_islem + hatali_islem
+            win_rate = (basarili_islem / toplam_islem * 100) if toplam_islem > 0 else 0
+            net_kar_zarar = bakiye - baslangic_bakiye
+            getiri_yuzdesi = (net_kar_zarar / baslangic_bakiye) * 100
+
+            st.success("✅ Backtest Başarıyla Tamamlandı!")
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Bitiş Bakiyesi", f"{bakiye:,.2f} TL", f"% {getiri_yuzdesi:.2f}")
+            c2.metric("Kazanma Oranı (Win Rate)", f"% {win_rate:.1f}", "Robotun Başarısı")
+            c3.metric("Toplam İşlem", toplam_islem, f"{basarili_islem} Karlı / {hatali_islem} Zararlı")
+            c4.metric("Net Kar/Zarar", f"{net_kar_zarar:,.2f} TL")
+
+            if islem_gecmisi:
+                st.markdown("### 📜 Detaylı İşlem Geçmişi (Al/Sat Noktaları)")
+                df_gecmis = pd.DataFrame(islem_gecmisi).set_index("Tarih")
+                
+                # Tabloyu renklendir
+                def renk(val):
+                    if val == '🟢 AL': return 'color: #00FF00; font-weight: bold'
+                    if val in ['🔴 SAT', '🔵 KAPANIS (Mevcut)']: return 'color: #FF0000; font-weight: bold'
+                    if isinstance(val, (int, float)):
+                        if val > 0: return 'color: #00FF00'
+                        if val < 0: return 'color: #FF0000'
+                    return ''
+                    
+                st.dataframe(df_gecmis.style.map(renk, subset=['İşlem', 'Kar/Zarar (%)']), use_container_width=True)
+            else:
+                st.warning("Bu dönemde stratejiye uygun hiçbir al-sat fırsatı oluşmamış.")
+
+        except Exception as e:
+            st.error(f"Backtest çalışırken bir hata oluştu: {e}")
 with tabs[7]:
         st.subheader("🎲 Monte Carlo Risk Simülasyonu (Gelecek 30 Gün)")
         if st.button("Simülasyonu Başlat"):

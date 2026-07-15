@@ -77,11 +77,14 @@ def ensemble_prediction(df):
     try:
         import numpy as np
         import pandas as pd
-        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+        from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, VotingRegressor
+        from sklearn.ensemble import HistGradientBoostingRegressor # YENİ: Yüksek Hızlı ve Keskin Model
         
         t_df = stokastik_hesapla(df.copy())
         
-        # --- 1. GÖSTERGELER ---
+        # ==========================================
+        # 1. TEMEL TEKNİK GÖSTERGELER
+        # ==========================================
         # RSI
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
@@ -96,71 +99,102 @@ def ensemble_prediction(df):
         macd_signal = macd.ewm(span=9, adjust=False).mean()
         t_df['MACD_Hist'] = macd - macd_signal
 
-        # Bollinger Bantları (Sıfıra bölünme korumalı)
+        # Bollinger Bantları
         bb_orta = t_df['Close'].rolling(window=20).mean()
         bb_std = t_df['Close'].rolling(window=20).std()
         bb_ust = bb_orta + (bb_std * 2)
         bb_alt = bb_orta - (bb_std * 2)
-        bb_fark = (bb_ust - bb_alt).replace(0, 0.0001) # Fark sıfırsa küçük bir sayı ata
+        bb_fark = (bb_ust - bb_alt).replace(0, 0.0001)
         t_df['BB_Pozisyon'] = (t_df['Close'] - bb_alt) / bb_fark
 
-        # ATR (Güvenli Pandas Yöntemi)
+        # ATR ve OBV
         high_low = t_df['High'] - t_df['Low']
         high_close = (t_df['High'] - t_df['Close'].shift()).abs()
         low_close = (t_df['Low'] - t_df['Close'].shift()).abs()
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        t_df['ATR'] = ranges.max(axis=1).rolling(14).mean()
-
-        # OBV ve Hacim
+        t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
+        
         obv = (np.sign(t_df['Close'].diff()) * t_df['Volume']).fillna(0).cumsum()
-        obv_ema = obv.ewm(span=10).mean()
-        t_df['OBV_Trend'] = np.where(obv > obv_ema, 1, -1) 
+        t_df['OBV_Trend'] = np.where(obv > obv.ewm(span=10).mean(), 1, -1) 
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
 
-        # Hedef Getiri
+        # ==========================================
+        # 2. YENİ GÜÇLENDİRİLMİŞ TEKNİK (MFI & TREND)
+        # ==========================================
+        # MFI (Para Akışı Endeksi - Hacim Destekli RSI)
+        t_df['Typical_Price'] = (t_df['High'] + t_df['Low'] + t_df['Close']) / 3
+        t_df['Raw_Money_Flow'] = t_df['Typical_Price'] * t_df['Volume']
+        t_df['Positive_Flow'] = np.where(t_df['Typical_Price'] > t_df['Typical_Price'].shift(1), t_df['Raw_Money_Flow'], 0)
+        t_df['Negative_Flow'] = np.where(t_df['Typical_Price'] < t_df['Typical_Price'].shift(1), t_df['Raw_Money_Flow'], 0)
+        
+        pos_mf = pd.Series(t_df['Positive_Flow']).rolling(14).sum()
+        neg_mf = pd.Series(t_df['Negative_Flow']).rolling(14).sum().replace(0, 0.0001)
+        t_df['MFI'] = 100 - (100 / (1 + (pos_mf / neg_mf)))
+
+        # EMA Trend Gücü (50 ve 200 Günlük Kesişim Durumu)
+        t_df['EMA50'] = t_df['Close'].ewm(span=50, adjust=False).mean()
+        t_df['EMA200'] = t_df['Close'].ewm(span=200, adjust=False).mean()
+        # Fiyatın ve kısa trendin ana trende olan uzaklığı
+        t_df['Trend_Gucu'] = (t_df['EMA50'] - t_df['EMA200']) / t_df['EMA200']
+
+        # Hedef Getiri (5 Günlük)
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        features = ['RSI', 'Stoch_K', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'OBV_Trend', 'Vol_Change']
+        # Modele girecek olan nihai eğitim verileri
+        features = ['RSI', 'Stoch_K', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'OBV_Trend', 'Vol_Change', 'MFI', 'Trend_Gucu']
         
-        # --- 2. HAYATİ FİLTRE: Sonsuz Değerleri Temizle ---
-        # pct_change ve bölme işlemlerinden gelebilecek 'inf' değerlerini 'NaN' yapar, sonra siler.
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
-        if len(ml_df) < 60:
+        if len(ml_df) < 100: # Analiz için minimum gün sayısını artırdık
             return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
         y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # --- 3. ÇİFT MOTORLU YAPAY ZEKA (Voting) ---
-        rf = RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=4, random_state=42)
-        gb = GradientBoostingRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42)
+        # ==========================================
+        # 3. YENİ YAPAY ZEKA ÜÇLÜ KONSEYİ (Voting)
+        # ==========================================
+        # Daha az ağaç ama daha zeki mimariler
+        rf = RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42)
+        # Borsa verilerindeki ani sıçramaları yakalayan özel orman
+        et = ExtraTreesRegressor(n_estimators=100, max_depth=6, random_state=42)
+        # En modern, hızlı ve doğrusal olmayan verilerde efsanevi çalışan algoritma
+        hg = HistGradientBoostingRegressor(max_iter=100, max_depth=5, random_state=42)
         
-        ensemble = VotingRegressor(estimators=[('rf', rf), ('gb', gb)])
+        # Konsey oylaması (Üç model de kendi tahminini yapıp ortalamasını alır)
+        ensemble = VotingRegressor(estimators=[('rf', rf), ('et', et), ('hg', hg)])
         ensemble.fit(X, y)
 
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
-        # --- 4. SİNYAL ÜRETİMİ ---
+        # ==========================================
+        # 4. ÇELİK GİBİ SIKI SİNYAL ONAY MEKANİZMASI
+        # ==========================================
         macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
         para_girisi = t_df['OBV_Trend'].iloc[-1] == 1
-        bb_ucuz = t_df['BB_Pozisyon'].iloc[-1] < 0.35
+        bb_uygun = t_df['BB_Pozisyon'].iloc[-1] < 0.50 # Çok şişmemiş olması yeterli
+        mfi_destek = t_df['MFI'].iloc[-1] > 40 # Hacimli para girişi başlamış mı?
+        trend_destek = t_df['Trend_Gucu'].iloc[-1] > -0.05 # Çok ağır bir düşüş trendinde olmamalı
         
-        teyit_skoru = sum([macd_pozitif, para_girisi, bb_ucuz])
+        # Toplam 5 teyit noktamız var
+        teyit_skoru = sum([macd_pozitif, para_girisi, bb_uygun, mfi_destek, trend_destek])
+        
         sinyal = "NÖTR"
-        guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
+        guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
 
-        if beklenen_getiri_pct > 2.5 and teyit_skoru >= 2:
+        # YENİ KATI KURAL: "Güçlü Al" için en az %3 AI getirisi VE en az 4 Teknik Onay!
+        if beklenen_getiri_pct > 3.0 and teyit_skoru >= 4:
             sinyal = "🚀 GÜÇLÜ AL"
-            guven_skoru = min(guven_skoru + 20, 99.0)
-        elif beklenen_getiri_pct > 1.5 and teyit_skoru >= 1:
+            guven_skoru = min(guven_skoru + 25, 99.0)
+        # YENİ KURAL: "Al" için en az %1.5 AI getirisi VE en az 3 Teknik Onay!
+        elif beklenen_getiri_pct > 1.5 and teyit_skoru >= 3:
             sinyal = "🟢 AL"
-            guven_skoru = min(guven_skoru + 10, 99.0)
-        elif beklenen_getiri_pct < -2.0:
+            guven_skoru = min(guven_skoru + 15, 99.0)
+        elif beklenen_getiri_pct < -2.0 or teyit_skoru <= 1:
+            # Hem AI getiri beklemiyor hem de teknik zayıfsa "SAT" sinyali üretilir
             sinyal = "⚠️ SAT"
 
         return {

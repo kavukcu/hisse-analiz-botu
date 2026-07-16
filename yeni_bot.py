@@ -71,7 +71,6 @@ def ensemble_prediction(df):
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
         
-        # 🛠️ DÜZELTME 1: .copy() kaldırıldı. Böylece Stoch_K sizin ana tablonuza işlenebilecek.
         t_df = stokastik_hesapla(df)
         
         # =================================================================
@@ -256,15 +255,15 @@ def veri_yukle(ticker, start, end):
     import time, logging
     for _ in range(3):
         try:
-            df = yf.download(
-                ticker,
-                start=start,
-                end=end,
-                session=oturum,
-                progress=False,
-                auto_adjust=True,
-                threads=True
-            )
+            df = yf.download(ticker, period="1y")
+            ticker,
+            start=start,
+            end=end,
+            session=oturum,
+            progress=False,
+            auto_adjust=True,
+            threads=True
+            
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
             gerekli=["Open","High","Low","Close","Volume"]
@@ -380,8 +379,12 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     return bt_df
 
 # RANDOM FOREST MAKİNE ÖĞRENMESİ
+import numpy as np
+from datetime import timedelta
+from sklearn.ensemble import RandomForestRegressor
+
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
-    # Orijinal df'i bozmamak için kopyasını alıyoruz
+    # Orijinal veriyi bozmamak için kopyasını alıyoruz
     df_ml = df[['Close', 'Volume']].copy()
     
     # Özellikleri (Features) hesaplıyoruz
@@ -397,19 +400,50 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     rs = gain / (loss + 1e-9)
     df_ml['RSI_14'] = 100 - (100 / (1 + rs))
     
-    # 🎯 KRİTİK ADIM 1: Sonsuz (inf / -inf) değerleri NaN ile değiştiriyoruz
+    # KÖK ÇÖZÜM: Sonsuz ve boş verileri (NaN) temizle
     df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
-    
-    # 🎯 KRİTİK ADIM 2: Şimdi tüm NaN değerlerini güvenle temizleyebiliriz
     df_ml.dropna(inplace=True)
     
-    # 🎯 KRİTİK ADIM 3: Veri seti boş mu veya çok mu yetersiz kontrolü
+    # Veri Yetersizliği Kontrolü
     if len(df_ml) < 15:
-        # Eğer yeterli veri yoksa eğitim yapmadan basit bir projeksiyon döndür (Uygulamanın çökmesini önler)
+        # Veri yetersizse, hata vermek yerine anlık fiyatı sabit döndür
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
-        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
-        tahminler = [son_fiyat] * gelecek_gun  # <--- HATA BURADAYDI, DÜZELTİLDİ
+        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)] if not df.empty else []
+        tahminler = [son_fiyat] * gelecek_gun
         return tarihler, tahminler
+
+    # Model Eğitimi (Veri yeterliyse burası çalışır)
+    X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
+    y = df_ml['Close']
+    
+    model = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
+    model.fit(X.values, y.values) # .values kullanımı feature isim uyarılarını engeller
+    
+    # Gelecek Tahmini Döngüsü
+    tahminler = []
+    son_satir = df_ml.iloc[-1]
+    
+    lag1 = son_satir['Close']
+    lag2 = son_satir['Lag1']
+    sma_10 = son_satir['SMA_10']
+    hacim_deg = son_satir['Hacim_Degisim']
+    rsi_14 = son_satir['RSI_14']
+    
+    for _ in range(gelecek_gun):
+        # Tahmin yap
+        input_data = np.array([[lag1, lag2, sma_10, hacim_deg, rsi_14]])
+        pred = model.predict(input_data)[0]
+        tahminler.append(pred)
+        
+        # Bir sonraki iterasyon için değerleri kaydır ve güncelle
+        lag2 = lag1
+        lag1 = pred
+        sma_10 = (sma_10 * 9 + pred) / 10  # Tahmini fiyata göre SMA'yı yumuşatarak güncelle
+        hacim_deg = 0.0  # Gelecek hacim değişimi nötr
+        rsi_14 = 50.0    # Gelecek RSI nötr
+        
+    tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+    return tarihler, tahminler
 
     # Veriler temiz olduğuna göre eğitime geçebiliriz
     X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]

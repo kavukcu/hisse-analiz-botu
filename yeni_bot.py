@@ -1969,52 +1969,158 @@ def terminal_status_v84():
 # ============================================================
 
 def ensemble_prediction(df):
-    """
-    Ensemble-ready prediction layer.
-    Currently uses Random Forest plus rule-based voting.
-    Architecture can later be extended with XGBoost/LightGBM.
-    """
     try:
-        _, preds = makine_ogrenmesi_tahmin(df, gelecek_gun=5)
-        rf_prediction = preds[-1]
-    except Exception:
-        rf_prediction = float(df["Close"].iloc[-1])
+        import numpy as np
+        import pandas as pd
+        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+        from sklearn.svm import SVR
+        from sklearn.linear_model import Ridge
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+        
+        t_df = stokastik_hesapla(df.copy())
+        
+        # =================================================================
+        # 1. STANDART TEKNİK GÖSTERGELER
+        # =================================================================
+        delta = t_df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        t_df['RSI'] = 100 - (100 / (1 + gain / loss.replace(0, 0.0001)))
 
-    last_close = float(df["Close"].iloc[-1])
+        macd = t_df['Close'].ewm(span=12, adjust=False).mean() - t_df['Close'].ewm(span=26, adjust=False).mean()
+        t_df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
 
-    rf_vote = 1 if rf_prediction > last_close else -1
+        bb_orta = t_df['Close'].rolling(window=20).mean()
+        bb_std = t_df['Close'].rolling(window=20).std()
+        bb_fark = (bb_std * 4).replace(0, 0.0001)
+        t_df['BB_Pozisyon'] = (t_df['Close'] - (bb_orta - (bb_std * 2))) / bb_fark
 
-    try:
-        tech = generate_signal_score(df)["score"]
-    except Exception:
-        tech = 0
+        high_low = t_df['High'] - t_df['Low']
+        high_close = (t_df['High'] - t_df['Close'].shift()).abs()
+        low_close = (t_df['Low'] - t_df['Close'].shift()).abs()
+        t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
 
-    tech_vote = 1 if tech >= 3 else (-1 if tech <= -2 else 0)
+        # =================================================================
+        # 2. İLERİ DÜZEY QUANT & YENİ EKLENEN TİLSON T3
+        # =================================================================
+        # Z-SCORE & CMF & ADX
+        t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
 
-    confidence = calculate_confidence_score(df)
+        mf_multiplier = ((t_df['Close'] - t_df['Low']) - (t_df['High'] - t_df['Close'])) / (t_df['High'] - t_df['Low']).replace(0, 0.0001)
+        mf_volume = mf_multiplier * t_df['Volume']
+        t_df['CMF'] = mf_volume.rolling(20).sum() / t_df['Volume'].rolling(20).sum().replace(0, 0.0001)
 
-    conf_vote = 1 if confidence >= 70 else (-1 if confidence < 40 else 0)
+        up_move = t_df['High'] - t_df['High'].shift(1)
+        down_move = t_df['Low'].shift(1) - t_df['Low']
+        pos_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+        neg_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+        
+        atr_14 = t_df['ATR'].replace(0, 0.0001)
+        pos_di = 100 * (pd.Series(pos_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
+        neg_di = 100 * (pd.Series(neg_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
+        dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di).replace(0, 0.0001)
+        t_df['ADX'] = dx.ewm(alpha=1/14, adjust=False).mean()
 
-    votes = rf_vote + tech_vote + conf_vote
+        t_df['Vol_Change'] = t_df['Volume'].pct_change()
+        t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
 
-    if votes >= 2:
-        signal = "STRONG BUY"
-    elif votes == 1:
-        signal = "BUY"
-    elif votes == 0:
-        signal = "HOLD"
-    else:
-        signal = "SELL"
+        # 🚀 YENİ: TİLSON T3 HESAPLAMASI
+        v = 0.7  # Hacim Faktörü (Volume Factor)
+        period = 8 # Tilson için ideal kısa-orta periyot
+        
+        e1 = t_df['Close'].ewm(span=period, adjust=False).mean()
+        e2 = e1.ewm(span=period, adjust=False).mean()
+        e3 = e2.ewm(span=period, adjust=False).mean()
+        e4 = e3.ewm(span=period, adjust=False).mean()
+        e5 = e4.ewm(span=period, adjust=False).mean()
+        e6 = e5.ewm(span=period, adjust=False).mean()
+        
+        c1 = -v**3
+        c2 = 3*(v**2) + 3*(v**3)
+        c3 = -6*(v**2) - 3*v - 3*(v**3)
+        c4 = 1 + 3*v + v**3 + 3*(v**2)
+        
+        t_df['Tilson_T3'] = c1*e6 + c2*e5 + c3*e4 + c4*e3
+        # Fiyat Tilson'un üzerindeyse Pozitif (1), Altındaysa Negatif (-1)
+        t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
 
-    return {
-        "rf_prediction": round(rf_prediction, 4),
-        "last_close": round(last_close, 4),
-        "votes": votes,
-        "signal": signal,
-        "confidence": confidence
-    }
+        # =================================================================
+        # 3. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
+        # =================================================================
+        t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
+        
+        # Yapay Zeka Öğrenim Setine Tilson Da Eklendi!
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend']
+        
+        t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        ml_df = t_df.dropna()
 
+        if len(ml_df) < 120:
+            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
 
+        X = ml_df[features]
+        y = ml_df['Target_Return']
+        son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
+
+        gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
+        
+        svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])
+        ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
+        
+        ensemble = VotingRegressor(estimators=[('gb', gb), ('svr', svr_pipeline), ('ridge', ridge_pipeline)], weights=[2, 1, 1])
+        ensemble.fit(X, y)
+
+        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
+        anlik_fiyat = float(t_df['Close'].iloc[-1])
+        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
+        
+        # =================================================================
+        # 4. KANTİTATİF SİNYAL YÖNETİMİ (TİLSON ONAYLI)
+        # =================================================================
+        adx_gucu = t_df['ADX'].iloc[-1]
+        cmf_pozitif = t_df['CMF'].iloc[-1] > 0
+        z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 
+        macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
+        trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
+        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1 # 🚀 YENİ: Fiyat Tilson'un Üstünde Mi?
+        
+        # Toplam Teyit Skoru Artık 5 Üzerinden Hesaplanıyor!
+        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay])
+        
+        sinyal = "NÖTR"
+        guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
+
+        # ADX Filtresi
+        if adx_gucu < 20:
+            sinyal = "NÖTR (Yatay Piyasa)"
+            guven_skoru -= 20
+        else:
+            # Yapay Zeka beklentisi ve Tilson ağırlıklı Teknik Onay
+            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 4:
+                sinyal = "🚀 GÜÇLÜ AL"
+                guven_skoru = min(guven_skoru + 25, 99.0)
+            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3:
+                sinyal = "🟢 AL"
+                guven_skoru = min(guven_skoru + 15, 99.0)
+            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 1) or (t_df['Tilson_Trend'].iloc[-1] == -1 and t_df['MACD_Hist'].iloc[-1] < 0):
+                # YENİ KURAL: Fiyat Tilson'un altına düştüyse ve MACD negatifse acımasızca SAT!
+                sinyal = "⚠️ SAT"
+
+        return {
+            "rf_prediction": round(hedef_fiyat, 2),
+            "signal": sinyal,
+            "confidence": max(round(guven_skoru, 1), 0.0),
+            "expected_return_pct": round(beklenen_getiri_pct, 2) 
+        }
+    except Exception as e:
+        anlik = float(df['Close'].iloc[-1]) if not df.empty else 0.0
+        return {
+            "rf_prediction": anlik, 
+            "signal": "HATA", 
+            "confidence": 0.0,
+            "expected_return_pct": 0.0
+        }
 def ai_dashboard(symbol, df):
     return {
         "symbol": symbol,

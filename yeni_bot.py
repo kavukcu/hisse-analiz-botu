@@ -60,7 +60,6 @@ def python_istatistik_analizi(df):
 
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 import numpy as np
-
 def ensemble_prediction(df):
     try:
         import numpy as np
@@ -154,14 +153,19 @@ def ensemble_prediction(df):
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
-        # 🛠️ DÜZELTME 2: 120 gün limiti 40'a düşürüldü. Ayrıca `None` hatasını önlemek için `float()` kullanıldı.
-        if len(ml_df) < 40:
+        # 🎯 KRİTİK DÜZELTME: Limit 40'tan 15'e düşürüldü.
+        if len(ml_df) < 15:
             anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
             return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
         y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
+
+        # EĞER SON VERİ İÇİNDE NaN VARSA GÜVENLİ ÇIKIŞ YAP (Çökmeyi Önler)
+        if np.isnan(son_veri).any():
+             anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
+             return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
         svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])

@@ -74,93 +74,159 @@ import numpy as np
 
 def ensemble_prediction(df):
     try:
-        t_df = stokastik_hesapla(df.copy())
+        import numpy as np
+        import pandas as pd
+        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+        from sklearn.svm import SVR
+        from sklearn.linear_model import Ridge
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
         
-        # --- 1. TEKNİK GÖSTERGELER (AI İÇİN ÖZELLİK MÜHENDİSLİĞİ) ---
-        # RSI Hesaplama
+        # 🛠️ DÜZELTME 1: .copy() kaldırıldı. Böylece Stoch_K sizin ana tablonuza işlenebilecek.
+        t_df = stokastik_hesapla(df)
+        
+        # =================================================================
+        # 1. STANDART TEKNİK GÖSTERGELER
+        # =================================================================
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-        rs = gain / loss
-        t_df['RSI'] = 100 - (100 / (1 + rs))
+        t_df['RSI'] = 100 - (100 / (1 + gain / loss.replace(0, 0.0001)))
 
-        # YENİ: MACD (Trend Gücü ve Yönü)
-        exp1 = t_df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = t_df['Close'].ewm(span=26, adjust=False).mean()
-        t_df['MACD'] = exp1 - exp2
-        t_df['MACD_Signal'] = t_df['MACD'].ewm(span=9, adjust=False).mean()
-        t_df['MACD_Hist'] = t_df['MACD'] - t_df['MACD_Signal']
+        macd = t_df['Close'].ewm(span=12, adjust=False).mean() - t_df['Close'].ewm(span=26, adjust=False).mean()
+        t_df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
 
-        # YENİ: Bollinger Bantları (Volatilite ve Sıkışma)
-        t_df['BB_Orta'] = t_df['Close'].rolling(window=20).mean()
-        t_df['BB_Std'] = t_df['Close'].rolling(window=20).std()
-        t_df['BB_Ust'] = t_df['BB_Orta'] + (t_df['BB_Std'] * 2)
-        t_df['BB_Alt'] = t_df['BB_Orta'] - (t_df['BB_Std'] * 2)
+        bb_orta = t_df['Close'].rolling(window=20).mean()
+        bb_std = t_df['Close'].rolling(window=20).std()
+        bb_fark = (bb_std * 4).replace(0, 0.0001)
+        t_df['BB_Pozisyon'] = (t_df['Close'] - (bb_orta - (bb_std * 2))) / bb_fark
+
+        high_low = t_df['High'] - t_df['Low']
+        high_close = (t_df['High'] - t_df['Close'].shift()).abs()
+        low_close = (t_df['Low'] - t_df['Close'].shift()).abs()
+        t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
+
+        # =================================================================
+        # 2. İLERİ DÜZEY QUANT (TİLSON, ADX, Z-SCORE)
+        # =================================================================
+        t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
+
+        mf_multiplier = ((t_df['Close'] - t_df['Low']) - (t_df['High'] - t_df['Close'])) / (t_df['High'] - t_df['Low']).replace(0, 0.0001)
+        mf_volume = mf_multiplier * t_df['Volume']
+        t_df['CMF'] = mf_volume.rolling(20).sum() / t_df['Volume'].rolling(20).sum().replace(0, 0.0001)
+
+        up_move = t_df['High'] - t_df['High'].shift(1)
+        down_move = t_df['Low'].shift(1) - t_df['Low']
+        pos_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+        neg_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
         
-        # AI için kritik veri: Fiyat Bollinger Bandının neresinde? (0 = Dipte, 1 = Tepede)
-        t_df['BB_Pozisyon'] = (t_df['Close'] - t_df['BB_Alt']) / (t_df['BB_Ust'] - t_df['BB_Alt'])
+        atr_14 = t_df['ATR'].replace(0, 0.0001)
+        pos_di = 100 * (pd.Series(pos_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
+        neg_di = 100 * (pd.Series(neg_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
+        dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di).replace(0, 0.0001)
+        t_df['ADX'] = dx.ewm(alpha=1/14, adjust=False).mean()
 
-        # --- 2. YAPAY ZEKA VERİ SETİ ---
-        # AI artık sadece fiyata değil; trende (MACD), hacme (Volume), momentum (RSI, Stoch) ve sıkışmaya (BB) bakıyor!
-        features = ['RSI', 'Stoch_K', 'Stoch_D', 'MACD_Hist', 'BB_Pozisyon', 'Volume']
-        t_df['Target'] = t_df['Close'].shift(-5) # Hedef: 5 gün sonraki fiyat
+        t_df['Vol_Change'] = t_df['Volume'].pct_change()
+        t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
+
+        v = 0.7 
+        period = 8 
+        e1 = t_df['Close'].ewm(span=period, adjust=False).mean()
+        e2 = e1.ewm(span=period, adjust=False).mean()
+        e3 = e2.ewm(span=period, adjust=False).mean()
+        e4 = e3.ewm(span=period, adjust=False).mean()
+        e5 = e4.ewm(span=period, adjust=False).mean()
+        e6 = e5.ewm(span=period, adjust=False).mean()
+        c1 = -v**3
+        c2 = 3*(v**2) + 3*(v**3)
+        c3 = -6*(v**2) - 3*v - 3*(v**3)
+        c4 = 1 + 3*v + v**3 + 3*(v**2)
+        t_df['Tilson_T3'] = c1*e6 + c2*e5 + c3*e4 + c4*e3
+        t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
+
+        # =================================================================
+        # 3. FİBONACCİ & 5-8 HIZLI EMA
+        # =================================================================
+        roll_high = t_df['High'].rolling(window=50).max()
+        roll_low = t_df['Low'].rolling(window=50).min()
+        fark = (roll_high - roll_low).replace(0, 0.0001)
+        t_df['Fib_Level'] = (t_df['Close'] - roll_low) / fark
         
+        t_df['EMA5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
+        t_df['EMA8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
+        t_df['EMA_5_8_Trend'] = np.where(t_df['EMA5'] > t_df['EMA8'], 1, -1)
+
+        # =================================================================
+        # 4. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
+        # =================================================================
+        t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
+        
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend', 'Fib_Level', 'EMA_5_8_Trend']
+        
+        t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
-        if len(ml_df) < 50:
-            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
+        # 🛠️ DÜZELTME 2: 120 gün limiti 40'a düşürüldü. Ayrıca `None` hatasını önlemek için `float()` kullanıldı.
+        if len(ml_df) < 40:
+            anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
+            return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
-        y = ml_df['Target']
+        y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # --- 3. ÇİFT MOTORLU YAPAY ZEKA (GERÇEK ENSEMBLE) ---
-        # Model 1: Random Forest (Ağaçların Bilgeliği - Dengeli Tahmin)
-        rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
-        rf_model.fit(X, y)
-        rf_tahmin = rf_model.predict(son_veri)[0]
-
-        # Model 2: Gradient Boosting (Hatalardan Öğrenen - Agresif Tahmin)
-        gb_model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
-        gb_model.fit(X, y)
-        gb_tahmin = gb_model.predict(son_veri)[0]
-
-        # İki modelin güçlerini birleştir (Ortalama)
-        hedef_fiyat = (rf_tahmin + gb_tahmin) / 2
-        anlik_fiyat = t_df['Close'].iloc[-1]
+        gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
+        svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])
+        ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
         
-        getiri_potansiyeli = ((hedef_fiyat - anlik_fiyat) / anlik_fiyat) * 100
+        ensemble = VotingRegressor(estimators=[('gb', gb), ('svr', svr_pipeline), ('ridge', ridge_pipeline)], weights=[2, 1, 1])
+        ensemble.fit(X, y)
+
+        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
+        anlik_fiyat = float(t_df['Close'].iloc[-1])
+        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
-        # --- 4. TEKNİK & YAPAY ZEKA MELEZ SİNYALİ ---
-        # Sadece AI'ın getiri beklemesi yetmez, Teknik taraf da onaylamalı!
-        macd_al = t_df['MACD_Hist'].iloc[-1] > 0
-        bb_dipte = t_df['BB_Pozisyon'].iloc[-1] < 0.25 # Fiyat alt banda yakın mı?
+        # =================================================================
+        # 5. KANTİTATİF SİNYAL YÖNETİMİ
+        # =================================================================
+        adx_gucu = t_df['ADX'].iloc[-1]
+        cmf_pozitif = t_df['CMF'].iloc[-1] > 0
+        z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 
+        macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
+        trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
+        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1
+        hizli_tetik_onay = t_df['EMA_5_8_Trend'].iloc[-1] == 1
+        
+        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay, hizli_tetik_onay])
         
         sinyal = "NÖTR"
-        if getiri_potansiyeli > 3.0 and macd_al:
-            sinyal = "🚀 GÜÇLÜ AL"
-        elif getiri_potansiyeli > 1.5:
-            sinyal = "🟢 AL"
-        elif getiri_potansiyeli < -2.0:
-            sinyal = "⚠️ SAT"
+        guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
 
-        # Teknik göstergeler AI'ı onaylıyorsa Güven Skoru artar
-        guven_skoru = min(abs(getiri_potansiyeli) * 8 + 60, 99.0)
-        if macd_al and bb_dipte and "AL" in sinyal:
-            guven_skoru = min(guven_skoru + 15, 99.0) 
+        if adx_gucu < 20:
+            sinyal = "NÖTR (Yatay)"
+            guven_skoru -= 20
+        else:
+            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 5:
+                sinyal = "🚀 GÜÇLÜ AL"
+                guven_skoru = min(guven_skoru + 25, 99.0)
+            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3 and hizli_tetik_onay:
+                sinyal = "🟢 AL"
+                guven_skoru = min(guven_skoru + 15, 99.0)
+            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 2) or (not tilson_onay and not hizli_tetik_onay):
+                sinyal = "⚠️ SAT"
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
-            "confidence": round(guven_skoru, 1),
-            "expected_return_pct": round(getiri_potansiyeli, 2) 
+            "confidence": max(round(guven_skoru, 1), 0.0),
+            "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
     except Exception as e:
-        anlik = df['Close'].iloc[-1] if not df.empty else 0
+        anlik_hata_guvenli = round(float(df['Close'].iloc[-1]), 2) if not df.empty else 0.0
         return {
-            "rf_prediction": anlik, 
+            "rf_prediction": anlik_hata_guvenli, 
             "signal": "HATA", 
-            "confidence": 0,
+            "confidence": 0.0,
             "expected_return_pct": 0.0
         }
 def institutional_decision(df):
@@ -878,7 +944,7 @@ with tabs[2]:
                     kod = str(row["Varlık"]).upper(); mal = float(row["Maliyet"]); lot = float(row["Lot"])
                     if kod and lot > 0:
                         try:
-                            c_veri = yf.download(kod, period="2y", progress=False, session=oturum)
+                            c_veri = yf.download(kod, period="1y", progress=False, session=oturum)
                             if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
                             g_fiyat = float(c_veri['Close'].iloc[-1])
                             top_mal += (mal * lot); top_deg += (g_fiyat * lot)

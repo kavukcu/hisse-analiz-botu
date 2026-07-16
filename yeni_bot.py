@@ -260,6 +260,12 @@ def veri_yukle(ticker, start, end):
     for _ in range(3):
         try:
             veri = yf.download(ticker, period="1y")
+            df = yf.download(ticker, period="1y")
+
+# VERİ KONTROLÜ EKLENTİSİ
+            if df.empty:
+                st.warning(f"⚠️ {ticker} sembolü için yeterli veri çekilemedi. Lütfen hisse kodunu kontrol edin.")
+                st.stop()  # Uygulamanın alt satırlara inip çökmesini engeller ve burada durdurur
             ticker,
             start=start,
             end=end,
@@ -591,9 +597,13 @@ with tabs[0]:
 df = stokastik_hesapla(df)
 
 # Güncel (en son) değerleri alıyoruz
-son_k = df['Stoch_K'].iloc[-1]
+# Eğer tablo boş değilse ve Stoch_K sütunu gerçekten varsa son değeri al
+if not df.empty and 'Stoch_K' in df.columns:
+    son_k = float(df['Stoch_K'].iloc[-1])
+else:
+    son_k = 50.0  # Tablo boşsa uygulamanın çökmemesi için nötr (50) bir değer ata
 son_d = df['Stoch_D'].iloc[-1]
-
+son_d = 50.0
 # Stoch sinyali üretme mantığı
 stoch_sinyal = "NÖTR"
 sinyal_rengi = "normal"

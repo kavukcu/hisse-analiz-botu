@@ -261,32 +261,34 @@ def veri_yukle(ticker, start, end):
     import time, logging
     for _ in range(3):
         try:
-            veri = yf.download(ticker, period="1y")
-            df = yf.download(ticker, period="1y")
+            # Parametreler tek bir yf.download çağrısında birleştirildi
+            df = yf.download(
+                ticker,
+                start=start,
+                end=end,
+                session=oturum,
+                progress=False,
+                auto_adjust=True,
+                threads=True
+            )
 
-# VERİ KONTROLÜ EKLENTİSİ
+            # VERİ KONTROLÜ EKLENTİSİ
             if df.empty:
                 st.warning(f"⚠️ {ticker} sembolü için yeterli veri çekilemedi. Lütfen hisse kodunu kontrol edin.")
                 st.stop()  # Uygulamanın alt satırlara inip çökmesini engeller ve burada durdurur
-            ticker,
-            start=start,
-            end=end,
-            session=oturum,
-            progress=False,
-            auto_adjust=True,
-            threads=True
             
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
+                
             gerekli=["Open","High","Low","Close","Volume"]
             if df.empty or any(c not in df.columns for c in gerekli):
                 raise ValueError("Eksik veya boş veri")
+                
             return df.dropna()
         except Exception as e:
             logging.warning(f"Veri indirilemedi: {e}")
             time.sleep(1)
     return pd.DataFrame()
-
 @st.cache_data(show_spinner=False)
 def sirket_bilgisi_getir(ticker):
     try: 
@@ -418,13 +420,12 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     
     # Veri Yetersizliği Kontrolü
     if len(df_ml) < 15:
-        # Veri yetersizse, hata vermek yerine anlık fiyatı sabit döndür
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)] if not df.empty else []
         tahminler = [son_fiyat] * gelecek_gun
         return tarihler, tahminler
 
-    # Model Eğitimi (Veri yeterliyse burası çalışır)
+    # Model Eğitimi
     X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
     y = df_ml['Close']
     
@@ -450,47 +451,9 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
         # Bir sonraki iterasyon için değerleri kaydır ve güncelle
         lag2 = lag1
         lag1 = pred
-        sma_10 = (sma_10 * 9 + pred) / 10  # Tahmini fiyata göre SMA'yı yumuşatarak güncelle
-        hacim_deg = 0.0  # Gelecek hacim değişimi nötr
-        rsi_14 = 50.0    # Gelecek RSI nötr
-        
-    tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
-    return tarihler, tahminler
-
-    # Veriler temiz olduğuna göre eğitime geçebiliriz
-    X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
-    y = df_ml['Close']
-    
-    model = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
-    model.fit(X.values, y.values)
-    
-    tahminler = []
-    son_satir = df_ml.iloc[-1]
-    
-    lag1 = son_satir['Close']
-    lag2 = son_satir['Lag1']
-    sma_10 = son_satir['SMA_10']
-    hacim_deg = son_satir['Hacim_Degisim']
-    rsi_14 = son_satir['RSI_14']
-    
-    for _ in range(gelecek_gun):
-        pred = model.predict([[lag1, lag2, sma_10, hacim_deg, rsi_14]])[0]
-        tahminler.append(pred)
-        
-        # Gelecek iterasyon için değerleri kaydır
-        lag2 = lag1
-        lag1 = pred
-        sma_10 = (sma_10 * 9 + pred) / 10
-        # Tahmin sürecinde Hacim ve RSI nötr varsayılır
-        hacim_deg = 0.0 
-        rsi_14 = 50.0 
-        
-    # Döngü bittikten sonra tarihleri hesapla ve sonucu dön
-    tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
-    return tarihler, tahminler
-        # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
-    hacim_deg = 0.0 
-    rsi_14 = 50.0 
+        sma_10 = (sma_10 * 9 + pred) / 10  
+        hacim_deg = 0.0  
+        rsi_14 = 50.0    
         
     tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
@@ -680,7 +643,10 @@ if goster_smc:
                     fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
                 elif df['FVG_Bearish'].iloc[i]:
                     fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-                    if goster_fibo: max_fiyat = df['High'].max()
+                    
+        # Fibo hesaplaması For döngüsünün ve SMC kontrolünün dışına/hizasına alındı
+if goster_fibo: 
+            max_fiyat = df['High'].max()
             min_fiyat = df['Low'].min()
             fark = max_fiyat - min_fiyat
             seviyeler = {
@@ -701,6 +667,7 @@ if goster_smc:
                 else:
                     fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
         # YENİ EKLENEN GRAFİK FORMASYONLARI KODU (İkili Tepe & Dip)if goster_grafik_formasyon:
+if goster_grafik_formasyon:
             ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
             # İkili Tepeleri Çiz (Ayı Formasyonu - Kırmızı Kesikli Çizgi)
             for tepe in ikili_tepeler:
@@ -710,7 +677,6 @@ if goster_smc:
             for dip in ikili_dipler:
                 fig.add_shape(type="line", x0=dip[0], y0=dip[2], x1=dip[1], y1=dip[3], line=dict(color="green", width=3, dash="dot"), row=1, col=1)
                 fig.add_annotation(x=dip[1], y=dip[3], text="📈 İkili Dip", showarrow=True, arrowhead=1, ax=0, ay=30, font=dict(color="green"), row=1, col=1)
-                
             if goster_vwap:
                 fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
             if goster_formasyon:

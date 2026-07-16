@@ -13,15 +13,18 @@ def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
         high_max = df['High'].rolling(window=k_periyot).max()
+        
+        # %K Çizgisi (Hızlı Çizgi)
         df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
+        
+        # %D Çizgisi (Yavaş Çizgi)
         df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
+        
         return df
     except Exception as e:
         df['Stoch_K'] = 50.0
         df['Stoch_D'] = 50.0
         return df
-        
-
         # %K Çizgisi (Hızlı Çizgi)
         df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
         
@@ -577,6 +580,7 @@ with c_stoch2:
     st.metric(label="Stoch %D (Yavaş)", value=f"{son_d:.2f}")
 with c_stoch3:
     st.metric(label="Stoch Durumu", value=stoch_sinyal, delta="Trend Dönüşü Olabilir" if "AŞIRI" in stoch_sinyal else None, delta_color=sinyal_rengi)
+# === Sekme 10: AI Ensemble & Kurumsal Karar ===
 with tabs[10]:
     st.subheader("🧠 v85 AI Ensemble & Kurumsal Karar Motoru (BIST Özel)")
     
@@ -595,46 +599,42 @@ with tabs[10]:
         
         st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
         st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
-        st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")        
-        st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
-        st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
         st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")
-        "📈 SMC & Quant Fiyat Hareketi", "🔍 Akıllı Asenkron Radar", "💼 Cüzdan & Akıllı Stop", 
-        "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası", 
-        "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Durumu", "🧬 Python İstatistik"
 
+# === Sekme 0: ANA GRAFİK (Doğru Girinti ile) ===
+with tabs[0]:
+    st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
+
+    c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
+    with c_ayar1:
+        goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
+        goster_smc = st.checkbox("🏦 FVG & Likidite Boşlukları (SMC)", value=True)
+        goster_fibo = st.checkbox("📐 Altın Oran (Fibonacci)", value=True)
+    with c_ayar2:
+        goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip (Makro)", value=True)
+        goster_formasyon = st.checkbox("🕯️ Mum Formasyonları (Mikro)", value=False)
+    with c_ayar3:
+        goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
+        goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
+        
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
     
-        st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
-
-        c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
-        with c_ayar1:
-            goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
-            goster_smc = st.checkbox("🏦 FVG & Likidite Boşlukları (SMC)", value=True)
-            goster_fibo = st.checkbox("📐 Altın Oran (Fibonacci)", value=True)
-        with c_ayar2:
-            goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip (Makro)", value=True)
-            goster_formasyon = st.checkbox("🕯️ Mum Formasyonları (Mikro)", value=False)
-        with c_ayar3:
-            goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
-            goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
-            
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
+    
+    # VPVR Çizimi
+    if goster_vpvr:
+        hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
+        bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
+        max_hacim = hacim_bölümleri.max()
+        sure_uzunlugu = df.index[-1] - df.index[0]
+        x_koordinatlari = [df.index[0] + sure_uzunlugu * 0.3 * (v / max_hacim) for v in hacim_bölümleri]
         
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
+        for i in range(len(bölüm_merkezleri)):
+            fig.add_shape(type="line", x0=df.index[0], y0=bölüm_merkezleri[i], x1=x_koordinatlari[i], y1=bölüm_merkezleri[i], line=dict(color="rgba(100, 150, 255, 0.4)", width=4), row=1, col=1)
         
-        if goster_vpvr:
-            hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
-            bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
-            max_hacim = hacim_bölümleri.max()
-            sure_uzunlugu = df.index[-1] - df.index[0]
-            x_koordinatlari = [df.index[0] + sure_uzunlugu * 0.3 * (v / max_hacim) for v in hacim_bölümleri]
-            
-            for i in range(len(bölüm_merkezleri)):
-                fig.add_shape(type="line", x0=df.index[0], y0=bölüm_merkezleri[i], x1=x_koordinatlari[i], y1=bölüm_merkezleri[i], line=dict(color="rgba(100, 150, 255, 0.4)", width=4), row=1, col=1)
-            
-            poc_index = np.argmax(hacim_bölümleri)
-            poc_fiyat = bölüm_merkezleri[poc_index]
-            fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
+        poc_index = np.argmax(hacim_bölümleri)
+        poc_fiyat = bölüm_merkezleri[poc_index]
+        fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
 if goster_smc:
             for i in range(2, len(df)):
                 # Taşmayı önlemek için güvenli indeks hesaplaması
@@ -644,26 +644,47 @@ if goster_smc:
                     fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
                 elif df['FVG_Bearish'].iloc[i]:
                     fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-                if goster_fibo: max_fiyat = df['High'].max()
-            min_fiyat = df['Low'].min()
-            fark = max_fiyat - min_fiyat
-            seviyeler = {
-                0: "100% (Tepe)", 
-                0.236: "76.4%", 
-                0.382: "61.8%", 
-                0.5: "50%", 
-                0.618: "38.2% (Altın Oran)", 
-                0.786: "21.4%", 
-                1: "0% (Dip)"
-            }
-            renkler = ['#ff0000', '#ff9900', '#ffff00', '#33cc33', '#00ffcc', '#cc33ff', '#999999']
+if goster_smc:
+        for i in range(2, len(df)):
+            bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
             
-            for i, (level, oran) in enumerate(seviyeler.items()):
-                fiyat_seviyesi = max_fiyat - (fark * level)
-                if level == 0.618:
-                    fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
-                else:
-                    fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
+            if df['FVG_Bullish'].iloc[i]:
+                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+            elif df['FVG_Bearish'].iloc[i]:
+                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+    
+    # DİKKAT: Fibo hesaplaması artık döngünün dışında
+if goster_smc:
+        for i in range(2, len(df)):
+            bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
+            
+            if df['FVG_Bullish'].iloc[i]:
+                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+            elif df['FVG_Bearish'].iloc[i]:
+                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
+    
+    # DİKKAT: Fibo hesaplaması artık döngünün dışında
+if goster_fibo: 
+        max_fiyat = df['High'].max()
+        min_fiyat = df['Low'].min()
+        fark = max_fiyat - min_fiyat
+        seviyeler = {
+            0: "100% (Tepe)", 
+            0.236: "76.4%", 
+            0.382: "61.8%", 
+            0.5: "50%", 
+            0.618: "38.2% (Altın Oran)", 
+            0.786: "21.4%", 
+            1: "0% (Dip)"
+        }
+        renkler = ['#ff0000', '#ff9900', '#ffff00', '#33cc33', '#00ffcc', '#cc33ff', '#999999']
+        
+        for i, (level, oran) in enumerate(seviyeler.items()):
+            fiyat_seviyesi = max_fiyat - (fark * level)
+            if level == 0.618:
+                fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
+            else:
+                fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
         # YENİ EKLENEN GRAFİK FORMASYONLARI KODU (İkili Tepe & Dip)
             if goster_grafik_formasyon:
                 ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
@@ -738,7 +759,7 @@ with tabs[1]:
         "GARAN.IS", "GUBRF.IS", "HEKTS.IS", "ISCTR.IS", "KCHOL.IS", 
         "KONTR.IS", "KOZAL.IS", "KRDMD.IS", "ODAS.IS", "PGSUS.IS", 
         "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", 
-        "TOASO.IS", "YKBNK.IS", "ACSEL.IS" "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
+        "TOASO.IS", "YKBNK.IS", "ACSEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
     ]
 
     # =====================================================================

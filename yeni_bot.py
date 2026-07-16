@@ -398,65 +398,87 @@ from datetime import timedelta
 from sklearn.ensemble import RandomForestRegressor
 
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
-    # Orijinal veriyi bozmamak için kopyasını alıyoruz
-    df_ml = df[['Close', 'Volume']].copy()
+    # Kütüphaneleri fonksiyonun içinde çağırarak NameError (Tanımsız değişken) çökmelerini KESİN OLARAK engelliyoruz.
+    import numpy as np
+    import pandas as pd
+    from datetime import timedelta
+    from sklearn.ensemble import RandomForestRegressor
+    import streamlit as st
     
-    # Özellikleri (Features) hesaplıyoruz
-    df_ml['Lag1'] = df_ml['Close'].shift(1)
-    df_ml['Lag2'] = df_ml['Close'].shift(2)
-    df_ml['SMA_10'] = df_ml['Close'].rolling(window=10).mean()
-    df_ml['Hacim_Degisim'] = df_ml['Volume'].pct_change()
-    
-    # RSI Hesaplaması
-    delta = df_ml['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
-    rs = gain / (loss + 1e-9)
-    df_ml['RSI_14'] = 100 - (100 / (1 + rs))
-    
-    # KÖK ÇÖZÜM: Sonsuz ve boş verileri (NaN) temizle
-    df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df_ml.dropna(inplace=True)
-    
-    # Veri Yetersizliği Kontrolü
-    if len(df_ml) < 15:
-        son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
-        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)] if not df.empty else []
-        tahminler = [son_fiyat] * gelecek_gun
+    try:
+        # 1. Temel Veri Kontrolü: Veri boşsa veya çok kısaysa tahmini atla
+        if df is None or df.empty or len(df) < 15:
+            son_fiyat = float(df['Close'].iloc[-1]) if (df is not None and not df.empty and 'Close' in df.columns) else 0.0
+            tarihler = [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+            return tarihler, [son_fiyat] * gelecek_gun
+
+        # 2. Model için veriyi hazırlama
+        df_ml = df[['Close', 'Volume']].copy()
+        df_ml['Lag1'] = df_ml['Close'].shift(1)
+        df_ml['Lag2'] = df_ml['Close'].shift(2)
+        df_ml['SMA_10'] = df_ml['Close'].rolling(window=10).mean()
+        
+        # Sıfıra bölünme veya tanımsız hacim hatalarını önleme
+        df_ml['Hacim_Degisim'] = df_ml['Volume'].pct_change().fillna(0.0)
+        df_ml['Hacim_Degisim'].replace([np.inf, -np.inf], 0.0, inplace=True)
+        
+        # RSI Hesaplaması
+        delta = df_ml['Close'].diff()
+        gain = delta.where(delta > 0, 0.0).rolling(window=14).mean()
+        loss = -delta.where(delta < 0, 0.0).rolling(window=14).mean()
+        rs = gain / (loss + 1e-9)
+        df_ml['RSI_14'] = 100 - (100 / (1 + rs))
+        
+        # Boş ve sonsuz değerleri NaN yapıp temizle
+        df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df_ml.dropna(inplace=True)
+        
+        # Temizlik sonrası veri yeterliliği son kontrolü
+        if len(df_ml) < 5:
+            son_fiyat = float(df['Close'].iloc[-1])
+            tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+            return tarihler, [son_fiyat] * gelecek_gun
+
+        # 3. Makine Öğrenmesi Eğitimi
+        X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
+        y = df_ml['Close']
+        
+        # Model (Hızlı ve optimize edilmiş ayarlar)
+        model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
+        model.fit(X.values, y.values)
+        
+        # 4. Gelecek Tahmini Döngüsü
+        tahminler = []
+        son_satir = df_ml.iloc[-1]
+        
+        lag1 = float(son_satir['Close'])
+        lag2 = float(son_satir['Lag1'])
+        sma_10 = float(son_satir['SMA_10'])
+        hacim_deg = float(son_satir['Hacim_Degisim'])
+        rsi_14 = float(son_satir['RSI_14'])
+        
+        for _ in range(gelecek_gun):
+            # Numpy dizisine çevirerek tahmin yap
+            input_data = np.array([[lag1, lag2, sma_10, hacim_deg, rsi_14]])
+            pred = float(model.predict(input_data)[0])
+            tahminler.append(pred)
+            
+            # Değerleri bir sonraki gün için kaydır ve güncelle
+            lag2 = lag1
+            lag1 = pred
+            sma_10 = (sma_10 * 9 + pred) / 10  
+            hacim_deg = 0.0  
+            rsi_14 = 50.0    
+            
+        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
         return tarihler, tahminler
 
-    # Model Eğitimi
-    X = df_ml[['Lag1', 'Lag2', 'SMA_10', 'Hacim_Degisim', 'RSI_14']]
-    y = df_ml['Close']
-    
-    model = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
-    model.fit(X.values, y.values) # .values kullanımı feature isim uyarılarını engeller
-    
-    # Gelecek Tahmini Döngüsü
-    tahminler = []
-    son_satir = df_ml.iloc[-1]
-    
-    lag1 = son_satir['Close']
-    lag2 = son_satir['Lag1']
-    sma_10 = son_satir['SMA_10']
-    hacim_deg = son_satir['Hacim_Degisim']
-    rsi_14 = son_satir['RSI_14']
-    
-    for _ in range(gelecek_gun):
-        # Tahmin yap
-        input_data = np.array([[lag1, lag2, sma_10, hacim_deg, rsi_14]])
-        pred = model.predict(input_data)[0]
-        tahminler.append(pred)
-        
-        # Bir sonraki iterasyon için değerleri kaydır ve güncelle
-        lag2 = lag1
-        lag1 = pred
-        sma_10 = (sma_10 * 9 + pred) / 10  
-        hacim_deg = 0.0  
-        rsi_14 = 50.0    
-        
-    tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
-    return tarihler, tahminler
+    except Exception as e:
+        # EĞER HALA HATA VARSA: Radar tablosunu bozmak yerine hatayı ekrana kırmızı uyarı olarak yazdıracak
+        st.error(f"Yapay Zeka Tahmin Modülünde Hata: {str(e)}")
+        son_fiyat = float(df['Close'].iloc[-1]) if (df is not None and not df.empty and 'Close' in df.columns) else 0.0
+        tarihler = [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+        return tarihler, [son_fiyat] * gelecek_gun
 # --- SİDEBAR VE PİYASA SEÇİMİ ---
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])

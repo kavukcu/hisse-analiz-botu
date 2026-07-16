@@ -86,7 +86,7 @@ def ensemble_prediction(df):
         t_df = stokastik_hesapla(df.copy())
         
         # =================================================================
-        # 1. STANDART TEKNİK GÖSTERGELER (RSI, MACD, BB, ATR)
+        # 1. STANDART TEKNİK GÖSTERGELER
         # =================================================================
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
@@ -107,17 +107,15 @@ def ensemble_prediction(df):
         t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
 
         # =================================================================
-        # 2. İLERİ DÜZEY QUANT GÖSTERGELERİ (ADX, CMF, Z-SCORE)
+        # 2. İLERİ DÜZEY QUANT & YENİ EKLENEN TİLSON T3
         # =================================================================
-        # Z-SCORE (İstatistiksel Mean Reversion) - Fiyat ortalamadan ne kadar saptı?
+        # Z-SCORE & CMF & ADX
         t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
 
-        # CMF (Chaikin Money Flow) - Hacim + Kapanış Lokasyonu (Kurumsal İz)
         mf_multiplier = ((t_df['Close'] - t_df['Low']) - (t_df['High'] - t_df['Close'])) / (t_df['High'] - t_df['Low']).replace(0, 0.0001)
         mf_volume = mf_multiplier * t_df['Volume']
         t_df['CMF'] = mf_volume.rolling(20).sum() / t_df['Volume'].rolling(20).sum().replace(0, 0.0001)
 
-        # ADX (Average Directional Index) - Piyasada trend var mı, yoksa yatay mı?
         up_move = t_df['High'] - t_df['High'].shift(1)
         down_move = t_df['Low'].shift(1) - t_df['Low']
         pos_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
@@ -132,48 +130,50 @@ def ensemble_prediction(df):
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
         t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
 
+        # 🚀 YENİ: TİLSON T3 HESAPLAMASI
+        v = 0.7  # Hacim Faktörü (Volume Factor)
+        period = 8 # Tilson için ideal kısa-orta periyot
+        
+        e1 = t_df['Close'].ewm(span=period, adjust=False).mean()
+        e2 = e1.ewm(span=period, adjust=False).mean()
+        e3 = e2.ewm(span=period, adjust=False).mean()
+        e4 = e3.ewm(span=period, adjust=False).mean()
+        e5 = e4.ewm(span=period, adjust=False).mean()
+        e6 = e5.ewm(span=period, adjust=False).mean()
+        
+        c1 = -v**3
+        c2 = 3*(v**2) + 3*(v**3)
+        c3 = -6*(v**2) - 3*v - 3*(v**3)
+        c4 = 1 + 3*v + v**3 + 3*(v**2)
+        
+        t_df['Tilson_T3'] = c1*e6 + c2*e5 + c3*e4 + c4*e3
+        # Fiyat Tilson'un üzerindeyse Pozitif (1), Altındaysa Negatif (-1)
+        t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
+
         # =================================================================
         # 3. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
         # =================================================================
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend']
+        # Yapay Zeka Öğrenim Setine Tilson Da Eklendi!
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend']
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
-        if len(ml_df) < 120: # Daha kompleks modeller için daha fazla veri şart
+        if len(ml_df) < 120:
             return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
         y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # YENİ AI KONSEYİ: 3 Farklı Matematiksel Aile (Ağaç, Uzaklık, Lineer)
-        
-        # 1. Model: Ağaç Tabanlı (Manipülasyonlara dirençli Huber Loss ile)
         gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
         
-        # 2. Model: Destek Vektör Makineleri (SVR) - Doğrusal olmayan karmaşık ilişkileri bulur
-        # SVR verilerin ölçeklendirilmesine ihtiyaç duyar, bu yüzden Pipeline kullanıyoruz.
-        svr_pipeline = Pipeline([
-            ('scaler', StandardScaler()),
-            ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))
-        ])
+        svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])
+        ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
         
-        # 3. Model: Ridge Regresyon - Ağaçların aşırı uç tahminler yapmasını frenleyen lineer bir çapa
-        ridge_pipeline = Pipeline([
-            ('scaler', StandardScaler()),
-            ('ridge', Ridge(alpha=2.0))
-        ])
-        
-        # Konsey Oylaması
-        ensemble = VotingRegressor(estimators=[
-            ('gb', gb), 
-            ('svr', svr_pipeline), 
-            ('ridge', ridge_pipeline)
-        ], weights=[2, 1, 1]) # Gradient Boosting'in kararına daha fazla ağırlık veriyoruz
-        
+        ensemble = VotingRegressor(estimators=[('gb', gb), ('svr', svr_pipeline), ('ridge', ridge_pipeline)], weights=[2, 1, 1])
         ensemble.fit(X, y)
 
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
@@ -181,39 +181,41 @@ def ensemble_prediction(df):
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
         # =================================================================
-        # 4. KANTİTATİF (QUANT) RİSK VE SİNYAL YÖNETİMİ
+        # 4. KANTİTATİF SİNYAL YÖNETİMİ (TİLSON ONAYLI)
         # =================================================================
         adx_gucu = t_df['ADX'].iloc[-1]
         cmf_pozitif = t_df['CMF'].iloc[-1] > 0
-        z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 # Çok aşırı değerlenmemiş
+        z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 
         macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
         trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
+        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1 # 🚀 YENİ: Fiyat Tilson'un Üstünde Mi?
         
-        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari])
+        # Toplam Teyit Skoru Artık 5 Üzerinden Hesaplanıyor!
+        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay])
         
         sinyal = "NÖTR"
         guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
 
-        # QUANT KURALI 1: ADX 20'nin altındaysa piyasa yataydır. Sinyaller sahtedir. Karar: NÖTR
+        # ADX Filtresi
         if adx_gucu < 20:
             sinyal = "NÖTR (Yatay Piyasa)"
             guven_skoru -= 20
         else:
-            # Piyasada trend var. AI ve Teknik onaya bakılabilir.
-            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 3:
+            # Yapay Zeka beklentisi ve Tilson ağırlıklı Teknik Onay
+            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 4:
                 sinyal = "🚀 GÜÇLÜ AL"
-                guven_skoru = min(guven_skoru + 20, 99.0)
-            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 2:
+                guven_skoru = min(guven_skoru + 25, 99.0)
+            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3:
                 sinyal = "🟢 AL"
-                guven_skoru = min(guven_skoru + 10, 99.0)
-            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 1 and t_df['Z_Score'].iloc[-1] > 2):
-                # AI düşüş bekliyor VEYA teknik zayıfken fiyat ortalamadan çok sapmış (şişmiş)
+                guven_skoru = min(guven_skoru + 15, 99.0)
+            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 1) or (t_df['Tilson_Trend'].iloc[-1] == -1 and t_df['MACD_Hist'].iloc[-1] < 0):
+                # YENİ KURAL: Fiyat Tilson'un altına düştüyse ve MACD negatifse acımasızca SAT!
                 sinyal = "⚠️ SAT"
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
-            "confidence": max(round(guven_skoru, 1), 0.0), # Eksiye düşmemesi için
+            "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
     except Exception as e:

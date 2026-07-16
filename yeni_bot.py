@@ -83,7 +83,8 @@ def ensemble_prediction(df):
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
         
-        t_df = stokastik_hesapla(df.copy())
+        # 🛠️ DÜZELTME 1: .copy() kaldırıldı. Böylece Stoch_K sizin ana tablonuza işlenebilecek.
+        t_df = stokastik_hesapla(df)
         
         # =================================================================
         # 1. STANDART TEKNİK GÖSTERGELER
@@ -145,16 +146,13 @@ def ensemble_prediction(df):
         t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
 
         # =================================================================
-        # 3. YENİ EKLENEN: FİBONACCİ & 5-8 HIZLI EMA
+        # 3. FİBONACCİ & 5-8 HIZLI EMA
         # =================================================================
-        # Dinamik Fibonacci Seviyesi (Son 50 mum)
         roll_high = t_df['High'].rolling(window=50).max()
         roll_low = t_df['Low'].rolling(window=50).min()
         fark = (roll_high - roll_low).replace(0, 0.0001)
-        # 0 = Tam Dipte, 1 = Tam Zirvede, 0.618 vb. Altın Oran seviyeleri
         t_df['Fib_Level'] = (t_df['Close'] - roll_low) / fark
         
-        # 5 ve 8 Günlük EMA Hızlı Kesişim (Tetikleyici)
         t_df['EMA5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
         t_df['EMA8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
         t_df['EMA_5_8_Trend'] = np.where(t_df['EMA5'] > t_df['EMA8'], 1, -1)
@@ -164,14 +162,15 @@ def ensemble_prediction(df):
         # =================================================================
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        # 🚀 Fib_Level ve EMA_5_8_Trend Yapay Zeka'nın Eğitim Listesine Eklendi
         features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend', 'Fib_Level', 'EMA_5_8_Trend']
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
-        if len(ml_df) < 120:
-            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
+        # 🛠️ DÜZELTME 2: 120 gün limiti 40'a düşürüldü. Ayrıca `None` hatasını önlemek için `float()` kullanıldı.
+        if len(ml_df) < 40:
+            anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
+            return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
         y = ml_df['Target_Return']
@@ -189,7 +188,7 @@ def ensemble_prediction(df):
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
         # =================================================================
-        # 5. KANTİTATİF SİNYAL YÖNETİMİ (6 ONAYLI ZIRH)
+        # 5. KANTİTATİF SİNYAL YÖNETİMİ
         # =================================================================
         adx_gucu = t_df['ADX'].iloc[-1]
         cmf_pozitif = t_df['CMF'].iloc[-1] > 0
@@ -197,27 +196,23 @@ def ensemble_prediction(df):
         macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
         trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
         tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1
-        hizli_tetik_onay = t_df['EMA_5_8_Trend'].iloc[-1] == 1 # 🚀 YENİ: 5 EMA, 8 EMA'nın üstünde mi?
+        hizli_tetik_onay = t_df['EMA_5_8_Trend'].iloc[-1] == 1
         
-        # Toplam Teyit Skoru Artık 6 Üzerinden Hesaplanıyor!
         teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay, hizli_tetik_onay])
         
         sinyal = "NÖTR"
         guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
 
         if adx_gucu < 20:
-            sinyal = "NÖTR (Yatay Piyasa)"
+            sinyal = "NÖTR (Yatay)"
             guven_skoru -= 20
         else:
-            # 🚀 GÜÇLÜ AL için 6 teyidin en az 5'i olumlu olmalı! (Kusursuz Fırtına)
             if beklenen_getiri_pct > 2.5 and teyit_skoru >= 5:
                 sinyal = "🚀 GÜÇLÜ AL"
                 guven_skoru = min(guven_skoru + 25, 99.0)
-            # 🟢 AL için 6 teyidin en az 3'ü ve kısa vadeli tetik (EMA5>EMA8) aktif olmalı!
             elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3 and hizli_tetik_onay:
                 sinyal = "🟢 AL"
                 guven_skoru = min(guven_skoru + 15, 99.0)
-            # ⚠️ SAT Kuralı: Hem AI getiri beklemiyor, hem Tilson kırılmış, hem de Hızlı EMA'lar ölüm kesişimi (Death Cross) yapmış!
             elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 2) or (not tilson_onay and not hizli_tetik_onay):
                 sinyal = "⚠️ SAT"
 
@@ -228,9 +223,9 @@ def ensemble_prediction(df):
             "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
     except Exception as e:
-        anlik = float(df['Close'].iloc[-1]) if not df.empty else 0.0
+        anlik_hata_guvenli = round(float(df['Close'].iloc[-1]), 2) if not df.empty else 0.0
         return {
-            "rf_prediction": anlik, 
+            "rf_prediction": anlik_hata_guvenli, 
             "signal": "HATA", 
             "confidence": 0.0,
             "expected_return_pct": 0.0

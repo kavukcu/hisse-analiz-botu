@@ -498,9 +498,8 @@ else:
     tarama_listesi = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD"]
 
 hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
-baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=730)) 
+baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365)) 
 bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
-
 with st.spinner('Kurumsal teknik analiz verileri hesaplanıyor...'):
     df = veri_yukle(hisse_kodu, baslangic, bitis)
     info = sirket_bilgisi_getir(hisse_kodu)

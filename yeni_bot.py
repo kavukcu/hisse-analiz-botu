@@ -70,7 +70,8 @@ def ensemble_prediction(df):
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
         
-        t_df = stokastik_hesapla(df)
+        # Orijinal veriyi bozmamak için kopyasını alıyoruz
+        t_df = stokastik_hesapla(df.copy())
         
         # =================================================================
         # 1. STANDART TEKNİK GÖSTERGELER
@@ -114,7 +115,9 @@ def ensemble_prediction(df):
         t_df['ADX'] = dx.ewm(alpha=1/14, adjust=False).mean()
 
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
-        t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
+        
+        # 🛠️ DÜZELTME 1: Veri yutmasını önlemek için EMA Trendi 50'den 20 güne düşürüldü
+        t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=20).mean(), 1, -1)
 
         v = 0.7 
         period = 8 
@@ -134,8 +137,9 @@ def ensemble_prediction(df):
         # =================================================================
         # 3. FİBONACCİ & 5-8 HIZLI EMA
         # =================================================================
-        roll_high = t_df['High'].rolling(window=50).max()
-        roll_low = t_df['Low'].rolling(window=50).min()
+        # 🛠️ DÜZELTME 2: Fibonacci penceresi 50'den 20'ye düşürüldü
+        roll_high = t_df['High'].rolling(window=20).max()
+        roll_low = t_df['Low'].rolling(window=20).min()
         fark = (roll_high - roll_low).replace(0, 0.0001)
         t_df['Fib_Level'] = (t_df['Close'] - roll_low) / fark
         
@@ -147,25 +151,23 @@ def ensemble_prediction(df):
         # 4. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
         # =================================================================
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
-        
         features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend', 'Fib_Level', 'EMA_5_8_Trend']
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
-        ml_df = t_df.dropna()
+        
+        # 🎯 KRİTİK DÜZELTME 3: Yahoo Finance bugünkü veriyi boş verirse, dünkü verilerle otomatik doldurur.
+        t_df[features] = t_df[features].ffill().bfill()
+        
+        # Modeli sadece sonuçlanmış (gelecek 5 günü bilinen) geçmiş veriyle eğitiriz
+        ml_df = t_df.dropna(subset=['Target_Return'])
 
-        # 🎯 KRİTİK DÜZELTME: Limit 40'tan 15'e düşürüldü.
-        if len(ml_df) < 15:
+        if len(ml_df) < 10:
             anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
             return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
         y = ml_df['Target_Return']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
-
-        # EĞER SON VERİ İÇİNDE NaN VARSA GÜVENLİ ÇIKIŞ YAP (Çökmeyi Önler)
-        if np.isnan(son_veri).any():
-             anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
-             return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
         svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])

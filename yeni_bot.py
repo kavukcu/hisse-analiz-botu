@@ -8,23 +8,28 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import requests
 from sklearn.ensemble import RandomForestRegressor
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np 
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
         high_max = df['High'].rolling(window=k_periyot).max()
-        
-        # %K Çizgisi (Hızlı Çizgi)
         df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
-        
-        # %D Çizgisi (Yavaş Çizgi)
         df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
-        
         return df
     except Exception as e:
         df['Stoch_K'] = 50.0
         df['Stoch_D'] = 50.0
         return df
+    except Exception as e: # <--- BU KISIM EKSİK! Bunu try ile aynı hizaya ekleyin
+        df['Stoch_K'] = 50.0
+        df['Stoch_D'] = 50.0
+        return df
+        
+        # En düşük 'Low' ve en yüksek 'High' değerlerini bul
+        low_min = df['Low'].rolling(window=k_periyot).min()
+        high_max = df['High'].rolling(window=k_periyot).max()
+        
         # %K Çizgisi (Hızlı Çizgi)
         df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
         
@@ -64,165 +69,98 @@ def python_istatistik_analizi(df):
         }
 # --- YAPAY ZEKA VE KURUMSAL MOTOR FONKSİYONLARI (KODUN ÜST KISMINA EKLENECEK) ---
 
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 import numpy as np
-import pandas as pd
 
 def ensemble_prediction(df):
     try:
-        import numpy as np
-        import pandas as pd
-        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
-        from sklearn.svm import SVR
-        from sklearn.linear_model import Ridge
-        from sklearn.pipeline import Pipeline
-        from sklearn.preprocessing import StandardScaler
+        t_df = stokastik_hesapla(df.copy())
         
-        # 🛠️ DÜZELTME 1: .copy() kaldırıldı. Böylece Stoch_K sizin ana tablonuza işlenebilecek.
-        t_df = stokastik_hesapla(df)
-        
-        # =================================================================
-        # 1. STANDART TEKNİK GÖSTERGELER
-        # =================================================================
+        # --- 1. TEKNİK GÖSTERGELER (AI İÇİN ÖZELLİK MÜHENDİSLİĞİ) ---
+        # RSI Hesaplama
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-        t_df['RSI'] = 100 - (100 / (1 + gain / loss.replace(0, 0.0001)))
+        rs = gain / loss
+        t_df['RSI'] = 100 - (100 / (1 + rs))
 
-        macd = t_df['Close'].ewm(span=12, adjust=False).mean() - t_df['Close'].ewm(span=26, adjust=False).mean()
-        t_df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
+        # YENİ: MACD (Trend Gücü ve Yönü)
+        exp1 = t_df['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = t_df['Close'].ewm(span=26, adjust=False).mean()
+        t_df['MACD'] = exp1 - exp2
+        t_df['MACD_Signal'] = t_df['MACD'].ewm(span=9, adjust=False).mean()
+        t_df['MACD_Hist'] = t_df['MACD'] - t_df['MACD_Signal']
 
-        bb_orta = t_df['Close'].rolling(window=20).mean()
-        bb_std = t_df['Close'].rolling(window=20).std()
-        bb_fark = (bb_std * 4).replace(0, 0.0001)
-        t_df['BB_Pozisyon'] = (t_df['Close'] - (bb_orta - (bb_std * 2))) / bb_fark
-
-        high_low = t_df['High'] - t_df['Low']
-        high_close = (t_df['High'] - t_df['Close'].shift()).abs()
-        low_close = (t_df['Low'] - t_df['Close'].shift()).abs()
-        t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
-
-        # =================================================================
-        # 2. İLERİ DÜZEY QUANT (TİLSON, ADX, Z-SCORE)
-        # =================================================================
-        t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
-
-        mf_multiplier = ((t_df['Close'] - t_df['Low']) - (t_df['High'] - t_df['Close'])) / (t_df['High'] - t_df['Low']).replace(0, 0.0001)
-        mf_volume = mf_multiplier * t_df['Volume']
-        t_df['CMF'] = mf_volume.rolling(20).sum() / t_df['Volume'].rolling(20).sum().replace(0, 0.0001)
-
-        up_move = t_df['High'] - t_df['High'].shift(1)
-        down_move = t_df['Low'].shift(1) - t_df['Low']
-        pos_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-        neg_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+        # YENİ: Bollinger Bantları (Volatilite ve Sıkışma)
+        t_df['BB_Orta'] = t_df['Close'].rolling(window=20).mean()
+        t_df['BB_Std'] = t_df['Close'].rolling(window=20).std()
+        t_df['BB_Ust'] = t_df['BB_Orta'] + (t_df['BB_Std'] * 2)
+        t_df['BB_Alt'] = t_df['BB_Orta'] - (t_df['BB_Std'] * 2)
         
-        atr_14 = t_df['ATR'].replace(0, 0.0001)
-        pos_di = 100 * (pd.Series(pos_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
-        neg_di = 100 * (pd.Series(neg_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
-        dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di).replace(0, 0.0001)
-        t_df['ADX'] = dx.ewm(alpha=1/14, adjust=False).mean()
+        # AI için kritik veri: Fiyat Bollinger Bandının neresinde? (0 = Dipte, 1 = Tepede)
+        t_df['BB_Pozisyon'] = (t_df['Close'] - t_df['BB_Alt']) / (t_df['BB_Ust'] - t_df['BB_Alt'])
 
-        t_df['Vol_Change'] = t_df['Volume'].pct_change()
-        t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
-
-        v = 0.7 
-        period = 8 
-        e1 = t_df['Close'].ewm(span=period, adjust=False).mean()
-        e2 = e1.ewm(span=period, adjust=False).mean()
-        e3 = e2.ewm(span=period, adjust=False).mean()
-        e4 = e3.ewm(span=period, adjust=False).mean()
-        e5 = e4.ewm(span=period, adjust=False).mean()
-        e6 = e5.ewm(span=period, adjust=False).mean()
-        c1 = -v**3
-        c2 = 3*(v**2) + 3*(v**3)
-        c3 = -6*(v**2) - 3*v - 3*(v**3)
-        c4 = 1 + 3*v + v**3 + 3*(v**2)
-        t_df['Tilson_T3'] = c1*e6 + c2*e5 + c3*e4 + c4*e3
-        t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
-
-        # =================================================================
-        # 3. FİBONACCİ & 5-8 HIZLI EMA
-        # =================================================================
-        roll_high = t_df['High'].rolling(window=50).max()
-        roll_low = t_df['Low'].rolling(window=50).min()
-        fark = (roll_high - roll_low).replace(0, 0.0001)
-        t_df['Fib_Level'] = (t_df['Close'] - roll_low) / fark
+        # --- 2. YAPAY ZEKA VERİ SETİ ---
+        # AI artık sadece fiyata değil; trende (MACD), hacme (Volume), momentum (RSI, Stoch) ve sıkışmaya (BB) bakıyor!
+        features = ['RSI', 'Stoch_K', 'Stoch_D', 'MACD_Hist', 'BB_Pozisyon', 'Volume']
+        t_df['Target'] = t_df['Close'].shift(-5) # Hedef: 5 gün sonraki fiyat
         
-        t_df['EMA5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
-        t_df['EMA8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
-        t_df['EMA_5_8_Trend'] = np.where(t_df['EMA5'] > t_df['EMA8'], 1, -1)
-
-        # =================================================================
-        # 4. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
-        # =================================================================
-        t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
-        
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend', 'Fib_Level', 'EMA_5_8_Trend']
-        
-        t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
 
-        # 🛠️ DÜZELTME 2: 120 gün limiti 40'a düşürüldü. Ayrıca `None` hatasını önlemek için `float()` kullanıldı.
-        if len(ml_df) < 40:
-            anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
-            return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
+        if len(ml_df) < 50:
+            return {"rf_prediction": df['Close'].iloc[-1], "signal": "NÖTR", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features]
-        y = ml_df['Target_Return']
+        y = ml_df['Target']
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
-        svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])
-        ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
-        
-        ensemble = VotingRegressor(estimators=[('gb', gb), ('svr', svr_pipeline), ('ridge', ridge_pipeline)], weights=[2, 1, 1])
-        ensemble.fit(X, y)
+        # --- 3. ÇİFT MOTORLU YAPAY ZEKA (GERÇEK ENSEMBLE) ---
+        # Model 1: Random Forest (Ağaçların Bilgeliği - Dengeli Tahmin)
+        rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
+        rf_model.fit(X, y)
+        rf_tahmin = rf_model.predict(son_veri)[0]
 
-        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
-        anlik_fiyat = float(t_df['Close'].iloc[-1])
-        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
+        # Model 2: Gradient Boosting (Hatalardan Öğrenen - Agresif Tahmin)
+        gb_model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+        gb_model.fit(X, y)
+        gb_tahmin = gb_model.predict(son_veri)[0]
+
+        # İki modelin güçlerini birleştir (Ortalama)
+        hedef_fiyat = (rf_tahmin + gb_tahmin) / 2
+        anlik_fiyat = t_df['Close'].iloc[-1]
         
-        # =================================================================
-        # 5. KANTİTATİF SİNYAL YÖNETİMİ
-        # =================================================================
-        adx_gucu = t_df['ADX'].iloc[-1]
-        cmf_pozitif = t_df['CMF'].iloc[-1] > 0
-        z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 
-        macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
-        trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
-        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1
-        hizli_tetik_onay = t_df['EMA_5_8_Trend'].iloc[-1] == 1
+        getiri_potansiyeli = ((hedef_fiyat - anlik_fiyat) / anlik_fiyat) * 100
         
-        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay, hizli_tetik_onay])
+        # --- 4. TEKNİK & YAPAY ZEKA MELEZ SİNYALİ ---
+        # Sadece AI'ın getiri beklemesi yetmez, Teknik taraf da onaylamalı!
+        macd_al = t_df['MACD_Hist'].iloc[-1] > 0
+        bb_dipte = t_df['BB_Pozisyon'].iloc[-1] < 0.25 # Fiyat alt banda yakın mı?
         
         sinyal = "NÖTR"
-        guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
+        if getiri_potansiyeli > 3.0 and macd_al:
+            sinyal = "🚀 GÜÇLÜ AL"
+        elif getiri_potansiyeli > 1.5:
+            sinyal = "🟢 AL"
+        elif getiri_potansiyeli < -2.0:
+            sinyal = "⚠️ SAT"
 
-        if adx_gucu < 20:
-            sinyal = "NÖTR (Yatay)"
-            guven_skoru -= 20
-        else:
-            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 5:
-                sinyal = "🚀 GÜÇLÜ AL"
-                guven_skoru = min(guven_skoru + 25, 99.0)
-            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3 and hizli_tetik_onay:
-                sinyal = "🟢 AL"
-                guven_skoru = min(guven_skoru + 15, 99.0)
-            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 2) or (not tilson_onay and not hizli_tetik_onay):
-                sinyal = "⚠️ SAT"
+        # Teknik göstergeler AI'ı onaylıyorsa Güven Skoru artar
+        guven_skoru = min(abs(getiri_potansiyeli) * 8 + 60, 99.0)
+        if macd_al and bb_dipte and "AL" in sinyal:
+            guven_skoru = min(guven_skoru + 15, 99.0) 
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
-            "confidence": max(round(guven_skoru, 1), 0.0),
-            "expected_return_pct": round(beklenen_getiri_pct, 2) 
+            "confidence": round(guven_skoru, 1),
+            "expected_return_pct": round(getiri_potansiyeli, 2) 
         }
     except Exception as e:
-        anlik_hata_guvenli = round(float(df['Close'].iloc[-1]), 2) if not df.empty else 0.0
+        anlik = df['Close'].iloc[-1] if not df.empty else 0
         return {
-            "rf_prediction": anlik_hata_guvenli, 
+            "rf_prediction": anlik, 
             "signal": "HATA", 
-            "confidence": 0.0,
+            "confidence": 0,
             "expected_return_pct": 0.0
         }
 def institutional_decision(df):
@@ -449,7 +387,12 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     # Döngü bittikten sonra tarihleri hesapla ve sonucu dön (Döngünün DIŞINDA olmalı)
     tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
-
+        # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
+    hacim_deg = 0.0 
+    rsi_14 = 50.0 
+        
+    tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+    return tarihler, tahminler
 # --- SİDEBAR VE PİYASA SEÇİMİ ---
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
@@ -580,7 +523,6 @@ with c_stoch2:
     st.metric(label="Stoch %D (Yavaş)", value=f"{son_d:.2f}")
 with c_stoch3:
     st.metric(label="Stoch Durumu", value=stoch_sinyal, delta="Trend Dönüşü Olabilir" if "AŞIRI" in stoch_sinyal else None, delta_color=sinyal_rengi)
-# === Sekme 10: AI Ensemble & Kurumsal Karar ===
 with tabs[10]:
     st.subheader("🧠 v85 AI Ensemble & Kurumsal Karar Motoru (BIST Özel)")
     
@@ -599,42 +541,46 @@ with tabs[10]:
         
         st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
         st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
+        st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")        
+        st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
+        st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
         st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")
+        "📈 SMC & Quant Fiyat Hareketi", "🔍 Akıllı Asenkron Radar", "💼 Cüzdan & Akıllı Stop", 
+        "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası", 
+        "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Durumu", "🧬 Python İstatistik"
 
-# === Sekme 0: ANA GRAFİK (Doğru Girinti ile) ===
-with tabs[0]:
-    st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
-
-    c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
-    with c_ayar1:
-        goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
-        goster_smc = st.checkbox("🏦 FVG & Likidite Boşlukları (SMC)", value=True)
-        goster_fibo = st.checkbox("📐 Altın Oran (Fibonacci)", value=True)
-    with c_ayar2:
-        goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip (Makro)", value=True)
-        goster_formasyon = st.checkbox("🕯️ Mum Formasyonları (Mikro)", value=False)
-    with c_ayar3:
-        goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
-        goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
+    with tabs[0]:
+        st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
         
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
-    
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
-    
-    # VPVR Çizimi
-    if goster_vpvr:
-        hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
-        bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
-        max_hacim = hacim_bölümleri.max()
-        sure_uzunlugu = df.index[-1] - df.index[0]
-        x_koordinatlari = [df.index[0] + sure_uzunlugu * 0.3 * (v / max_hacim) for v in hacim_bölümleri]
+        c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
+        with c_ayar1:
+            goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
+            goster_smc = st.checkbox("🏦 FVG & Likidite Boşlukları (SMC)", value=True)
+            goster_fibo = st.checkbox("📐 Altın Oran (Fibonacci)", value=True)
+        with c_ayar2:
+            goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip (Makro)", value=True)
+            goster_formasyon = st.checkbox("🕯️ Mum Formasyonları (Mikro)", value=False)
+        with c_ayar3:
+            goster_vwap = st.checkbox("⚖️ VWAP (Kurumsal Maliyet)", value=False)
+            goster_ai = st.checkbox("🤖 Random Forest AI Tahmini", value=True)
+            
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
         
-        for i in range(len(bölüm_merkezleri)):
-            fig.add_shape(type="line", x0=df.index[0], y0=bölüm_merkezleri[i], x1=x_koordinatlari[i], y1=bölüm_merkezleri[i], line=dict(color="rgba(100, 150, 255, 0.4)", width=4), row=1, col=1)
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
         
-        poc_index = np.argmax(hacim_bölümleri)
-        poc_fiyat = bölüm_merkezleri[poc_index]
-        fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
+        if goster_vpvr:
+            hacim_bölümleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
+            bölüm_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
+            max_hacim = hacim_bölümleri.max()
+            sure_uzunlugu = df.index[-1] - df.index[0]
+            x_koordinatlari = [df.index[0] + sure_uzunlugu * 0.3 * (v / max_hacim) for v in hacim_bölümleri]
+            
+            for i in range(len(bölüm_merkezleri)):
+                fig.add_shape(type="line", x0=df.index[0], y0=bölüm_merkezleri[i], x1=x_koordinatlari[i], y1=bölüm_merkezleri[i], line=dict(color="rgba(100, 150, 255, 0.4)", width=4), row=1, col=1)
+            
+            poc_index = np.argmax(hacim_bölümleri)
+            poc_fiyat = bölüm_merkezleri[poc_index]
+            fig.add_hline(y=poc_fiyat, line_dash="solid", line_color="red", annotation_text="POC (En Yoğun Maliyet)", row=1, col=1)
 if goster_smc:
             for i in range(2, len(df)):
                 # Taşmayı önlemek için güvenli indeks hesaplaması
@@ -644,50 +590,28 @@ if goster_smc:
                     fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
                 elif df['FVG_Bearish'].iloc[i]:
                     fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-if goster_smc:
-        for i in range(2, len(df)):
-            bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
+                    if goster_fibo: max_fiyat = df['High'].max()
+            min_fiyat = df['Low'].min()
+            fark = max_fiyat - min_fiyat
+            seviyeler = {
+                0: "100% (Tepe)", 
+                0.236: "76.4%", 
+                0.382: "61.8%", 
+                0.5: "50%", 
+                0.618: "38.2% (Altın Oran)", 
+                0.786: "21.4%", 
+                1: "0% (Dip)"
+            }
+            renkler = ['#ff0000', '#ff9900', '#ffff00', '#33cc33', '#00ffcc', '#cc33ff', '#999999']
             
-            if df['FVG_Bullish'].iloc[i]:
-                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-            elif df['FVG_Bearish'].iloc[i]:
-                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-    
-    # DİKKAT: Fibo hesaplaması artık döngünün dışında
-if goster_smc:
-        for i in range(2, len(df)):
-            bitis_idx = i+5 if i+5 < len(df) else len(df)-1 
-            
-            if df['FVG_Bullish'].iloc[i]:
-                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['High'].iloc[i-2], x1=df.index[bitis_idx], y1=df['Low'].iloc[i], fillcolor="rgba(0, 255, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-            elif df['FVG_Bearish'].iloc[i]:
-                fig.add_shape(type="rect", x0=df.index[i-2], y0=df['Low'].iloc[i-2], x1=df.index[bitis_idx], y1=df['High'].iloc[i], fillcolor="rgba(255, 0, 0, 0.2)", line=dict(width=0), layer="below", row=1, col=1)
-    
-    # DİKKAT: Fibo hesaplaması artık döngünün dışında
-if goster_fibo: 
-        max_fiyat = df['High'].max()
-        min_fiyat = df['Low'].min()
-        fark = max_fiyat - min_fiyat
-        seviyeler = {
-            0: "100% (Tepe)", 
-            0.236: "76.4%", 
-            0.382: "61.8%", 
-            0.5: "50%", 
-            0.618: "38.2% (Altın Oran)", 
-            0.786: "21.4%", 
-            1: "0% (Dip)"
-        }
-        renkler = ['#ff0000', '#ff9900', '#ffff00', '#33cc33', '#00ffcc', '#cc33ff', '#999999']
-        
-        for i, (level, oran) in enumerate(seviyeler.items()):
-            fiyat_seviyesi = max_fiyat - (fark * level)
-            if level == 0.618:
-                fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
-            else:
-                fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
-        # YENİ EKLENEN GRAFİK FORMASYONLARI KODU (İkili Tepe & Dip)
-            if goster_grafik_formasyon:
-                ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
+            for i, (level, oran) in enumerate(seviyeler.items()):
+                fiyat_seviyesi = max_fiyat - (fark * level)
+                if level == 0.618:
+                    fig.add_hline(y=fiyat_seviyesi, line_dash="solid", line_width=2, line_color="#00ffcc", annotation_text=f"⭐ {oran}", row=1, col=1)
+                else:
+                    fig.add_hline(y=fiyat_seviyesi, line_dash="dash", line_width=1, line_color=renkler[i], annotation_text=f"Fibo {oran}", row=1, col=1)
+        # YENİ EKLENEN GRAFİK FORMASYONLARI KODU (İkili Tepe & Dip)if goster_grafik_formasyon:
+            ikili_tepeler, ikili_dipler = grafik_formasyon_bul(df)
             # İkili Tepeleri Çiz (Ayı Formasyonu - Kırmızı Kesikli Çizgi)
             for tepe in ikili_tepeler:
                 fig.add_shape(type="line", x0=tepe[0], y0=tepe[2], x1=tepe[1], y1=tepe[3], line=dict(color="red", width=3, dash="dot"), row=1, col=1)
@@ -759,7 +683,7 @@ with tabs[1]:
         "GARAN.IS", "GUBRF.IS", "HEKTS.IS", "ISCTR.IS", "KCHOL.IS", 
         "KONTR.IS", "KOZAL.IS", "KRDMD.IS", "ODAS.IS", "PGSUS.IS", 
         "SAHOL.IS", "SASA.IS", "SISE.IS", "TCELL.IS", "THYAO.IS", 
-        "TOASO.IS", "YKBNK.IS", "ACSEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
+        "TOASO.IS", "TUPRS.IS", "YKBNK.IS"
     ]
 
     # =====================================================================
@@ -787,7 +711,7 @@ with tabs[1]:
                 t_df['RSI'] = 100 - (100 / (1 + rs))
                 son_rsi = float(t_df['RSI'].iloc[-1])
 
-                # MACD Hesaplaması
+                # YENİ: MACD Hesaplaması
                 exp1 = t_df['Close'].ewm(span=12, adjust=False).mean()
                 exp2 = t_df['Close'].ewm(span=26, adjust=False).mean()
                 macd = exp1 - exp2
@@ -796,7 +720,7 @@ with tabs[1]:
                 son_macd = float(macd_hist.iloc[-1])
                 macd_durum = "📈 POZİTİF" if son_macd > 0 else "📉 NEGATİF"
 
-                # Bollinger Bantları (BB) Konumu
+                # YENİ: Bollinger Bantları (BB) Konumu
                 bb_orta = t_df['Close'].rolling(window=20).mean()
                 bb_std = t_df['Close'].rolling(window=20).std()
                 bb_ust = bb_orta + (bb_std * 2)
@@ -812,12 +736,6 @@ with tabs[1]:
                     bb_durum = "🔴 TEPEDE (Şişik)"
                 else:
                     bb_durum = "⚪ NÖTR"
-                    
-                # YENİ: OBV (On-Balance Volume) - Para Akışı
-                import numpy as np
-                obv = (np.sign(t_df['Close'].diff()) * t_df['Volume']).fillna(0).cumsum()
-                obv_ema = obv.ewm(span=10).mean()
-                obv_durum = "💸 GİRİŞ VAR" if obv.iloc[-1] > obv_ema.iloc[-1] else "🩸 ÇIKIŞ VAR"
                 
                 # Yapay Zeka ve Kurumsal Karar Tahminleri
                 karar = institutional_decision(t_df)
@@ -830,16 +748,15 @@ with tabs[1]:
                 return {
                     "Hisse": ticker.replace(".IS", ""),
                     "Anlık Fiyat": round(fiyat, 2),
-                    "Hedef (AI)": round(hedef_fiyat, 2),
-                    "Potansiyel %": round(getiri_potansiyeli, 2),
-                    "AI Sinyali": ai_tahmin["signal"],
-                    "Kurumsal": karar["decision"],
-                    "Para Akışı (OBV)": obv_durum,      # <--- YENİ EKLENDİ
-                    "MACD Trend": macd_durum,
-                    "BB Konumu": bb_durum,
-                    "RSI": round(son_rsi, 2),
+                    "Hedef Fiyat (AI)": round(hedef_fiyat, 2),
+                    "Potansiyel (%)": round(getiri_potansiyeli, 2),
+                    "Anlık RSI": round(son_rsi, 2),
                     "Stoch %K": round(son_k_degeri, 2), 
-                    "Puan": karar["score"]
+                    "MACD Trend": macd_durum,       # <--- YENİ EKLENDİ
+                    "BB Konumu": bb_durum,          # <--- YENİ EKLENDİ
+                    "AI Sinyali": ai_tahmin["signal"],
+                    "Kurumsal Karar": karar["decision"],
+                    "Genel Puan": karar["score"]
                 }
             except Exception as e:
                 return None
@@ -861,21 +778,22 @@ with tabs[1]:
         progress_bar.empty()
         
         if firsatlar:
-            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef (AI)", "Potansiyel %", "AI Sinyali", "Kurumsal", "Para Akışı (OBV)", "MACD Trend", "BB Konumu", "RSI", "Stoch %K", "Puan"]]
-            df_firsatlar = df_firsatlar.sort_values(by="Puan", ascending=False).set_index("Hisse")
+            # Sütunları daha mantıklı bir okuma sırasına göre dizdik
+            df_firsatlar = pd.DataFrame(firsatlar)[["Hisse", "Anlık Fiyat", "Hedef Fiyat (AI)", "Potansiyel (%)", "AI Sinyali", "Kurumsal Karar", "MACD Trend", "BB Konumu", "Anlık RSI", "Stoch %K", "Genel Puan"]]
+            df_firsatlar = df_firsatlar.sort_values(by="Genel Puan", ascending=False).set_index("Hisse")
             
             def color_signals(val):
                 if isinstance(val, str):
-                    if any(x in val.upper() for x in ['AL', 'ACCUMULATION', 'POZİTİF', 'DİPTE', 'GİRİŞ']): 
+                    if any(x in val.upper() for x in ['AL', 'ACCUMULATION', 'POZİTİF', 'DİPTE']): 
                         return 'color: #00FF00; font-weight: bold'
-                    if any(x in val.upper() for x in ['SAT', 'DISTRIBUTION', 'NEGATİF', 'TEPEDE', 'ÇIKIŞ']): 
+                    if any(x in val.upper() for x in ['SAT', 'DISTRIBUTION', 'NEGATİF', 'TEPEDE']): 
                         return 'color: #FF0000; font-weight: bold'
                 elif isinstance(val, (int, float)):
                     if val < 30: return 'color: #00FF00; font-weight: bold' 
                     if val > 70: return 'color: #FF0000; font-weight: bold' 
                 return ''
 
-            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal', 'Para Akışı (OBV)', 'MACD Trend', 'BB Konumu', 'RSI', 'Stoch %K']), use_container_width=True)
+            st.dataframe(df_firsatlar.style.map(color_signals, subset=['AI Sinyali', 'Kurumsal Karar', 'MACD Trend', 'BB Konumu', 'Anlık RSI', 'Stoch %K']), use_container_width=True)
 
     st.divider()
 
@@ -891,7 +809,7 @@ with tabs[1]:
         
         def kesisim_tara(ticker):
             try:
-                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=180), end=datetime.today(), progress=False)
+                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=60), end=datetime.today(), progress=False)
                 if t_df.empty or len(t_df) < 15: return None
                 if isinstance(t_df.columns, pd.MultiIndex): t_df.columns = t_df.columns.droplevel(1)
                 
@@ -960,7 +878,7 @@ with tabs[2]:
                     kod = str(row["Varlık"]).upper(); mal = float(row["Maliyet"]); lot = float(row["Lot"])
                     if kod and lot > 0:
                         try:
-                            c_veri = yf.download(kod, period="1y", progress=False, session=oturum)
+                            c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
                             if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
                             g_fiyat = float(c_veri['Close'].iloc[-1])
                             top_mal += (mal * lot); top_deg += (g_fiyat * lot)
@@ -994,6 +912,7 @@ with tabs[5]:
                 if isinstance(tmp_df.columns, pd.MultiIndex): tmp_df.columns = tmp_df.columns.droplevel(1)
                 if not tmp_df.empty: korelasyon_df[ticker] = tmp_df['Close']
             st.plotly_chart(px.imshow(korelasyon_df.corr(), text_auto=True, color_continuous_scale='RdBu_r'), use_container_width=True)
+with tabs[6]:
         st.subheader("⚙️ Strateji Testi (Backtest): SMA 20 vs SMA 50")
         bt_sonuc = backtest_motoru(df)
         if not bt_sonuc.empty:
@@ -1007,127 +926,6 @@ with tabs[5]:
             fig_bt.add_trace(go.Scatter(x=bt_sonuc.index, y=bt_sonuc['Strateji_Kumulatif'], name="Strateji Getirisi", line=dict(color='green', width=3)))
             fig_bt.update_layout(template="plotly_dark", height=400)
             st.plotly_chart(fig_bt, use_container_width=True)
-with tabs[6]:
-    st.subheader("⚙️ Strateji Backtest Makinesi")
-    st.markdown("Bu modül, geliştirdiğimiz **'Stokastik Dipten Dönüş & Aşırı Satım (RSI)'** stratejisini seçili hissenin geçmiş verilerinde günbegün test eder ve ne kadar kâr/zarar ettiğini kanıtlar.")
-
-    # Kullanıcıdan başlangıç parası isteyelim
-    baslangic_bakiye = st.number_input("Başlangıç Bakiyesi (TL)", min_value=1000, value=100000, step=10000)
-
-    if st.button("🚀 Seçili Hisse İçin Backtesti Başlat"):
-        try:
-            # İşlem yapacağımız kopyayı alıp göstergeleri hesaplayalım
-            b_df = df.copy()
-            b_df = stokastik_hesapla(b_df)
-
-            # RSI Hesaplama
-            delta = b_df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-            loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-            rs = gain / loss
-            b_df['RSI'] = 100 - (100 / (1 + rs))
-
-            b_df = b_df.dropna()
-
-            # Backtest Cüzdanı
-            bakiye = baslangic_bakiye
-            elindeki_lot = 0
-            alim_fiyati = 0
-            islem_gecmisi = []
-            basarili_islem = 0
-            hatali_islem = 0
-
-            # GEÇMİŞTE ZAMAN YOLCULUĞU BAŞLIYOR...
-            for i in range(1, len(b_df)):
-                fiyat = float(b_df['Close'].iloc[i])
-                tarih = b_df.index[i].strftime("%Y-%m-%d")
-
-                k_bugun = b_df['Stoch_K'].iloc[i]
-                d_bugun = b_df['Stoch_D'].iloc[i]
-                k_dun = b_df['Stoch_K'].iloc[i-1]
-                d_dun = b_df['Stoch_D'].iloc[i-1]
-                rsi = b_df['RSI'].iloc[i]
-
-                # 🟢 ALIM KURALI: Stoch < 30 bölgesinde Kesişim + RSI 50'nin altındayken (Ucuzken topla)
-                if elindeki_lot == 0:
-                    if (k_dun < d_dun) and (k_bugun > d_bugun) and (k_bugun < 30) and (rsi < 50):
-                        alabilecegi_lot = int(bakiye // fiyat)
-                        if alabilecegi_lot > 0:
-                            maliyet = alabilecegi_lot * fiyat
-                            bakiye -= maliyet
-                            elindeki_lot += alabilecegi_lot
-                            alim_fiyati = fiyat
-                            islem_gecmisi.append({"Tarih": tarih, "İşlem": "🟢 AL", "Fiyat": round(fiyat, 2), "Lot": alabilecegi_lot, "Kar/Zarar (%)": 0.0})
-
-                # 🔴 SATIM KURALI: Stoch > 70 bölgesinde ters kesişim VEYA %5 Stop-Loss patlaması
-                elif elindeki_lot > 0:
-                    guncel_kar_zarar_pct = ((fiyat - alim_fiyati) / alim_fiyati) * 100
-                    sat_sinyali = False
-                    
-                    # 1. Kural: Tepe noktasında sat
-                    if (k_dun > d_dun) and (k_bugun < d_bugun) and (k_bugun > 70):
-                        sat_sinyali = True 
-                    # 2. Kural: İşler ters giderse %5 zararda kol kes (Stop-Loss)
-                    elif guncel_kar_zarar_pct <= -5: 
-                        sat_sinyali = True
-
-                    if sat_sinyali:
-                        satis_tutari = elindeki_lot * fiyat
-                        bakiye += satis_tutari
-
-                        if fiyat > alim_fiyati:
-                            basarili_islem += 1
-                        else:
-                            hatali_islem += 1
-
-                        islem_gecmisi.append({"Tarih": tarih, "İşlem": "🔴 SAT", "Fiyat": round(fiyat, 2), "Lot": elindeki_lot, "Kar/Zarar (%)": round(guncel_kar_zarar_pct, 2)})
-                        elindeki_lot = 0
-                        alim_fiyati = 0
-
-            # Test bittiğinde (bugüne geldiğinde) hala elinde lot varsa güncel fiyattan nakde çevir
-            if elindeki_lot > 0:
-                son_fiyat = float(b_df['Close'].iloc[-1])
-                bakiye += elindeki_lot * son_fiyat
-                guncel_kar_zarar_pct = ((son_fiyat - alim_fiyati) / alim_fiyati) * 100
-                if son_fiyat > alim_fiyati:
-                    basarili_islem += 1
-                else:
-                    hatali_islem += 1
-                islem_gecmisi.append({"Tarih": b_df.index[-1].strftime("%Y-%m-%d"), "İşlem": "🔵 KAPANIS (Mevcut)", "Fiyat": round(son_fiyat, 2), "Lot": elindeki_lot, "Kar/Zarar (%)": round(guncel_kar_zarar_pct, 2)})
-
-            # --- SONUÇLARI HESAPLA VE EKRANA BAS ---
-            toplam_islem = basarili_islem + hatali_islem
-            win_rate = (basarili_islem / toplam_islem * 100) if toplam_islem > 0 else 0
-            net_kar_zarar = bakiye - baslangic_bakiye
-            getiri_yuzdesi = (net_kar_zarar / baslangic_bakiye) * 100
-
-            st.success("✅ Backtest Başarıyla Tamamlandı!")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Bitiş Bakiyesi", f"{bakiye:,.2f} TL", f"% {getiri_yuzdesi:.2f}")
-            c2.metric("Kazanma Oranı (Win Rate)", f"% {win_rate:.1f}", "Robotun Başarısı")
-            c3.metric("Toplam İşlem", toplam_islem, f"{basarili_islem} Karlı / {hatali_islem} Zararlı")
-            c4.metric("Net Kar/Zarar", f"{net_kar_zarar:,.2f} TL")
-
-            if islem_gecmisi:
-                st.markdown("### 📜 Detaylı İşlem Geçmişi (Al/Sat Noktaları)")
-                df_gecmis = pd.DataFrame(islem_gecmisi).set_index("Tarih")
-                
-                # Tabloyu renklendir
-                def renk(val):
-                    if val == '🟢 AL': return 'color: #00FF00; font-weight: bold'
-                    if val in ['🔴 SAT', '🔵 KAPANIS (Mevcut)']: return 'color: #FF0000; font-weight: bold'
-                    if isinstance(val, (int, float)):
-                        if val > 0: return 'color: #00FF00'
-                        if val < 0: return 'color: #FF0000'
-                    return ''
-                    
-                st.dataframe(df_gecmis.style.map(renk, subset=['İşlem', 'Kar/Zarar (%)']), use_container_width=True)
-            else:
-                st.warning("Bu dönemde stratejiye uygun hiçbir al-sat fırsatı oluşmamış.")
-
-        except Exception as e:
-            st.error(f"Backtest çalışırken bir hata oluştu: {e}")
 with tabs[7]:
         st.subheader("🎲 Monte Carlo Risk Simülasyonu (Gelecek 30 Gün)")
         if st.button("Simülasyonu Başlat"):
@@ -1984,162 +1782,52 @@ def terminal_status_v84():
 # ============================================================
 
 def ensemble_prediction(df):
+    """
+    Ensemble-ready prediction layer.
+    Currently uses Random Forest plus rule-based voting.
+    Architecture can later be extended with XGBoost/LightGBM.
+    """
     try:
-        import numpy as np
-        import pandas as pd
-        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
-        from sklearn.svm import SVR
-        from sklearn.linear_model import Ridge
-        from sklearn.pipeline import Pipeline
-        from sklearn.preprocessing import StandardScaler
-        
-        # 🛠️ DÜZELTME 1: .copy() kaldırıldı. Böylece Stoch_K sizin ana tablonuza işlenebilecek.
-        t_df = stokastik_hesapla(df)
-        
-        # =================================================================
-        # 1. STANDART TEKNİK GÖSTERGELER
-        # =================================================================
-        delta = t_df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-        t_df['RSI'] = 100 - (100 / (1 + gain / loss.replace(0, 0.0001)))
+        _, preds = makine_ogrenmesi_tahmin(df, gelecek_gun=5)
+        rf_prediction = preds[-1]
+    except Exception:
+        rf_prediction = float(df["Close"].iloc[-1])
 
-        macd = t_df['Close'].ewm(span=12, adjust=False).mean() - t_df['Close'].ewm(span=26, adjust=False).mean()
-        t_df['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
+    last_close = float(df["Close"].iloc[-1])
 
-        bb_orta = t_df['Close'].rolling(window=20).mean()
-        bb_std = t_df['Close'].rolling(window=20).std()
-        bb_fark = (bb_std * 4).replace(0, 0.0001)
-        t_df['BB_Pozisyon'] = (t_df['Close'] - (bb_orta - (bb_std * 2))) / bb_fark
+    rf_vote = 1 if rf_prediction > last_close else -1
 
-        high_low = t_df['High'] - t_df['Low']
-        high_close = (t_df['High'] - t_df['Close'].shift()).abs()
-        low_close = (t_df['Low'] - t_df['Close'].shift()).abs()
-        t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
+    try:
+        tech = generate_signal_score(df)["score"]
+    except Exception:
+        tech = 0
 
-        # =================================================================
-        # 2. İLERİ DÜZEY QUANT (TİLSON, ADX, Z-SCORE)
-        # =================================================================
-        t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
+    tech_vote = 1 if tech >= 3 else (-1 if tech <= -2 else 0)
 
-        mf_multiplier = ((t_df['Close'] - t_df['Low']) - (t_df['High'] - t_df['Close'])) / (t_df['High'] - t_df['Low']).replace(0, 0.0001)
-        mf_volume = mf_multiplier * t_df['Volume']
-        t_df['CMF'] = mf_volume.rolling(20).sum() / t_df['Volume'].rolling(20).sum().replace(0, 0.0001)
+    confidence = calculate_confidence_score(df)
 
-        up_move = t_df['High'] - t_df['High'].shift(1)
-        down_move = t_df['Low'].shift(1) - t_df['Low']
-        pos_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-        neg_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
-        
-        atr_14 = t_df['ATR'].replace(0, 0.0001)
-        pos_di = 100 * (pd.Series(pos_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
-        neg_di = 100 * (pd.Series(neg_dm).ewm(alpha=1/14, adjust=False).mean() / atr_14)
-        dx = 100 * np.abs(pos_di - neg_di) / (pos_di + neg_di).replace(0, 0.0001)
-        t_df['ADX'] = dx.ewm(alpha=1/14, adjust=False).mean()
+    conf_vote = 1 if confidence >= 70 else (-1 if confidence < 40 else 0)
 
-        t_df['Vol_Change'] = t_df['Volume'].pct_change()
-        t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
+    votes = rf_vote + tech_vote + conf_vote
 
-        v = 0.7 
-        period = 8 
-        e1 = t_df['Close'].ewm(span=period, adjust=False).mean()
-        e2 = e1.ewm(span=period, adjust=False).mean()
-        e3 = e2.ewm(span=period, adjust=False).mean()
-        e4 = e3.ewm(span=period, adjust=False).mean()
-        e5 = e4.ewm(span=period, adjust=False).mean()
-        e6 = e5.ewm(span=period, adjust=False).mean()
-        c1 = -v**3
-        c2 = 3*(v**2) + 3*(v**3)
-        c3 = -6*(v**2) - 3*v - 3*(v**3)
-        c4 = 1 + 3*v + v**3 + 3*(v**2)
-        t_df['Tilson_T3'] = c1*e6 + c2*e5 + c3*e4 + c4*e3
-        t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
+    if votes >= 2:
+        signal = "STRONG BUY"
+    elif votes == 1:
+        signal = "BUY"
+    elif votes == 0:
+        signal = "HOLD"
+    else:
+        signal = "SELL"
 
-        # =================================================================
-        # 3. FİBONACCİ & 5-8 HIZLI EMA
-        # =================================================================
-        roll_high = t_df['High'].rolling(window=50).max()
-        roll_low = t_df['Low'].rolling(window=50).min()
-        fark = (roll_high - roll_low).replace(0, 0.0001)
-        t_df['Fib_Level'] = (t_df['Close'] - roll_low) / fark
-        
-        t_df['EMA5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
-        t_df['EMA8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
-        t_df['EMA_5_8_Trend'] = np.where(t_df['EMA5'] > t_df['EMA8'], 1, -1)
+    return {
+        "rf_prediction": round(rf_prediction, 4),
+        "last_close": round(last_close, 4),
+        "votes": votes,
+        "signal": signal,
+        "confidence": confidence
+    }
 
-        # =================================================================
-        # 4. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
-        # =================================================================
-        t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
-        
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend', 'Fib_Level', 'EMA_5_8_Trend']
-        
-        t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
-        ml_df = t_df.dropna()
 
-        # 🛠️ DÜZELTME 2: 120 gün limiti 40'a düşürüldü. Ayrıca `None` hatasını önlemek için `float()` kullanıldı.
-        if len(ml_df) < 40:
-            anlik_fiyat_guvenli = round(float(t_df['Close'].iloc[-1]), 2)
-            return {"rf_prediction": anlik_fiyat_guvenli, "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
-
-        X = ml_df[features]
-        y = ml_df['Target_Return']
-        son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
-
-        gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
-        svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])
-        ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
-        
-        ensemble = VotingRegressor(estimators=[('gb', gb), ('svr', svr_pipeline), ('ridge', ridge_pipeline)], weights=[2, 1, 1])
-        ensemble.fit(X, y)
-
-        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
-        anlik_fiyat = float(t_df['Close'].iloc[-1])
-        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
-        
-        # =================================================================
-        # 5. KANTİTATİF SİNYAL YÖNETİMİ
-        # =================================================================
-        adx_gucu = t_df['ADX'].iloc[-1]
-        cmf_pozitif = t_df['CMF'].iloc[-1] > 0
-        z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 
-        macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
-        trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
-        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1
-        hizli_tetik_onay = t_df['EMA_5_8_Trend'].iloc[-1] == 1
-        
-        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay, hizli_tetik_onay])
-        
-        sinyal = "NÖTR"
-        guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
-
-        if adx_gucu < 20:
-            sinyal = "NÖTR (Yatay)"
-            guven_skoru -= 20
-        else:
-            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 5:
-                sinyal = "🚀 GÜÇLÜ AL"
-                guven_skoru = min(guven_skoru + 25, 99.0)
-            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3 and hizli_tetik_onay:
-                sinyal = "🟢 AL"
-                guven_skoru = min(guven_skoru + 15, 99.0)
-            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 2) or (not tilson_onay and not hizli_tetik_onay):
-                sinyal = "⚠️ SAT"
-
-        return {
-            "rf_prediction": round(hedef_fiyat, 2),
-            "signal": sinyal,
-            "confidence": max(round(guven_skoru, 1), 0.0),
-            "expected_return_pct": round(beklenen_getiri_pct, 2) 
-        }
-    except Exception as e:
-        anlik_hata_guvenli = round(float(df['Close'].iloc[-1]), 2) if not df.empty else 0.0
-        return {
-            "rf_prediction": anlik_hata_guvenli, 
-            "signal": "HATA", 
-            "confidence": 0.0,
-            "expected_return_pct": 0.0
-        }
 def ai_dashboard(symbol, df):
     return {
         "symbol": symbol,

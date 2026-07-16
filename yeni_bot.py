@@ -21,10 +21,6 @@ def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
         df['Stoch_K'] = 50.0
         df['Stoch_D'] = 50.0
         return df
-    except Exception as e: # <--- BU KISIM EKSİK! Bunu try ile aynı hizaya ekleyin
-        df['Stoch_K'] = 50.0
-        df['Stoch_D'] = 50.0
-        return df
         
         # En düşük 'Low' ve en yüksek 'High' değerlerini bul
         low_min = df['Low'].rolling(window=k_periyot).min()
@@ -882,7 +878,7 @@ with tabs[1]:
         
         def kesisim_tara(ticker):
             try:
-                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=60), end=datetime.today(), progress=False)
+                t_df = yf.download(ticker, start=datetime.today() - timedelta(days=180), end=datetime.today(), progress=False)
                 if t_df.empty or len(t_df) < 15: return None
                 if isinstance(t_df.columns, pd.MultiIndex): t_df.columns = t_df.columns.droplevel(1)
                 
@@ -951,7 +947,7 @@ with tabs[2]:
                     kod = str(row["Varlık"]).upper(); mal = float(row["Maliyet"]); lot = float(row["Lot"])
                     if kod and lot > 0:
                         try:
-                            c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
+                            c_veri = yf.download(kod, period="1y", progress=False, session=oturum)
                             if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
                             g_fiyat = float(c_veri['Close'].iloc[-1])
                             top_mal += (mal * lot); top_deg += (g_fiyat * lot)

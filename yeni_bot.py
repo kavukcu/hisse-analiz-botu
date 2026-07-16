@@ -12,20 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np 
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
-        low_min = df['Low'].rolling(window=k_periyot).min()
-        high_max = df['High'].rolling(window=k_periyot).max()
-        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
-        df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
-        return df
-    except Exception as e:
-        df['Stoch_K'] = 50.0
-        df['Stoch_D'] = 50.0
-        return df
-    except Exception as e: # <--- BU KISIM EKSİK! Bunu try ile aynı hizaya ekleyin
-        df['Stoch_K'] = 50.0
-        df['Stoch_D'] = 50.0
-        return df
-        
         # En düşük 'Low' ve en yüksek 'High' değerlerini bul
         low_min = df['Low'].rolling(window=k_periyot).min()
         high_max = df['High'].rolling(window=k_periyot).max()
@@ -37,7 +23,10 @@ def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
         df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
         
         return df
-
+    except Exception as e:
+        df['Stoch_K'] = 50.0
+        df['Stoch_D'] = 50.0
+        return df
 # --- İSTATİSTİKSEL ANALİZ FONKSİYONU ---
 def python_istatistik_analizi(df):
     """Hissenin risk ve getiri istatistiklerini hesaplar."""
@@ -417,9 +406,9 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     # 🎯 KRİTİK ADIM 3: Veri seti boş mu veya çok mu yetersiz kontrolü
     if len(df_ml) < 15:
         # Eğer yeterli veri yoksa eğitim yapmadan basit bir projeksiyon döndür (Uygulamanın çökmesini önler)
-        son_fiyat = float(df['Close'].iloc[-1])
+        son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
-        tahminler = [son_fiyat * (1 + (i * 0.001)) for i in range(1, gelecek_gun + 1)] # Ufak bir trend simülasyonu
+        tahminler = [son_fiyat] * gelecek_gun  # <--- HATA BURADAYDI, DÜZELTİLDİ
         return tarihler, tahminler
 
     # Veriler temiz olduğuna göre eğitime geçebiliriz
@@ -427,7 +416,7 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
     y = df_ml['Close']
     
     model = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
-    model.fit(X.values, y.values) # Artık burada hata vermeyecektir!
+    model.fit(X.values, y.values)
     
     tahminler = []
     son_satir = df_ml.iloc[-1]
@@ -442,15 +431,15 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
         pred = model.predict([[lag1, lag2, sma_10, hacim_deg, rsi_14]])[0]
         tahminler.append(pred)
         
-        # Gelecek iterasyon için değerleri kaydır (Döngünün İÇİNDE olmalı)
+        # Gelecek iterasyon için değerleri kaydır
         lag2 = lag1
         lag1 = pred
         sma_10 = (sma_10 * 9 + pred) / 10
-        # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
+        # Tahmin sürecinde Hacim ve RSI nötr varsayılır
         hacim_deg = 0.0 
         rsi_14 = 50.0 
         
-    # Döngü bittikten sonra tarihleri hesapla ve sonucu dön (Döngünün DIŞINDA olmalı)
+    # Döngü bittikten sonra tarihleri hesapla ve sonucu dön
     tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
     return tarihler, tahminler
         # Tahmin sürecinde Hacim ve RSI nötr varsayılır (veya simüle edilebilir)
@@ -599,20 +588,6 @@ with tabs[10]:
         st.metric("Yapay Zeka Kararı", ai_sonuc["signal"])
         st.metric("Makine Öğrenmesi Tahmini (Kısa Vade)", f"{ai_sonuc['rf_prediction']} TL")
         st.progress(ai_sonuc["confidence"] / 100, text=f"Yapay Zeka Güven Skoru: %{ai_sonuc['confidence']}")
-        
-    with c2:
-        st.markdown("### 🏢 Kurumsal SMC & Risk Motoru")
-        kurumsal_sonuc = institutional_decision(df)
-        
-        st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
-        st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
-        st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")        
-        st.metric("Kurumsal Aksiyon", kurumsal_sonuc["decision"])
-        st.metric("Piyasa Rejimi (Trend/Range)", kurumsal_sonuc["regime"])
-        st.progress(1.0 - (kurumsal_sonuc["risk"] / 100), text=f"Risk Seviyesi: %{kurumsal_sonuc['risk']} (Ters Çevrilmiş)")
-        "📈 SMC & Quant Fiyat Hareketi", "🔍 Akıllı Asenkron Radar", "💼 Cüzdan & Akıllı Stop", 
-        "🏢 Temel & Temettü", "📰 Haber", "📊 Isı Haritası", 
-        "⚙️ Backtest", "🎲 Risk Simülasyonu", "🛠️ Sistem Durumu", "🧬 Python İstatistik"
 
     with tabs[0]:
         st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
@@ -3018,4 +2993,3 @@ def terminal_status_v100():
         "summary": True,
         "status": "READY"
     }
-

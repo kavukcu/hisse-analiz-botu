@@ -107,9 +107,8 @@ def ensemble_prediction(df):
         t_df['ATR'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1).rolling(14).mean()
 
         # =================================================================
-        # 2. İLERİ DÜZEY QUANT & YENİ EKLENEN TİLSON T3
+        # 2. İLERİ DÜZEY QUANT (TİLSON, ADX, Z-SCORE)
         # =================================================================
-        # Z-SCORE & CMF & ADX
         t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
 
         mf_multiplier = ((t_df['Close'] - t_df['Low']) - (t_df['High'] - t_df['Close'])) / (t_df['High'] - t_df['Low']).replace(0, 0.0001)
@@ -130,33 +129,43 @@ def ensemble_prediction(df):
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
         t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=50).mean(), 1, -1)
 
-        # 🚀 YENİ: TİLSON T3 HESAPLAMASI
-        v = 0.7  # Hacim Faktörü (Volume Factor)
-        period = 8 # Tilson için ideal kısa-orta periyot
-        
+        v = 0.7 
+        period = 8 
         e1 = t_df['Close'].ewm(span=period, adjust=False).mean()
         e2 = e1.ewm(span=period, adjust=False).mean()
         e3 = e2.ewm(span=period, adjust=False).mean()
         e4 = e3.ewm(span=period, adjust=False).mean()
         e5 = e4.ewm(span=period, adjust=False).mean()
         e6 = e5.ewm(span=period, adjust=False).mean()
-        
         c1 = -v**3
         c2 = 3*(v**2) + 3*(v**3)
         c3 = -6*(v**2) - 3*v - 3*(v**3)
         c4 = 1 + 3*v + v**3 + 3*(v**2)
-        
         t_df['Tilson_T3'] = c1*e6 + c2*e5 + c3*e4 + c4*e3
-        # Fiyat Tilson'un üzerindeyse Pozitif (1), Altındaysa Negatif (-1)
         t_df['Tilson_Trend'] = np.where(t_df['Close'] > t_df['Tilson_T3'], 1, -1)
 
         # =================================================================
-        # 3. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
+        # 3. YENİ EKLENEN: FİBONACCİ & 5-8 HIZLI EMA
+        # =================================================================
+        # Dinamik Fibonacci Seviyesi (Son 50 mum)
+        roll_high = t_df['High'].rolling(window=50).max()
+        roll_low = t_df['Low'].rolling(window=50).min()
+        fark = (roll_high - roll_low).replace(0, 0.0001)
+        # 0 = Tam Dipte, 1 = Tam Zirvede, 0.618 vb. Altın Oran seviyeleri
+        t_df['Fib_Level'] = (t_df['Close'] - roll_low) / fark
+        
+        # 5 ve 8 Günlük EMA Hızlı Kesişim (Tetikleyici)
+        t_df['EMA5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
+        t_df['EMA8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
+        t_df['EMA_5_8_Trend'] = np.where(t_df['EMA5'] > t_df['EMA8'], 1, -1)
+
+        # =================================================================
+        # 4. VERİ ÖN İŞLEME VE YAPAY ZEKA MİMARİSİ
         # =================================================================
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        # Yapay Zeka Öğrenim Setine Tilson Da Eklendi!
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend']
+        # 🚀 Fib_Level ve EMA_5_8_Trend Yapay Zeka'nın Eğitim Listesine Eklendi
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'CMF', 'ADX', 'Vol_Change', 'EMA_Trend', 'Tilson_Trend', 'Fib_Level', 'EMA_5_8_Trend']
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         ml_df = t_df.dropna()
@@ -169,7 +178,6 @@ def ensemble_prediction(df):
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
         gb = GradientBoostingRegressor(n_estimators=150, loss='huber', learning_rate=0.05, max_depth=4, random_state=42)
-        
         svr_pipeline = Pipeline([('scaler', StandardScaler()), ('svr', SVR(kernel='rbf', C=1.0, epsilon=0.1))])
         ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
         
@@ -181,35 +189,36 @@ def ensemble_prediction(df):
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
         # =================================================================
-        # 4. KANTİTATİF SİNYAL YÖNETİMİ (TİLSON ONAYLI)
+        # 5. KANTİTATİF SİNYAL YÖNETİMİ (6 ONAYLI ZIRH)
         # =================================================================
         adx_gucu = t_df['ADX'].iloc[-1]
         cmf_pozitif = t_df['CMF'].iloc[-1] > 0
         z_score_uygun = t_df['Z_Score'].iloc[-1] < 1.5 
         macd_pozitif = t_df['MACD_Hist'].iloc[-1] > 0
         trend_yukari = t_df['EMA_Trend'].iloc[-1] == 1
-        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1 # 🚀 YENİ: Fiyat Tilson'un Üstünde Mi?
+        tilson_onay = t_df['Tilson_Trend'].iloc[-1] == 1
+        hizli_tetik_onay = t_df['EMA_5_8_Trend'].iloc[-1] == 1 # 🚀 YENİ: 5 EMA, 8 EMA'nın üstünde mi?
         
-        # Toplam Teyit Skoru Artık 5 Üzerinden Hesaplanıyor!
-        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay])
+        # Toplam Teyit Skoru Artık 6 Üzerinden Hesaplanıyor!
+        teyit_skoru = sum([cmf_pozitif, z_score_uygun, macd_pozitif, trend_yukari, tilson_onay, hizli_tetik_onay])
         
         sinyal = "NÖTR"
         guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
 
-        # ADX Filtresi
         if adx_gucu < 20:
             sinyal = "NÖTR (Yatay Piyasa)"
             guven_skoru -= 20
         else:
-            # Yapay Zeka beklentisi ve Tilson ağırlıklı Teknik Onay
-            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 4:
+            # 🚀 GÜÇLÜ AL için 6 teyidin en az 5'i olumlu olmalı! (Kusursuz Fırtına)
+            if beklenen_getiri_pct > 2.5 and teyit_skoru >= 5:
                 sinyal = "🚀 GÜÇLÜ AL"
                 guven_skoru = min(guven_skoru + 25, 99.0)
-            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3:
+            # 🟢 AL için 6 teyidin en az 3'ü ve kısa vadeli tetik (EMA5>EMA8) aktif olmalı!
+            elif beklenen_getiri_pct > 1.0 and teyit_skoru >= 3 and hizli_tetik_onay:
                 sinyal = "🟢 AL"
                 guven_skoru = min(guven_skoru + 15, 99.0)
-            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 1) or (t_df['Tilson_Trend'].iloc[-1] == -1 and t_df['MACD_Hist'].iloc[-1] < 0):
-                # YENİ KURAL: Fiyat Tilson'un altına düştüyse ve MACD negatifse acımasızca SAT!
+            # ⚠️ SAT Kuralı: Hem AI getiri beklemiyor, hem Tilson kırılmış, hem de Hızlı EMA'lar ölüm kesişimi (Death Cross) yapmış!
+            elif beklenen_getiri_pct < -1.5 or (teyit_skoru <= 2) or (not tilson_onay and not hizli_tetik_onay):
                 sinyal = "⚠️ SAT"
 
         return {

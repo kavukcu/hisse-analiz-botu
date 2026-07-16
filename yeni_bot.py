@@ -71,7 +71,13 @@ def ensemble_prediction(df):
         from sklearn.preprocessing import StandardScaler
         
         # Orijinal veriyi bozmamak için kopyasını alıyoruz
-        t_df = stokastik_hesapla(df.copy())
+        t_df = df.copy()
+        
+        # 🛠️ DÜZELTME 1: stokastik_hesapla tanımsız olma ihtimaline karşı stokastiği içeride hesaplıyoruz
+        if 'Stoch_%K' not in t_df.columns:
+            low_min = t_df['Low'].rolling(window=14).min()
+            high_max = t_df['High'].rolling(window=14).max()
+            t_df['Stoch_%K'] = 100 * ((t_df['Close'] - low_min) / (high_max - low_min + 1e-9))
         
         # =================================================================
         # 1. STANDART TEKNİK GÖSTERGELER
@@ -115,8 +121,6 @@ def ensemble_prediction(df):
         t_df['ADX'] = dx.ewm(alpha=1/14, adjust=False).mean()
 
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
-        
-        # 🛠️ DÜZELTME 1: Veri yutmasını önlemek için EMA Trendi 50'den 20 güne düşürüldü
         t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=20).mean(), 1, -1)
 
         v = 0.7 
@@ -137,7 +141,6 @@ def ensemble_prediction(df):
         # =================================================================
         # 3. FİBONACCİ & 5-8 HIZLI EMA
         # =================================================================
-        # 🛠️ DÜZELTME 2: Fibonacci penceresi 50'den 20'ye düşürüldü
         roll_high = t_df['High'].rolling(window=20).max()
         roll_low = t_df['Low'].rolling(window=20).min()
         fark = (roll_high - roll_low).replace(0, 0.0001)
@@ -155,10 +158,9 @@ def ensemble_prediction(df):
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         
-        # 🎯 KRİTİK DÜZELTME 3: Yahoo Finance bugünkü veriyi boş verirse, dünkü verilerle otomatik doldurur.
-        t_df[features] = t_df[features].ffill().bfill()
+        # 🛠️ DÜZELTME 2: Ffill ve Bfill işe yaramazsa NaN bırakmaması için eksikleri '0' ile dolduruyoruz
+        t_df[features] = t_df[features].ffill().bfill().fillna(0)
         
-        # Modeli sadece sonuçlanmış (gelecek 5 günü bilinen) geçmiş veriyle eğitiriz
         ml_df = t_df.dropna(subset=['Target_Return'])
 
         if len(ml_df) < 10:
@@ -174,7 +176,9 @@ def ensemble_prediction(df):
         ridge_pipeline = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=2.0))])
         
         ensemble = VotingRegressor(estimators=[('gb', gb), ('svr', svr_pipeline), ('ridge', ridge_pipeline)], weights=[2, 1, 1])
-        ensemble.fit(X, y)
+        
+        # 🛠️ DÜZELTME 3: DataFrame yerine ".values" göndererek Scikit-Learn Tip Uyuşmazlığı hatasını engelliyoruz
+        ensemble.fit(X.values, y.values)
 
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
@@ -216,10 +220,12 @@ def ensemble_prediction(df):
             "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
     except Exception as e:
-        anlik_hata_guvenli = round(float(df['Close'].iloc[-1]), 2) if not df.empty else 0.0
+        # 🛠️ DÜZELTME 4: Eğer hala bir sorun çıkarsa körü körüne 'HATA' demek yerine, GERÇEK hatayı tabloya yazdıracak.
+        anlik_hata_guvenli = round(float(df['Close'].iloc[-1]), 2) if (df is not None and not df.empty) else 0.0
+        hata_nedeni = str(e)[:25] # Tabloya sığsın diye ilk 25 karakteri alıyoruz
         return {
             "rf_prediction": anlik_hata_guvenli, 
-            "signal": "HATA", 
+            "signal": f"Hata: {hata_nedeni}", # <--- Gerçek hata metnini radarda göreceksiniz
             "confidence": 0.0,
             "expected_return_pct": 0.0
         }

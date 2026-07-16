@@ -259,7 +259,7 @@ def veri_yukle(ticker, start, end):
     import time, logging
     for _ in range(3):
         try:
-            df = yf.download(ticker, period="1y")
+            veri = yf.download(ticker, period="1y")
             ticker,
             start=start,
             end=end,

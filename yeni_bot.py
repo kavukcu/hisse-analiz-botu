@@ -878,7 +878,7 @@ with tabs[2]:
                     kod = str(row["Varlık"]).upper(); mal = float(row["Maliyet"]); lot = float(row["Lot"])
                     if kod and lot > 0:
                         try:
-                            c_veri = yf.download(kod, period="1d", progress=False, session=oturum)
+                            c_veri = yf.download(kod, period="2y", progress=False, session=oturum)
                             if isinstance(c_veri.columns, pd.MultiIndex): c_veri.columns = c_veri.columns.droplevel(1)
                             g_fiyat = float(c_veri['Close'].iloc[-1])
                             top_mal += (mal * lot); top_deg += (g_fiyat * lot)

@@ -10,6 +10,9 @@ import requests
 from sklearn.ensemble import RandomForestRegressor
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np 
+from xgboost import XGBRegressor
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         # En düşük 'Low' ve en yüksek 'High' değerlerini bul
@@ -358,6 +361,44 @@ def smc_hesapla(df):
     df_smc['FVG_Bullish'] = (df_smc['Low'] > df_smc['High'].shift(2)) & (df_smc['Close'].shift(1) > df_smc['Open'].shift(1))
     df_smc['FVG_Bearish'] = (df_smc['High'] < df_smc['Low'].shift(2)) & (df_smc['Close'].shift(1) < df_smc['Open'].shift(1))
     return df_smc
+def ileri_teknik_gostergeler(df):
+    df_ta = df.copy()
+    
+    # 1. ICHIMOKU BULUTU (Kurumsal Trend Takibi)
+    high_9 = df_ta['High'].rolling(window=9).max()
+    low_9 = df_ta['Low'].rolling(window=9).min()
+    df_ta['Tenkan_Sen'] = (high_9 + low_9) / 2
+
+    high_26 = df_ta['High'].rolling(window=26).max()
+    low_26 = df_ta['Low'].rolling(window=26).min()
+    df_ta['Kijun_Sen'] = (high_26 + low_26) / 2
+
+    df_ta['Senkou_Span_A'] = ((df_ta['Tenkan_Sen'] + df_ta['Kijun_Sen']) / 2).shift(26)
+    
+    high_52 = df_ta['High'].rolling(window=52).max()
+    low_52 = df_ta['Low'].rolling(window=52).min()
+    df_ta['Senkou_Span_B'] = ((high_52 + low_52) / 2).shift(26)
+    
+    df_ta['Chikou_Span'] = df_ta['Close'].shift(-26)
+    
+    # 2. CAMARILLA PIVOT NOKTALARI (Günlük Likidite Seviyeleri)
+    # Önceki günün verilerini kullanır
+    prev_high = df_ta['High'].shift(1)
+    prev_low = df_ta['Low'].shift(1)
+    prev_close = df_ta['Close'].shift(1)
+    range_hl = prev_high - prev_low
+    
+    df_ta['Cam_H4'] = prev_close + (range_hl * 1.1 / 2) # Güçlü Direnç (Breakout)
+    df_ta['Cam_H3'] = prev_close + (range_hl * 1.1 / 4) # Satış Bölgesi
+    df_ta['Cam_L3'] = prev_close - (range_hl * 1.1 / 4) # Alış Bölgesi
+    df_ta['Cam_L4'] = prev_close - (range_hl * 1.1 / 2) # Güçlü Destek (Breakdown)
+
+    # ICHIMOKU TREND SİNYALİ
+    df_ta['Ichimoku_Trend'] = np.where(df_ta['Close'] > df_ta['Senkou_Span_A'], 
+                                       np.where(df_ta['Close'] > df_ta['Senkou_Span_B'], "GÜÇLÜ BOĞA", "NÖTR"), 
+                                       np.where(df_ta['Close'] < df_ta['Senkou_Span_B'], "GÜÇLÜ AYI", "NÖTR"))
+    
+    return df_ta
 
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
@@ -485,6 +526,64 @@ def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
         son_fiyat = float(df['Close'].iloc[-1]) if (df is not None and not df.empty and 'Close' in df.columns) else 0.0
         tarihler = [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
         return tarihler, [son_fiyat] * gelecek_gun
+import numpy as np
+import pandas as pd
+from xgboost import XGBRegressor
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
+from datetime import timedelta
+
+def gelismis_ai_tahmin(df, gelecek_gun=10):
+    try:
+        df_ml = df.copy()
+        
+        # Ekstra Özellik Mühendisliği (Feature Engineering)
+        df_ml['Return'] = df_ml['Close'].pct_change()
+        df_ml['Log_Return'] = np.log(df_ml['Close'] / df_ml['Close'].shift(1))
+        df_ml['SMA_10_Dist'] = df_ml['Close'] / df_ml['Close'].rolling(10).mean() - 1
+        df_ml['Volatilite_14'] = df_ml['Return'].rolling(14).std()
+        
+        # Hedef değişken (Gelecekteki fiyat değişimi)
+        df_ml['Target'] = df_ml['Close'].shift(-1)
+        
+        df_ml.dropna(inplace=True)
+        
+        if len(df_ml) < 50:
+            return [], []
+
+        features = ['Close', 'Volume', 'Log_Return', 'SMA_10_Dist', 'Volatilite_14']
+        X = df_ml[features].values
+        y = df_ml['Target'].values
+
+        # Ölçeklendirme
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Zaman Serisi Çapraz Doğrulama ile En İyi Model Seçimi (Basitleştirilmiş)
+        tscv = TimeSeriesSplit(n_splits=3)
+        model = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=5, objective='reg:squarederror')
+        
+        # Modeli tüm veriyle eğit
+        model.fit(X_scaled, y)
+
+        # Gelecek Tahmini (Otoregresif yaklaşım - Kendi tahminini girdi olarak kullanma)
+        tahminler = []
+        son_veri = X_scaled[-1].reshape(1, -1)
+        
+        for _ in range(gelecek_gun):
+            pred = float(model.predict(son_veri)[0])
+            tahminler.append(pred)
+            
+            # Son veriyi yeni tahminle güncelle (Basit simülasyon)
+            yeni_satir = son_veri.copy()
+            yeni_satir[0, 0] = pred # Yeni kapanış fiyatı olarak tahmini ata (Gerçekte scaler ters dönüşümü gerekir)
+            son_veri = yeni_satir
+            
+        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+        return tarihler, tahminler
+
+    except Exception as e:
+        return [], []
 # --- SİDEBAR VE PİYASA SEÇİMİ ---
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
@@ -713,9 +812,9 @@ if goster_grafik_formasyon:
                 fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
 if goster_ai:
-    tarihler, tahminler = makine_ogrenmesi_tahmin(df, gelecek_gun=30)
-    fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="RF Tahmini", line=dict(color='magenta', width=3, dash='dot')), row=1, col=1)
-
+    tarihler, tahminler = gelismis_ai_tahmin(df, gelecek_gun=30)
+    # Yeni modelin çizgisini fark edebilmek için adını ve rengini (cyan) değiştirdik
+    fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI Tahmini", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
 fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)
 

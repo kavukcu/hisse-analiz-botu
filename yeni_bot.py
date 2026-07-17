@@ -361,6 +361,8 @@ def smc_hesapla(df):
     df_smc['FVG_Bullish'] = (df_smc['Low'] > df_smc['High'].shift(2)) & (df_smc['Close'].shift(1) > df_smc['Open'].shift(1))
     df_smc['FVG_Bearish'] = (df_smc['High'] < df_smc['Low'].shift(2)) & (df_smc['Close'].shift(1) < df_smc['Open'].shift(1))
     return df_smc
+# Fonksiyonu tanımlamadan hemen önce dekoratörü ekliyoruz
+@st.cache_data(ttl=3600, show_spinner=False)
 def ileri_teknik_gostergeler(df):
     df_ta = df.copy()
     
@@ -382,24 +384,21 @@ def ileri_teknik_gostergeler(df):
     df_ta['Chikou_Span'] = df_ta['Close'].shift(-26)
     
     # 2. CAMARILLA PIVOT NOKTALARI (Günlük Likidite Seviyeleri)
-    # Önceki günün verilerini kullanır
     prev_high = df_ta['High'].shift(1)
     prev_low = df_ta['Low'].shift(1)
     prev_close = df_ta['Close'].shift(1)
     range_hl = prev_high - prev_low
     
-    df_ta['Cam_H4'] = prev_close + (range_hl * 1.1 / 2) # Güçlü Direnç (Breakout)
-    df_ta['Cam_H3'] = prev_close + (range_hl * 1.1 / 4) # Satış Bölgesi
-    df_ta['Cam_L3'] = prev_close - (range_hl * 1.1 / 4) # Alış Bölgesi
-    df_ta['Cam_L4'] = prev_close - (range_hl * 1.1 / 2) # Güçlü Destek (Breakdown)
+    df_ta['Cam_H4'] = prev_close + (range_hl * 1.1 / 2)
+    df_ta['Cam_H3'] = prev_close + (range_hl * 1.1 / 4)
+    df_ta['Cam_L3'] = prev_close - (range_hl * 1.1 / 4)
+    df_ta['Cam_L4'] = prev_close - (range_hl * 1.1 / 2)
 
-    # ICHIMOKU TREND SİNYALİ
     df_ta['Ichimoku_Trend'] = np.where(df_ta['Close'] > df_ta['Senkou_Span_A'], 
                                        np.where(df_ta['Close'] > df_ta['Senkou_Span_B'], "GÜÇLÜ BOĞA", "NÖTR"), 
                                        np.where(df_ta['Close'] < df_ta['Senkou_Span_B'], "GÜÇLÜ AYI", "NÖTR"))
     
     return df_ta
-
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()
@@ -443,15 +442,16 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
 import numpy as np
 from datetime import timedelta
 from sklearn.ensemble import RandomForestRegressor
+import numpy as np
+import pandas as pd
+from datetime import timedelta
+from sklearn.ensemble import RandomForestRegressor
+import streamlit as st
+@st.cache_data(ttl=3600, show_spinner=False)
 
 def makine_ogrenmesi_tahmin(df, gelecek_gun=30):
-    # Kütüphaneleri fonksiyonun içinde çağırarak NameError (Tanımsız değişken) çökmelerini KESİN OLARAK engelliyoruz.
-    import numpy as np
-    import pandas as pd
-    from datetime import timedelta
-    from sklearn.ensemble import RandomForestRegressor
-    import streamlit as st
-    
+
+
     try:
         # 1. Temel Veri Kontrolü: Veri boşsa veya çok kısaysa tahmini atla
         if df is None or df.empty or len(df) < 15:
@@ -561,7 +561,8 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
 
         # Zaman Serisi Çapraz Doğrulama ile En İyi Model Seçimi (Basitleştirilmiş)
         tscv = TimeSeriesSplit(n_splits=3)
-        model = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=5, objective='reg:squarederror')
+        # Ağaç sayısını (n_estimators) ve derinliği (max_depth) düşürerek hızı 3 kat artırıyoruz
+        model = XGBRegressor(n_estimators=30, learning_rate=0.1, max_depth=3, objective='reg:squarederror', n_jobs=-1)
         
         # Modeli tüm veriyle eğit
         model.fit(X_scaled, y)
@@ -812,6 +813,8 @@ if goster_grafik_formasyon:
                 fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
 if goster_ai:
+
+
     tarihler, tahminler = gelismis_ai_tahmin(df, gelecek_gun=30)
     # Yeni modelin çizgisini fark edebilmek için adını ve rengini (cyan) değiştirdik
     fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI Tahmini", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)

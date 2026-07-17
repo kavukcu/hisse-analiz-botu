@@ -6,8 +6,45 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+from ai_engine import AIEngine
 import requests
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import (
+    RandomForestRegressor,
+    GradientBoostingRegressor,
+    ExtraTreesRegressor,
+    VotingRegressor
+)
+
+from sklearn.linear_model import Ridge
+
+from sklearn.svm import SVR
+
+from sklearn.pipeline import Pipeline
+
+from sklearn.preprocessing import StandardScaler
+
+from sklearn.model_selection import TimeSeriesSplit
+
+from sklearn.metrics import mean_absolute_error
+
+import joblib
+
+import os
+try:
+    from xgboost import XGBRegressor
+    XGB_AVAILABLE = True
+except:
+    XGB_AVAILABLE = False
+try:
+    from lightgbm import LGBMRegressor
+    LGBM_AVAILABLE = True
+except:
+    LGBM_AVAILABLE = False
+try:
+    from catboost import CatBoostRegressor
+    CAT_AVAILABLE = True
+except:
+    CAT_AVAILABLE = False
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np 
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
@@ -228,7 +265,11 @@ def ensemble_prediction(df):
             "signal": f"Hata: {hata_nedeni}", # <--- Gerçek hata metnini radarda göreceksiniz
             "confidence": 0.0,
             "expected_return_pct": 0.0
+            ai = AIEngine()
         }
+
+
+# tahmin = ai.predict(X_test)
 def institutional_decision(df):
     """SMC & Kurumsal Risk Motoru"""
     try:

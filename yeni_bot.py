@@ -752,7 +752,6 @@ with tabs[1]:
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    # Butonlar yan yana düzenlendi
     col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
     with col_btn1:
         btn_radar = st.button("🚀 Genel Radar Taraması")
@@ -761,12 +760,59 @@ with tabs[1]:
     with col_btn3:
         btn_tilson = st.button("📈 Tilson (T3)")
     with col_btn4:
-        btn_nokta_atisi = st.button("🎯 Nokta Atışı (Sniper)", type="primary") # Primary ile renkli buton
+        btn_nokta_atisi = st.button("🎯 Nokta Atışı (Sniper)", type="primary")
     
-    # ... (Genel Radar, Stoch ve Tilson if blokları aynı kalacak) ...
+    # 1. GENEL RADAR BUTONU İŞLEVİ
+    if btn_radar:
+        with st.spinner('Tüm liste asenkron (paralel) taranıyor... Lütfen bekleyin.'):
+            radar_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        radar_sonuclari.append(sonuc)
+            
+            if radar_sonuclari:
+                df_radar = pd.DataFrame(radar_sonuclari)
+                st.dataframe(df_radar, use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
+                
+    # 2. STOCH ANALİZİ BUTONU İŞLEVİ
+    elif btn_stoch:
+        with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
+            stoch_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        stoch_sonuclari.append(sonuc)
+            
+            if stoch_sonuclari:
+                st.dataframe(pd.DataFrame(stoch_sonuclari), use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
-    # --- YENİ EKLENEN NOKTA ATIŞI BLOĞU ---
-    if btn_nokta_atisi:
+    # 3. TİLSON ANALİZİ BUTONU İŞLEVİ
+    elif btn_tilson:
+        with st.spinner('Tilson T3 trend analizi taranıyor...'):
+            tilson_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        tilson_sonuclari.append(sonuc)
+            
+            if tilson_sonuclari:
+                st.dataframe(pd.DataFrame(tilson_sonuclari), use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
+
+    # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
+    elif btn_nokta_atisi:
         with st.spinner('Piyasadaki kusursuz kesişimler (Nokta Atışı) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -788,44 +834,12 @@ with tabs[1]:
                 
                 if not df_sniper.empty:
                     st.success(f"🎯 Nokta atışı fırsat bulundu! Toplam {len(df_sniper)} hisse altın vuruş bölgesinde.")
-                    # Veriyi daha şık göstermek için tabloyu büyütüyoruz
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
-                    st.balloons() # Güzel bir efekt
+                    st.balloons()
                 else:
-                    st.error("📉 Şu anki piyasada 3 şartı (AI + Trend + Momentum) aynı anda sağlayan 'Kusursuz' bir fırsat bulunamadı. (Böyle durumların nadir olması, filtrenin doğru çalıştığını gösterir!)")
+                    st.error("📉 Şu anki piyasada 3 şartı (AI + Trend + Momentum) aynı anda sağlayan 'Kusursuz' bir fırsat bulunamadı.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
-
-
-    elif btn_stoch:
-        with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
-            stoch_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    if sonuc:
-                        stoch_sonuclari.append(sonuc)
-            
-            if stoch_sonuclari:
-                st.dataframe(pd.DataFrame(stoch_sonuclari), use_container_width=True, hide_index=True)
-            else:
-                st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
-
-    elif btn_tilson:
-        with st.spinner('Tilson T3 trend analizi taranıyor...'):
-            tilson_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    if sonuc:
-                        tilson_sonuclari.append(sonuc)
-            
-            if tilson_sonuclari:
-                st.dataframe(pd.DataFrame(tilson_sonuclari), use_container_width=True, hide_index=True)
-            else:
-                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     else:
         st.info("Piyasayı taramak ve analiz sonuçlarını görmek için yukarıdaki butonlardan birine tıklayın.")

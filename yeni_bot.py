@@ -606,6 +606,7 @@ tabs = st.tabs([
     "🧬 İstatistik",
     "🤖 AI Ensemble Karar"
     "🧠 AI Karne"
+    "🧠 AI Karne"
 ])
 
 # --- SEKME 0: QUANT GRAFİK ---

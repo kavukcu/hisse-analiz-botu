@@ -21,8 +21,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
-
-
+import sqlite3
 # ==========================================
 # SAYFA AYARLARI VE OTURUM
 # ==========================================
@@ -32,7 +31,68 @@ oturum = requests.Session()
 oturum.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 })
+# ==========================================
+# VERİTABANI VE HAFIZA YÖNETİMİ
+# ==========================================
+def veritabani_baslat():
+    """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
+    conn = sqlite3.connect('hisse_hafiza.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
+                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
+    conn.commit()
+    conn.close()
 
+def tahmin_kaydet(sembol, hedef_fiyat):
+    """Bugünün tahminlerini hafızaya yazar."""
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    c = conn.cursor()
+    bugun = datetime.now().strftime("%Y-%m-%d")
+    
+    # Aynı gün aynı hisse için zaten kayıt yapıldıysa tekrar eklemeyi önle
+    c.execute("SELECT * FROM tahminler WHERE tarih=? AND sembol=?", (bugun, sembol))
+    if not c.fetchone():
+        c.execute("INSERT INTO tahminler (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum) VALUES (?, ?, ?, NULL, 'BEKLİYOR')", 
+                  (bugun, sembol, hedef_fiyat))
+    conn.commit()
+    conn.close()
+
+def tahminleri_degerlendir():
+    """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar."""
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    c = conn.cursor()
+    c.execute("SELECT rowid, tarih, sembol, hedef_fiyat FROM tahminler WHERE durum = 'BEKLİYOR'")
+    bekleyenler = c.fetchall()
+    
+    for row in bekleyenler:
+        rowid, tarih_str, sembol, hedef_fiyat = row
+        kayit_tarihi = datetime.strptime(tarih_str, "%Y-%m-%d")
+        
+        # Eğer tahminin üzerinden 5 gün geçmişse kontrol et
+        if (datetime.now() - kayit_tarihi).days >= 5:
+            try:
+                # Güncel fiyatı çek
+                df = yf.download(sembol, period="1d", progress=False)
+                if not df.empty:
+                    gercek_fiyat = float(df['Close'].iloc[-1])
+                    
+                    # Hedef fiyat ile gerçek fiyat arasındaki sapmayı (hata payını) hesapla
+                    sapma_orani = abs(gercek_fiyat - hedef_fiyat) / gercek_fiyat
+                    
+                    # %5'lik bir yanılma payını başarılı kabul ediyoruz
+                    durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
+                    
+                    c.execute("UPDATE tahminler SET gerceklesme_fiyati = ?, durum = ? WHERE rowid = ?", 
+                              (gercek_fiyat, durum, rowid))
+            except Exception as e:
+                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
+                
+    conn.commit()
+    conn.close()
+
+# Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
+veritabani_baslat()
+tahminleri_degerlendir()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
@@ -236,6 +296,15 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
             ai_veri = ensemble_prediction(temp_df)
             
+            # --- YENİ: Yapay zekanın hedefini hafızaya kaydet ---
+            try:
+                # Hedef fiyat string geldiği için float'a çevirerek kaydediyoruz
+                hedef_float = float(ai_veri['rf_prediction'])
+                tahmin_kaydet(sembol, hedef_float)
+            except Exception as e:
+                logging.error(f"Veritabanı kayıt hatası: {e}")
+            # -----------------------------------------------------
+
             return {
                 "Varlık": sembol,
                 "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
@@ -716,3 +785,27 @@ with tabs[9]:
         st.metric("Yapay Zeka Kararı", ai_sonuc["signal"])
         st.metric("Tahmini Hedef", f"{ai_sonuc['rf_prediction']} TL")
         st.progress(int(ai_sonuc["confidence"]), text=f"Güven Skoru: %{ai_sonuc['confidence']}")
+# --- YENİ SEKME: AI BAŞARI KARNESİ ---
+with tabs[10]: # Sekme indeksini kendi kodunuza göre ayarlayın
+    st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
+    st.markdown("Yapay zeka, geçmişte verdiği hedef fiyat tahminlerini 5 gün sonra güncel fiyatlarla kıyaslayarak kendi performansını değerlendirir. **Hata payı %5'in altında olan tahminler başarılı kabul edilir.**")
+    
+    try:
+        conn = sqlite3.connect('hisse_hafiza.db')
+        gecmis_df = pd.read_sql_query("SELECT * FROM tahminler ORDER BY tarih DESC", conn)
+        conn.close()
+        
+        if not gecmis_df.empty:
+            st.dataframe(gecmis_df, use_container_width=True, hide_index=True)
+            
+            # Basit bir istatistik
+            basarili_sayisi = len(gecmis_df[gecmis_df['durum'] == 'BAŞARILI ✅'])
+            degerlendirilen_sayisi = len(gecmis_df[gecmis_df['durum'] != 'BEKLİYOR'])
+            
+            if degerlendirilen_sayisi > 0:
+                basari_orani = (basarili_sayisi / degerlendirilen_sayisi) * 100
+                st.metric(label="Net Başarı Oranı", value=f"% {basari_orani:.1f}")
+        else:
+            st.info("Henüz kaydedilmiş bir AI tahmini bulunmuyor. Radarı çalıştırdığınızda tahminler toplanmaya başlayacaktır.")
+    except Exception as e:
+        st.error("Veritabanı okunamadı.")

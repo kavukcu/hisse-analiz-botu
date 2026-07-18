@@ -11,7 +11,8 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import requests
 import concurrent.futures
-
+import logging
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
 from sklearn.svm import SVR
@@ -20,6 +21,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
+
 
 # ==========================================
 # SAYFA AYARLARI VE OTURUM
@@ -216,7 +218,101 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
-
+def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
+    """
+    Hisseleri paralel taramak için oluşturulmuş işçi fonksiyondur.
+    analiz_tipi: 'radar' veya 'stoch' olabilir.
+    """
+    try:
+        temp_df = veri_yukle(sembol, baslangic, bitis)
+        if temp_df.empty: 
+            return None
+        
+        temp_df = stokastik_hesapla(temp_df)
+        son_k = temp_df['Stoch_K'].iloc[-1]
+        son_d = temp_df['Stoch_D'].iloc[-1]
+        
+        if analiz_tipi == "radar":
+            stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
+            ai_veri = ensemble_prediction(temp_df)
+            
+            return {
+                "Varlık": sembol,
+                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
+                "Stoch %K": round(son_k, 2),
+                "Stoch Durum": stoch_durum,
+                "🤖 AI Kararı": ai_veri['signal'],
+                "🎯 AI Hedef Fiyat": f"{ai_veri['rf_prediction']} TL",
+                "⚡ Güven Skoru": f"% {ai_veri['confidence']}"
+            }
+            
+        elif analiz_tipi == "stoch":
+            if son_k < 20 and son_k > son_d:
+                detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
+            elif son_k > 80 and son_k < son_d:
+                detay_durum = "🔴 AŞIRI ALIM - GÜÇLÜ SAT (K < D)"
+            elif son_k > son_d:
+                detay_durum = "↗️ POZİTİF EĞİLİM (K > D)"
+            else:
+                detay_durum = "↘️ NEGATİF EĞİLİM (K < D)"
+                
+            return {
+                "Varlık": sembol,
+                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
+                "Stoch %K": round(son_k, 2),
+                "Stoch %D": round(son_d, 2),
+                "Durum Analizi": detay_durum
+            }
+            
+    except Exception as e:
+        logging.error(f"[{sembol}] Analiz Hatası: {str(e)}") # Hataları yutmak yerine logluyoruz
+        return None
+def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
+    try:
+        temp_df = veri_yukle(sembol, baslangic, bitis)
+        if temp_df.empty: 
+            return None
+        
+        temp_df = stokastik_hesapla(temp_df)
+        son_k = temp_df['Stoch_K'].iloc[-1]
+        son_d = temp_df['Stoch_D'].iloc[-1]
+        
+        if analiz_tipi == "radar":
+            stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
+            ai_veri = ensemble_prediction(temp_df)
+            
+            return {
+                "Varlık": sembol,
+                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
+                "Stoch %K": round(son_k, 2),
+                "Stoch Durum": stoch_durum,
+                "🤖 AI Kararı": ai_veri['signal'],
+                "🎯 AI Hedef Fiyat": f"{ai_veri['rf_prediction']} TL",
+                "⚡ Güven Skoru": f"% {ai_veri['confidence']}"
+            }
+            
+        elif analiz_tipi == "stoch":
+            if son_k < 20 and son_k > son_d:
+                detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
+            elif son_k > 80 and son_k < son_d:
+                detay_durum = "🔴 AŞIRI ALIM - GÜÇLÜ SAT (K < D)"
+            elif son_k > son_d:
+                detay_durum = "↗️ POZİTİF EĞİLİM (K > D)"
+            else:
+                detay_durum = "↘️ NEGATİF EĞİLİM (K < D)"
+                
+            return {
+                "Varlık": sembol,
+                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
+                "Stoch %K": round(son_k, 2),
+                "Stoch %D": round(son_d, 2),
+                "Durum Analizi": detay_durum
+            }
+            
+    except Exception as e:
+        import logging
+        logging.error(f"[{sembol}] Analiz Hatası: {str(e)}")
+        return None
 # ==========================================
 # 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
 # ==========================================
@@ -504,45 +600,19 @@ with tabs[1]:
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    # Butonları değişkenlere atayarak Streamlit'in sayfayı yeniden yüklemesindeki
-    # çakışmaları engelliyoruz.
     btn_radar = st.button("🚀 Hızlı Radar Taramasını Başlat")
     btn_stoch = st.button("📊 Stoch Analizi Taramasını Başlat")
     
     if btn_radar:
-        with st.spinner('Tüm liste taranıyor, Yapay Zeka analiz ediyor... Lütfen bekleyin.'):
+        with st.spinner('Tüm liste asenkron (paralel) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        radar_sonuclari.append(sonuc)
             
-            for sembol in tarama_listesi:
-                try:
-                    # 1. Veriyi Çek
-                    temp_df = veri_yukle(sembol, baslangic, bitis)
-                    if temp_df.empty: 
-                        continue
-                    
-                    # 2. Stokastik Hesapla
-                    temp_df = stokastik_hesapla(temp_df)
-                    son_k = temp_df['Stoch_K'].iloc[-1]
-                    son_d = temp_df['Stoch_D'].iloc[-1]
-                    stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
-                    
-                    # 3. AI Karar Motorunu Çalıştır
-                    ai_veri = ensemble_prediction(temp_df)
-                    
-                    # 4. Sonuçları Tabloya Ekle
-                    radar_sonuclari.append({
-                        "Varlık": sembol,
-                        "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
-                        "Stoch %K": round(son_k, 2),
-                        "Stoch Durum": stoch_durum,
-                        "🤖 AI Kararı": ai_veri['signal'],
-                        "🎯 AI Hedef Fiyat": f"{ai_veri['rf_prediction']} TL",
-                        "⚡ Güven Skoru": f"% {ai_veri['confidence']}"
-                    })
-                except Exception as e:
-                    pass # Hata veren hisseyi atla, sistemi durdurma
-            
-            # Tabloyu Ekrana Bas
             if radar_sonuclari:
                 radar_df = pd.DataFrame(radar_sonuclari)
                 st.dataframe(radar_df, use_container_width=True, hide_index=True)
@@ -550,43 +620,15 @@ with tabs[1]:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
                 
     elif btn_stoch:
-        with st.spinner('Özel Stoch Analizi için liste taranıyor... Lütfen bekleyin.'):
+        with st.spinner('Özel Stoch Analizi paralel taranıyor... Lütfen bekleyin.'):
             stoch_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        stoch_sonuclari.append(sonuc)
             
-            for sembol in tarama_listesi:
-                try:
-                    # 1. Veriyi Çek
-                    temp_df = veri_yukle(sembol, baslangic, bitis)
-                    if temp_df.empty: 
-                        continue
-                    
-                    # 2. Stokastik Hesapla
-                    temp_df = stokastik_hesapla(temp_df)
-                    son_k = temp_df['Stoch_K'].iloc[-1]
-                    son_d = temp_df['Stoch_D'].iloc[-1]
-                    
-                    # 3. Özel Stoch Mantığı ve Durum Bildirimi
-                    if son_k < 20 and son_k > son_d:
-                        detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
-                    elif son_k > 80 and son_k < son_d:
-                        detay_durum = "🔴 AŞIRI ALIM - GÜÇLÜ SAT (K < D)"
-                    elif son_k > son_d:
-                        detay_durum = "↗️ POZİTİF EĞİLİM (K > D)"
-                    else:
-                        detay_durum = "↘️ NEGATİF EĞİLİM (K < D)"
-                        
-                    # 4. Sonuçları Tabloya Ekle
-                    stoch_sonuclari.append({
-                        "Varlık": sembol,
-                        "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
-                        "Stoch %K": round(son_k, 2),
-                        "Stoch %D": round(son_d, 2),
-                        "Durum Analizi": detay_durum
-                    })
-                except Exception as e:
-                    pass
-            
-            # Tabloyu Ekrana Bas
             if stoch_sonuclari:
                 stoch_df = pd.DataFrame(stoch_sonuclari)
                 st.dataframe(stoch_df, use_container_width=True, hide_index=True)

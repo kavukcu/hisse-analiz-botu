@@ -605,7 +605,7 @@ tabs = st.tabs([
     "🎲 Risk Simülasyonu", 
     "🧬 İstatistik",
     "🤖 AI Ensemble Karar"
-    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
+    "🧠 AI Karne"
 ])
 
 # --- SEKME 0: QUANT GRAFİK ---
@@ -787,19 +787,24 @@ with tabs[9]:
         st.metric("Tahmini Hedef", f"{ai_sonuc['rf_prediction']} TL")
         st.progress(int(ai_sonuc["confidence"]), text=f"Güven Skoru: %{ai_sonuc['confidence']}")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
+# --- SEKME 10: AI BAŞARI KARNESİ ---
 with tabs[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
-    st.markdown("Yapay zeka, geçmişte verdiği hedef fiyat tahminlerini 5 gün sonra güncel fiyatlarla kıyaslayarak kendi performansını değerlendirir. **Hata payı %5'in altında olan tahminler başarılı kabul edilir.**")
+    st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")
     
     try:
         conn = sqlite3.connect('hisse_hafiza.db')
-        gecmis_df = pd.read_sql_query("SELECT * FROM tahminler ORDER BY tarih DESC", conn)
+        # Tablo yoksa hata almamak için kontrol
+        try:
+            gecmis_df = pd.read_sql_query("SELECT * FROM tahminler ORDER BY tarih DESC", conn)
+        except:
+            st.warning("Veritabanı tablosu henüz oluşturulmamış.")
+            gecmis_df = pd.DataFrame()
         conn.close()
         
         if not gecmis_df.empty:
             st.dataframe(gecmis_df, use_container_width=True, hide_index=True)
             
-            # Basit bir istatistik
             basarili_sayisi = len(gecmis_df[gecmis_df['durum'] == 'BAŞARILI ✅'])
             degerlendirilen_sayisi = len(gecmis_df[gecmis_df['durum'] != 'BEKLİYOR'])
             
@@ -807,6 +812,6 @@ with tabs[10]:
                 basari_orani = (basarili_sayisi / degerlendirilen_sayisi) * 100
                 st.metric(label="Net Başarı Oranı", value=f"% {basari_orani:.1f}")
         else:
-            st.info("Henüz kaydedilmiş bir AI tahmini bulunmuyor. Radarı çalıştırdığınızda tahminler toplanmaya başlayacaktır.")
+            st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
     except Exception as e:
-        st.error("Veritabanı okunamadı.")
+        st.error(f"Veritabanı erişim hatası: {e}")

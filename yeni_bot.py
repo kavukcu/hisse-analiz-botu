@@ -801,7 +801,32 @@ with tabs[1]:
                 st.dataframe(stoch_df, use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı veya veri çekilemedi.")
+    # ... (diğer butonlar)
+    btn_tilson = st.button("📈 Tilson (T3) Taramasını Başlat")
+    
+    if btn_radar:
+        # ... (mevcut kodunuz)
+        pass # Kod bloğunuz burada kalmaya devam edecek
+        
+    elif btn_stoch:
+        # ... (mevcut kodunuz)
+        pass
 
+    elif btn_tilson:
+        with st.spinner('Tilson T3 trend analizi paralel taranıyor...'):
+            tilson_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        tilson_sonuclari.append(sonuc)
+            
+            if tilson_sonuclari:
+                tilson_df = pd.DataFrame(tilson_sonuclari)
+                st.dataframe(tilson_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Tarama sonucu bulunamadı.")
     else:
         st.info("Piyasayı taramak ve analiz sonuçlarını görmek için yukarıdaki butonlardan birine tıklayın.")
 # --- SEKME 2: CÜZDAN & STOP ---

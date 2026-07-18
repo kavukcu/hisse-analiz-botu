@@ -605,7 +605,7 @@ tabs = st.tabs([
     "🎲 Risk Simülasyonu", 
     "🧬 İstatistik",
     "🤖 AI Ensemble Karar"
-    "🧠 AI Başarı Karnesi"
+    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
 ])
 
 # --- SEKME 0: QUANT GRAFİK ---

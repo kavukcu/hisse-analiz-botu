@@ -604,7 +604,7 @@ tabs = st.tabs([
     "⚙️ Backtest", 
     "🎲 Risk Simülasyonu", 
     "🧬 İstatistik",
-    "🤖 AI Ensemble Karar"
+    "🤖 AI Ensemble Karar",
     "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
 ])
 

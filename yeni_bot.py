@@ -286,10 +286,19 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return None
         
         if analiz_tipi == "radar":
+            # Stoch Hesabı
             temp_df = stokastik_hesapla(temp_df)
             son_k = temp_df['Stoch_K'].iloc[-1]
             son_d = temp_df['Stoch_D'].iloc[-1]
             stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
+            
+            # Tilson Hesabı
+            temp_df['Tilson_T3'] = tilson_t3(temp_df['Close'])
+            t3_degeri = temp_df['Tilson_T3'].iloc[-1]
+            fiyat = temp_df['Close'].iloc[-1]
+            tilson_durum = "🚀 BOĞA" if fiyat > t3_degeri else "🐻 AYI"
+
+            # Yapay Zeka Hesabı
             ai_veri = ensemble_prediction(temp_df)
             
             try:
@@ -300,12 +309,12 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
 
             return {
                 "Varlık": sembol,
-                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
-                "Stoch %K": round(son_k, 2),
+                "Son Fiyat": f"{fiyat:.2f}",
+                "Trend (T3)": tilson_durum,       # Yeni Eklendi
                 "Stoch Durum": stoch_durum,
                 "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 AI Hedef Fiyat": f"{ai_veri['rf_prediction']} TL",
-                "⚡ Güven Skoru": f"% {ai_veri['confidence']}"
+                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL",
+                "⚡ Güven": f"% {ai_veri['confidence']}"
             }
             
         elif analiz_tipi == "stoch":
@@ -679,16 +688,21 @@ with tabs[1]:
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
     # Butonlar yan yana düzenlendi
-    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
     with col_btn1:
-        btn_radar = st.button("🚀 Hızlı Radar Taraması")
+        btn_radar = st.button("🚀 Genel Radar Taraması")
     with col_btn2:
-        btn_stoch = st.button("📊 Stoch Analiz Taraması")
+        btn_stoch = st.button("📊 Stoch Analizi")
     with col_btn3:
-        btn_tilson = st.button("📈 Tilson (T3) Taraması")
+        btn_tilson = st.button("📈 Tilson (T3)")
+    with col_btn4:
+        btn_nokta_atisi = st.button("🎯 Nokta Atışı (Sniper)", type="primary") # Primary ile renkli buton
     
-    if btn_radar:
-        with st.spinner('Tüm liste asenkron (paralel) taranıyor... Lütfen bekleyin.'):
+    # ... (Genel Radar, Stoch ve Tilson if blokları aynı kalacak) ...
+
+    # --- YENİ EKLENEN NOKTA ATIŞI BLOĞU ---
+    if btn_nokta_atisi:
+        with st.spinner('Piyasadaki kusursuz kesişimler (Nokta Atışı) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
@@ -698,10 +712,26 @@ with tabs[1]:
                         radar_sonuclari.append(sonuc)
             
             if radar_sonuclari:
-                st.dataframe(pd.DataFrame(radar_sonuclari), use_container_width=True, hide_index=True)
-            else:
-                st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
+                df_radar = pd.DataFrame(radar_sonuclari)
                 
+                # KESKİN NİŞANCI FİLTRESİ: Sadece 3 şartı da sağlayanları getir
+                df_sniper = df_radar[
+                    (df_radar['🤖 AI Kararı'] == '🚀 GÜÇLÜ AL') & 
+                    (df_radar['Stoch Durum'] == '🚀 AL') & 
+                    (df_radar['Trend (T3)'] == '🚀 BOĞA')
+                ]
+                
+                if not df_sniper.empty:
+                    st.success(f"🎯 Nokta atışı fırsat bulundu! Toplam {len(df_sniper)} hisse altın vuruş bölgesinde.")
+                    # Veriyi daha şık göstermek için tabloyu büyütüyoruz
+                    st.dataframe(df_sniper, use_container_width=True, hide_index=True)
+                    st.balloons() # Güzel bir efekt
+                else:
+                    st.error("📉 Şu anki piyasada 3 şartı (AI + Trend + Momentum) aynı anda sağlayan 'Kusursuz' bir fırsat bulunamadı. (Böyle durumların nadir olması, filtrenin doğru çalıştığını gösterir!)")
+            else:
+                st.warning("⚠️ Tarama yapılamadı.")
+
+
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []

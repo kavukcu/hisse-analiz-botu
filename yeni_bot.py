@@ -787,7 +787,7 @@ with tabs[9]:
         st.metric("Tahmini Hedef", f"{ai_sonuc['rf_prediction']} TL")
         st.progress(int(ai_sonuc["confidence"]), text=f"Güven Skoru: %{ai_sonuc['confidence']}")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
-with tabs[10]: # Sekme indeksini kendi kodunuza göre ayarlayın
+with tabs[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
     st.markdown("Yapay zeka, geçmişte verdiği hedef fiyat tahminlerini 5 gün sonra güncel fiyatlarla kıyaslayarak kendi performansını değerlendirir. **Hata payı %5'in altında olan tahminler başarılı kabul edilir.**")
     

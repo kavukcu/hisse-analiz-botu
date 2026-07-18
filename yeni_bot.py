@@ -279,31 +279,24 @@ def haber_duygu_analizi(ticker):
         return sonuclar
     except: return []
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
-    """
-    Hisseleri paralel taramak için oluşturulmuş işçi fonksiyondur.
-    analiz_tipi: 'radar' veya 'stoch' olabilir.
-    """
+    """Hisseleri paralel taramak için optimize edilmiş asenkron işçi fonksiyonu."""
     try:
         temp_df = veri_yukle(sembol, baslangic, bitis)
         if temp_df.empty: 
             return None
         
-        temp_df = stokastik_hesapla(temp_df)
-        son_k = temp_df['Stoch_K'].iloc[-1]
-        son_d = temp_df['Stoch_D'].iloc[-1]
-        
         if analiz_tipi == "radar":
+            temp_df = stokastik_hesapla(temp_df)
+            son_k = temp_df['Stoch_K'].iloc[-1]
+            son_d = temp_df['Stoch_D'].iloc[-1]
             stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
             ai_veri = ensemble_prediction(temp_df)
             
-            # --- YENİ: Yapay zekanın hedefini hafızaya kaydet ---
             try:
-                # Hedef fiyat string geldiği için float'a çevirerek kaydediyoruz
                 hedef_float = float(ai_veri['rf_prediction'])
                 tahmin_kaydet(sembol, hedef_float)
             except Exception as e:
                 logging.error(f"Veritabanı kayıt hatası: {e}")
-            # -----------------------------------------------------
 
             return {
                 "Varlık": sembol,
@@ -316,6 +309,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             }
             
         elif analiz_tipi == "stoch":
+            temp_df = stokastik_hesapla(temp_df)
+            son_k = temp_df['Stoch_K'].iloc[-1]
+            son_d = temp_df['Stoch_D'].iloc[-1]
+            
             if son_k < 20 and son_k > son_d:
                 detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
             elif son_k > 80 and son_k < son_d:
@@ -333,53 +330,21 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "Durum Analizi": detay_durum
             }
             
-    except Exception as e:
-        logging.error(f"[{sembol}] Analiz Hatası: {str(e)}") # Hataları yutmak yerine logluyoruz
-        return None
-def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
-    try:
-        temp_df = veri_yukle(sembol, baslangic, bitis)
-        if temp_df.empty: 
-            return None
-        
-        temp_df = stokastik_hesapla(temp_df)
-        son_k = temp_df['Stoch_K'].iloc[-1]
-        son_d = temp_df['Stoch_D'].iloc[-1]
-        
-        if analiz_tipi == "radar":
-            stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
-            ai_veri = ensemble_prediction(temp_df)
+        elif analiz_tipi == "tilson":
+            temp_df['Tilson_T3'] = tilson_t3(temp_df['Close'])
+            t3_degeri = temp_df['Tilson_T3'].iloc[-1]
+            fiyat = temp_df['Close'].iloc[-1]
+            
+            tilson_durum = "🚀 BOĞA (Fiyat > T3)" if fiyat > t3_degeri else "🐻 AYI (Fiyat < T3)"
             
             return {
                 "Varlık": sembol,
-                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
-                "Stoch %K": round(son_k, 2),
-                "Stoch Durum": stoch_durum,
-                "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 AI Hedef Fiyat": f"{ai_veri['rf_prediction']} TL",
-                "⚡ Güven Skoru": f"% {ai_veri['confidence']}"
-            }
-            
-        elif analiz_tipi == "stoch":
-            if son_k < 20 and son_k > son_d:
-                detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
-            elif son_k > 80 and son_k < son_d:
-                detay_durum = "🔴 AŞIRI ALIM - GÜÇLÜ SAT (K < D)"
-            elif son_k > son_d:
-                detay_durum = "↗️ POZİTİF EĞİLİM (K > D)"
-            else:
-                detay_durum = "↘️ NEGATİF EĞİLİM (K < D)"
-                
-            return {
-                "Varlık": sembol,
-                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
-                "Stoch %K": round(son_k, 2),
-                "Stoch %D": round(son_d, 2),
-                "Durum Analizi": detay_durum
+                "Son Fiyat": f"{fiyat:.2f}",
+                "T3 Değeri": f"{t3_degeri:.2f}",
+                "Trend Analizi": tilson_durum
             }
 
     except Exception as e:
-        import logging
         logging.error(f"[{sembol}] Analiz Hatası: {str(e)}")
         return None
 # ==========================================
@@ -406,6 +371,10 @@ def ensemble_prediction(df):
             high_max = t_df['High'].rolling(window=14).max()
             t_df['Stoch_K'] = 100 * ((t_df['Close'] - low_min) / (high_max - low_min + 1e-9))
         
+        # YENİ AI ÖZNİTELİĞİ: Tilson T3 Uzaklığı (Trend Momentum Oranı)
+        t_df['Tilson_T3'] = tilson_t3(t_df['Close'])
+        t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
+        
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
         loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
@@ -430,14 +399,13 @@ def ensemble_prediction(df):
 
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
         
-        # Modele beslenecek özellikler (Stoch_K eklendi)
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend', 'Stoch_K']
+        # 'Tilson_Dist' yapay zeka eğitim matrisine eklendi
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Tilson_Dist']
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
 
-        # Overfitting (ezberleme) riskini azaltmak için minimum veri sınırını 10'dan 50'ye çıkardık
         if len(ml_df) < 50:
             return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
@@ -445,39 +413,28 @@ def ensemble_prediction(df):
         y = ml_df['Target_Return'].values
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # --- 2. GERÇEK ENSEMBLE (VOTING) MODELİ KURULUMU ---
+        # AI Modellerinin hiperparametreleri volatil piyasalar için optimize edildi
+        model_xgb = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42, n_jobs=-1)
+        model_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
         
-        # Model 1: XGBoost (Hızlı ve agresif öğrenici)
-        model_xgb = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42, n_jobs=-1)
-        
-        # Model 2: Random Forest (Dengeli ve düşük varyanslı öğrenici)
-        model_rf = RandomForestRegressor(n_estimators=50, max_depth=3, random_state=42, n_jobs=-1)
-        
-        # Model 3: SVR (Destek Vektör Regresyonu - Fiyat sıkışmalarını iyi yakalar)
-        # Not: SVR verilerin ölçeklenmesine (scale) ihtiyaç duyar, bu yüzden Pipeline kullanıyoruz.
         model_svr = Pipeline([
             ('scaler', StandardScaler()),
-            ('svr', SVR(C=1.0, epsilon=0.1, kernel='rbf'))
+            ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))
         ])
 
-        # Üç modeli VotingRegressor ile birleştirip ortalama kararı alıyoruz
         ensemble = VotingRegressor(estimators=[
             ('xgb', model_xgb),
             ('rf', model_rf),
             ('svr', model_svr)
         ])
 
-        # Modeli eğitiyoruz
         ensemble.fit(X, y)
 
-        # Gelecek tahmini (Çıkarım)
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
         sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
-        
-        # Güven skorunu daha gerçekçi hesaplamak için baz puanı artırdık
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
 
         return {
@@ -761,14 +718,21 @@ with tabs[0]:
     st.plotly_chart(fig, use_container_width=True)
 
 # --- SEKME 1: RADAR ---
+# --- SEKME 1: RADAR ---
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    btn_radar = st.button("🚀 Hızlı Radar Taramasını Başlat")
-    btn_stoch = st.button("📊 Stoch Analizi Taramasını Başlat")
+    # Butonlar yan yana düzenlendi
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    with col_btn1:
+        btn_radar = st.button("🚀 Hızlı Radar Taraması")
+    with col_btn2:
+        btn_stoch = st.button("📊 Stoch Analiz Taraması")
+    with col_btn3:
+        btn_tilson = st.button("📈 Tilson (T3) Taraması")
     
     if btn_radar:
         with st.spinner('Tüm liste asenkron (paralel) taranıyor... Lütfen bekleyin.'):
@@ -781,13 +745,12 @@ with tabs[1]:
                         radar_sonuclari.append(sonuc)
             
             if radar_sonuclari:
-                radar_df = pd.DataFrame(radar_sonuclari)
-                st.dataframe(radar_df, use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(radar_sonuclari), use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
                 
     elif btn_stoch:
-        with st.spinner('Özel Stoch Analizi paralel taranıyor... Lütfen bekleyin.'):
+        with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
@@ -797,23 +760,12 @@ with tabs[1]:
                         stoch_sonuclari.append(sonuc)
             
             if stoch_sonuclari:
-                stoch_df = pd.DataFrame(stoch_sonuclari)
-                st.dataframe(stoch_df, use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(stoch_sonuclari), use_container_width=True, hide_index=True)
             else:
-                st.warning("⚠️ Stoch tarama sonucu bulunamadı veya veri çekilemedi.")
-    # ... (diğer butonlar)
-    btn_tilson = st.button("📈 Tilson (T3) Taramasını Başlat")
-    
-    if btn_radar:
-        # ... (mevcut kodunuz)
-        pass # Kod bloğunuz burada kalmaya devam edecek
-        
-    elif btn_stoch:
-        # ... (mevcut kodunuz)
-        pass
+                st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
     elif btn_tilson:
-        with st.spinner('Tilson T3 trend analizi paralel taranıyor...'):
+        with st.spinner('Tilson T3 trend analizi taranıyor...'):
             tilson_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
@@ -823,12 +775,13 @@ with tabs[1]:
                         tilson_sonuclari.append(sonuc)
             
             if tilson_sonuclari:
-                tilson_df = pd.DataFrame(tilson_sonuclari)
-                st.dataframe(tilson_df, use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(tilson_sonuclari), use_container_width=True, hide_index=True)
             else:
-                st.warning("⚠️ Tarama sonucu bulunamadı.")
+                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
+
     else:
         st.info("Piyasayı taramak ve analiz sonuçlarını görmek için yukarıdaki butonlardan birine tıklayın.")
+
 # --- SEKME 2: CÜZDAN & STOP ---
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")

@@ -428,8 +428,10 @@ def ensemble_prediction(df):
             ('svr', model_svr)
         ])
 
+        # Modelleri eğitiyoruz
         ensemble.fit(X, y)
 
+        # Gelecek tahmini (Çıkarım)
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
@@ -437,12 +439,27 @@ def ensemble_prediction(df):
         sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
 
+        # --- YENİ: Hangi verinin ne kadar önemli olduğunu çekiyoruz ---
+        try:
+            # XGBoost modelinin kullandığı ağırlıkları alıyoruz
+            f_importances = ensemble.named_estimators_['xgb'].feature_importances_
+            oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, f_importances)}
+        except Exception:
+            oznitelik_agirliklari = {}
+        # -------------------------------------------------------------
+
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
-            "expected_return_pct": round(beklenen_getiri_pct, 2) 
+            "expected_return_pct": round(beklenen_getiri_pct, 2),
+            "feature_importances": oznitelik_agirliklari # YENİ EKLENDİ
         }
+        
+    except Exception as e:
+        import logging
+        logging.error(f"AI Ensemble Hatası: {e}")
+        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
         
     except Exception as e:
         import logging
@@ -757,14 +774,43 @@ with tabs[8]:
     st.write(stats)
 
 # --- SEKME 9: YAPAY ZEKA ---
+# --- SEKME 9: YAPAY ZEKA ---
 with tabs[9]:
     st.subheader("🧠 v100 AI Ensemble & Kurumsal Karar Motoru")
-    c1, c2 = st.columns(2)
-    with c1:
+    
+    with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
         ai_sonuc = ensemble_prediction(df)
+        
+    c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
+    
+    with c1:
         st.metric("Yapay Zeka Kararı", ai_sonuc["signal"])
         st.metric("Tahmini Hedef", f"{ai_sonuc['rf_prediction']} TL")
         st.progress(int(ai_sonuc["confidence"]), text=f"Güven Skoru: %{ai_sonuc['confidence']}")
+        
+        st.markdown("---")
+        st.info("💡 **Nasıl Okunmalı?** Yandaki grafik, yapay zekanın hedef fiyatı belirlerken sağladığınız indikatörlerden hangilerine en çok dikkat ettiğini yüzdelik ağırlık olarak gösterir.")
+        
+    with c2:
+        # Öznitelik (Feature) grafiğinin çizilmesi
+        if ai_sonuc.get("feature_importances"):
+            # Verileri DataFrame'e çevirip küçükten büyüğe sıralıyoruz
+            imp_df = pd.DataFrame(list(ai_sonuc["feature_importances"].items()), columns=["İndikatör", "Etki Oranı"])
+            imp_df = imp_df.sort_values(by="Etki Oranı", ascending=True)
+            
+            # Plotly ile yatay bar grafiği
+            fig_imp = px.bar(imp_df, x="Etki Oranı", y="İndikatör", orientation='h', 
+                             title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
+                             text_auto='.2%', # Çubukların üzerine yüzde yazdırır
+                             color="Etki Oranı", color_continuous_scale="Viridis")
+            
+            fig_imp.update_layout(template="plotly_dark", height=350, margin=dict(l=0, r=0, t=40, b=0),
+                                  xaxis_tickformat='.0%', showlegend=False)
+            
+            st.plotly_chart(fig_imp, use_container_width=True)
+        else:
+            st.warning("Öznitelik ağırlıkları hesaplanamadı (Yetersiz veri veya model hatası).")
+
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
 with tabs[10]:

@@ -789,7 +789,7 @@ with tabs[9]:
         st.progress(int(ai_sonuc["confidence"]), text=f"Güven Skoru: %{ai_sonuc['confidence']}")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
-with tabs[10]:
+with tabs[11]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
     st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")
     

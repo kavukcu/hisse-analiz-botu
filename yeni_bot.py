@@ -330,6 +330,8 @@ def institutional_decision(df):
 def ensemble_prediction(df):
     try:
         t_df = df.copy()
+        
+        # --- 1. Veri Hazırlığı ve Feature Engineering ---
         if 'Stoch_K' not in t_df.columns:
             low_min = t_df['Low'].rolling(window=14).min()
             high_max = t_df['High'].rolling(window=14).max()
@@ -358,28 +360,56 @@ def ensemble_prediction(df):
         t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=20).mean(), 1, -1)
 
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend']
+        
+        # Modele beslenecek özellikler (Stoch_K eklendi)
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend', 'Stoch_K']
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
 
-        if len(ml_df) < 10:
+        # Overfitting (ezberleme) riskini azaltmak için minimum veri sınırını 10'dan 50'ye çıkardık
+        if len(ml_df) < 50:
             return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
 
         X = ml_df[features].values
         y = ml_df['Target_Return'].values
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        gb = GradientBoostingRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42)
-        gb.fit(X, y)
+        # --- 2. GERÇEK ENSEMBLE (VOTING) MODELİ KURULUMU ---
+        
+        # Model 1: XGBoost (Hızlı ve agresif öğrenici)
+        model_xgb = XGBRegressor(n_estimators=50, learning_rate=0.1, max_depth=3, random_state=42, n_jobs=-1)
+        
+        # Model 2: Random Forest (Dengeli ve düşük varyanslı öğrenici)
+        model_rf = RandomForestRegressor(n_estimators=50, max_depth=3, random_state=42, n_jobs=-1)
+        
+        # Model 3: SVR (Destek Vektör Regresyonu - Fiyat sıkışmalarını iyi yakalar)
+        # Not: SVR verilerin ölçeklenmesine (scale) ihtiyaç duyar, bu yüzden Pipeline kullanıyoruz.
+        model_svr = Pipeline([
+            ('scaler', StandardScaler()),
+            ('svr', SVR(C=1.0, epsilon=0.1, kernel='rbf'))
+        ])
 
-        beklenen_getiri_pct = float(gb.predict(son_veri)[0])
+        # Üç modeli VotingRegressor ile birleştirip ortalama kararı alıyoruz
+        ensemble = VotingRegressor(estimators=[
+            ('xgb', model_xgb),
+            ('rf', model_rf),
+            ('svr', model_svr)
+        ])
+
+        # Modeli eğitiyoruz
+        ensemble.fit(X, y)
+
+        # Gelecek tahmini (Çıkarım)
+        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
         sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
-        guven_skoru = min(abs(beklenen_getiri_pct) * 10 + 40, 99.0)
+        
+        # Güven skorunu daha gerçekçi hesaplamak için baz puanı artırdık
+        guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
@@ -387,9 +417,11 @@ def ensemble_prediction(df):
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2) 
         }
+        
     except Exception as e:
-        return {"rf_prediction": 0.0, "signal": f"Hata: {str(e)[:25]}", "confidence": 0.0, "expected_return_pct": 0.0}
-
+        import logging
+        logging.error(f"AI Ensemble Hatası: {e}")
+        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0}
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10):
     try:

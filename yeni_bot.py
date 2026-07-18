@@ -501,19 +501,50 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
-    son_k = df['Stoch_K'].iloc[-1] if 'Stoch_K' in df.columns else 50
-    son_d = df['Stoch_D'].iloc[-1] if 'Stoch_D' in df.columns else 50
-    stoch_sinyal = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
+    st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
+    st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    st.markdown("### 🌊 Seçili Hisse Anlık Stokastik")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Stoch %K", f"{son_k:.2f}")
-    c2.metric("Stoch %D", f"{son_d:.2f}")
-    c3.metric("Durum", stoch_sinyal)
-
     if st.button("🚀 Hızlı Radar Taramasını Başlat"):
-        st.info("Hızlı tarama modülü aktif edildi. (Buraya radar kodlarınız gelecek)")
-
+        with st.spinner('Tüm liste taranıyor, Yapay Zeka analiz ediyor... Lütfen bekleyin.'):
+            radar_sonuclari = []
+            
+            for sembol in tarama_listesi:
+                try:
+                    # 1. Veriyi Çek
+                    temp_df = veri_yukle(sembol, baslangic, bitis)
+                    if temp_df.empty: 
+                        continue
+                    
+                    # 2. Stokastik Hesapla
+                    temp_df = stokastik_hesapla(temp_df)
+                    son_k = temp_df['Stoch_K'].iloc[-1]
+                    son_d = temp_df['Stoch_D'].iloc[-1]
+                    stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
+                    
+                    # 3. AI Karar Motorunu Çalıştır
+                    ai_veri = ensemble_prediction(temp_df)
+                    
+                    # 4. Sonuçları Tabloya Ekle
+                    radar_sonuclari.append({
+                        "Varlık": sembol,
+                        "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
+                        "Stoch %K": round(son_k, 2),
+                        "Stoch Durum": stoch_durum,
+                        "🤖 AI Kararı": ai_veri['signal'],
+                        "🎯 AI Hedef Fiyat": f"{ai_veri['rf_prediction']} TL",
+                        "⚡ Güven Skoru": f"% {ai_veri['confidence']}"
+                    })
+                except Exception as e:
+                    pass # Hata veren hisseyi atla, sistemi durdurma
+            
+            # Tabloyu Ekrana Bas
+            if radar_sonuclari:
+                radar_df = pd.DataFrame(radar_sonuclari)
+                st.dataframe(radar_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
+    else:
+        st.info("Tüm piyasayı ve yapay zeka önerilerini görmek için taramayı başlatın.")
 # --- SEKME 2: CÜZDAN & STOP ---
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")

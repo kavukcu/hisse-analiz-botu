@@ -504,7 +504,12 @@ with tabs[1]:
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    if st.button("🚀 Hızlı Radar Taramasını Başlat"):
+    # Butonları değişkenlere atayarak Streamlit'in sayfayı yeniden yüklemesindeki
+    # çakışmaları engelliyoruz.
+    btn_radar = st.button("🚀 Hızlı Radar Taramasını Başlat")
+    btn_stoch = st.button("📊 Stoch Analizi Taramasını Başlat")
+    
+    if btn_radar:
         with st.spinner('Tüm liste taranıyor, Yapay Zeka analiz ediyor... Lütfen bekleyin.'):
             radar_sonuclari = []
             
@@ -543,8 +548,53 @@ with tabs[1]:
                 st.dataframe(radar_df, use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
+                
+    elif btn_stoch:
+        with st.spinner('Özel Stoch Analizi için liste taranıyor... Lütfen bekleyin.'):
+            stoch_sonuclari = []
+            
+            for sembol in tarama_listesi:
+                try:
+                    # 1. Veriyi Çek
+                    temp_df = veri_yukle(sembol, baslangic, bitis)
+                    if temp_df.empty: 
+                        continue
+                    
+                    # 2. Stokastik Hesapla
+                    temp_df = stokastik_hesapla(temp_df)
+                    son_k = temp_df['Stoch_K'].iloc[-1]
+                    son_d = temp_df['Stoch_D'].iloc[-1]
+                    
+                    # 3. Özel Stoch Mantığı ve Durum Bildirimi
+                    if son_k < 20 and son_k > son_d:
+                        detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
+                    elif son_k > 80 and son_k < son_d:
+                        detay_durum = "🔴 AŞIRI ALIM - GÜÇLÜ SAT (K < D)"
+                    elif son_k > son_d:
+                        detay_durum = "↗️ POZİTİF EĞİLİM (K > D)"
+                    else:
+                        detay_durum = "↘️ NEGATİF EĞİLİM (K < D)"
+                        
+                    # 4. Sonuçları Tabloya Ekle
+                    stoch_sonuclari.append({
+                        "Varlık": sembol,
+                        "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
+                        "Stoch %K": round(son_k, 2),
+                        "Stoch %D": round(son_d, 2),
+                        "Durum Analizi": detay_durum
+                    })
+                except Exception as e:
+                    pass
+            
+            # Tabloyu Ekrana Bas
+            if stoch_sonuclari:
+                stoch_df = pd.DataFrame(stoch_sonuclari)
+                st.dataframe(stoch_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Stoch tarama sonucu bulunamadı veya veri çekilemedi.")
+
     else:
-        st.info("Tüm piyasayı ve yapay zeka önerilerini görmek için taramayı başlatın.")
+        st.info("Piyasayı taramak ve analiz sonuçlarını görmek için yukarıdaki butonlardan birine tıklayın.")
 # --- SEKME 2: CÜZDAN & STOP ---
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")

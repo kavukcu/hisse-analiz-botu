@@ -22,6 +22,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 import sqlite3
+import optuna
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
 # ==========================================
 # SAYFA AYARLARI VE OTURUM
 # ==========================================
@@ -226,6 +229,7 @@ def mum_formasyonlarini_bul(df):
     df_f['Bearish_Engulfing'] = (df_f['Close'].shift(1) > df_f['Open'].shift(1)) & (df_f['Open'] > df_f['Close'].shift(1)) & (df_f['Close'] < df_f['Open'].shift(1))
     return df_f
 
+# --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df = df[['Close']].copy()
     bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
@@ -238,6 +242,73 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
     return bt_df
 
+# --- YENİ EKLENECEK KOD (HEMEN ALTINA YAPIŞTIRIN) ---
+def hizli_backtest_yap(df):
+    """Nokta Atışı (Tilson + Stokastik) için 5 günlük hızlı potansiyel ölçümü"""
+    # Verinin kopyasını al
+    test_df = df.copy()
+    
+    # Sadece son 5 günü filtrele (kısa vadeli performans için)
+    test_df = test_df.tail(5)
+    
+    if len(test_df) < 5:
+        return 0 # Yeterli veri yoksa 0 döndür
+        
+    ilk_fiyat = test_df['Close'].iloc[0]
+    son_fiyat = test_df['Close'].iloc[-1]
+    
+    # 5 Günlük Yüzdelik Getiri
+    getiri_yuzdesi = ((son_fiyat - ilk_fiyat) / ilk_fiyat) * 100
+    return round(getiri_yuzdesi, 2)
+def hizli_backtest_yap(sembol, baslangic, bitis):
+    """Geçmişe dönük (Backtest) strateji simülatörü."""
+    try:
+        # Geçmiş veriyi çek
+        df = veri_yukle(sembol, baslangic, bitis)
+        if df is None or df.empty or len(df) < 50:
+            return None
+            
+        b_df = df.copy()
+        
+        # 1. İndikatörleri Hesapla
+        b_df['Tilson_T3'] = tilson_t3(b_df['Close'])
+        
+        low_min = b_df['Low'].rolling(window=14).min()
+        high_max = b_df['High'].rolling(window=14).max()
+        b_df['Stoch_K'] = 100 * ((b_df['Close'] - low_min) / (high_max - low_min + 1e-9))
+        b_df['Stoch_D'] = b_df['Stoch_K'].rolling(window=3).mean()
+        
+        # 2. Geçmişteki "AL" Şartlarının (Sniper) Tespiti
+        # Şart: Stoch dipten (30 altı) yukarı kesmiş VE Fiyat Tilson trendinin üzerine çıkmış
+        b_df['AL_Sinyali'] = (b_df['Stoch_K'] > b_df['Stoch_D']) & (b_df['Stoch_K'] < 30) & (b_df['Close'] > b_df['Tilson_T3'])
+        
+        # 3. Kâr/Zarar Hesaplama (Pozisyon 5 gün tutulursa)
+        b_df['5_Gunluk_Getiri'] = ((b_df['Close'].shift(-5) - b_df['Close']) / b_df['Close']) * 100
+        
+        # Sadece "AL" sinyali üretilen günleri filtrele
+        islemler = b_df[b_df['AL_Sinyali']].dropna(subset=['5_Gunluk_Getiri'])
+        toplam_islem = len(islemler)
+        
+        if toplam_islem == 0:
+            return None
+            
+        # 4. Performans Metriklerini Çıkar
+        basarili_islem = len(islemler[islemler['5_Gunluk_Getiri'] > 0])
+        basari_orani = (basarili_islem / toplam_islem) * 100
+        ortalama_getiri = islemler['5_Gunluk_Getiri'].mean()
+        kümülatif_getiri = islemler['5_Gunluk_Getiri'].sum()
+        
+        return {
+            "Hisse": sembol,
+            "İşlem Sayısı": toplam_islem,
+            "Başarı Oranı (%)": round(basari_orani, 2),
+            "İşlem Başı Ort. Kâr (%)": round(ortalama_getiri, 2),
+            "Kümülatif Kâr (%)": round(kümülatif_getiri, 2)
+        }
+    except Exception as e:
+        import logging
+        logging.error(f"[{sembol}] Backtest Hatası: {str(e)}")
+        return None
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()
@@ -309,7 +380,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 s_skor = 0
 
             # 4. Yapay Zeka Hesabı
-            ai_veri = ensemble_prediction(temp_df)
+            ai_veri = ensemble_prediction(temp_df, sembol)
             
             try:
                 hedef_float = float(ai_veri['rf_prediction'])
@@ -378,10 +449,35 @@ def institutional_decision(df):
             "score": 8.5, 
             "risk": 30
         }
+    
     except:
         return {"decision": "BEKLE", "regime": "Belirsiz", "score": 5.0, "risk": 50}
+@st.cache_data(ttl=86400) # Her hissenin en iyi ayarını 24 saat hafızada tut
+def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
+    """Optuna ile hissenin o anki volatilitesine en uygun AI ayarlarını bulur."""
+    optuna.logging.set_verbosity(optuna.logging.WARNING) # Konsol kalabalığını önler
+    
+    def objective(trial):
+        param = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 150),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+            'max_depth': trial.suggest_int('max_depth', 3, 7),
+            'subsample': trial.suggest_float('subsample', 0.7, 1.0)
+        }
+        # Geçmiş verinin %80'i ile çalışıp, %20'si ile kendini test eder
+        X_train, X_test, y_train, y_test = train_test_split(X_matrisi, y_vektoru, test_size=0.2, random_state=42)
+        
+        model = XGBRegressor(**param, random_state=42, n_jobs=-1)
+        model.fit(X_train, y_train)
+        preds = model.predict(X_test)
+        mse = mean_squared_error(y_test, preds)
+        return mse # Hatayı en aza indirmeye çalışır
 
-def ensemble_prediction(df):
+    study = optuna.create_study(direction='minimize')
+    study.optimize(objective, n_trials=10) # 10 farklı kombinasyon dener
+    
+    return study.best_params
+def ensemble_prediction(df, sembol="Genel"):
     try:
         t_df = df.copy()
         
@@ -391,7 +487,6 @@ def ensemble_prediction(df):
             high_max = t_df['High'].rolling(window=14).max()
             t_df['Stoch_K'] = 100 * ((t_df['Close'] - low_min) / (high_max - low_min + 1e-9))
         
-        # YENİ AI ÖZNİTELİĞİ: Tilson T3 Uzaklığı (Trend Momentum Oranı)
         t_df['Tilson_T3'] = tilson_t3(t_df['Close'])
         t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
         
@@ -418,25 +513,38 @@ def ensemble_prediction(df):
         t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=20).mean(), 1, -1)
 
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
+
+        # --- YENİ: ZAMAN SERİSİ HAFIZASI (Lag Features) ---
+        # Modelin son 3 günün hafızasını tutması için geçmiş verileri ekliyoruz
+        t_df['Return_1d'] = t_df['Close'].pct_change(1)
+        t_df['Return_2d'] = t_df['Close'].pct_change(2)
+        t_df['Return_3d'] = t_df['Close'].pct_change(3)
         
-        # 'Tilson_Dist' yapay zeka eğitim matrisine eklendi
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Tilson_Dist']
+        t_df['Vol_Lag1'] = t_df['Vol_Change'].shift(1)
+        t_df['Vol_Lag2'] = t_df['Vol_Change'].shift(2)
+        
+        # Yeni 'Hafıza' verileri (Return_X ve Vol_LagX) eğitim matrisine eklendi
+        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Tilson_Dist', 
+                    'Return_1d', 'Return_2d', 'Return_3d', 'Vol_Lag1', 'Vol_Lag2']
+        # --------------------------------------------------
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
 
         if len(ml_df) < 50:
-            return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
+            return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0, "feature_importances": {}}
 
+        # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
         X = ml_df[features].values
         y = ml_df['Target_Return'].values
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        # AI Modellerinin hiperparametreleri volatil piyasalar için optimize edildi
-        model_xgb = XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42, n_jobs=-1)
-        model_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
+        best_xgb_params = en_iyi_xgb_parametrelerini_bul(sembol, X, y)
+
+        model_xgb = XGBRegressor(**best_xgb_params, random_state=42, n_jobs=-1)
         
+        model_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
         model_svr = Pipeline([
             ('scaler', StandardScaler()),
             ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))
@@ -448,10 +556,9 @@ def ensemble_prediction(df):
             ('svr', model_svr)
         ])
 
-        # Modelleri eğitiyoruz
         ensemble.fit(X, y)
 
-        # Gelecek tahmini (Çıkarım)
+        # --- 3. ÇIKARIM VE KARAR ---
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
@@ -459,32 +566,25 @@ def ensemble_prediction(df):
         sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
 
-        # --- YENİ: Hangi verinin ne kadar önemli olduğunu çekiyoruz ---
         try:
-            # XGBoost modelinin kullandığı ağırlıkları alıyoruz
             f_importances = ensemble.named_estimators_['xgb'].feature_importances_
             oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, f_importances)}
         except Exception:
             oznitelik_agirliklari = {}
-        # -------------------------------------------------------------
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
-            "feature_importances": oznitelik_agirliklari # YENİ EKLENDİ
+            "feature_importances": oznitelik_agirliklari
         }
         
     except Exception as e:
         import logging
         logging.error(f"AI Ensemble Hatası: {e}")
         return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
-        
-    except Exception as e:
-        import logging
-        logging.error(f"AI Ensemble Hatası: {e}")
-        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0}
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10):
     try:
@@ -666,8 +766,29 @@ tabs = st.tabs([
     "🧬 İstatistik",
     "🤖 AI Ensemble Karar",
     "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
+    
+    
 ])
+import streamlit as st
 
+st.subheader("📈 Strateji ve Backtest Sonuçları")
+
+# Arayüzü iki sekmeye ayırıyoruz
+sekme1, sekme2 = st.tabs(["Kapsamlı SMA Backtest (Mevcut)", "Nokta Atışı Potansiyeli (Yeni)"])
+
+with sekme1:
+    st.markdown("### 20-50 Günlük SMA Kesişim Stratejisi")
+    # BURAYA ESKİ GRAFİK ÇİZDİRME KODLARINIZI KOYUN
+    # Örnek:
+    # sonuc_df = backtest_motoru(hisse_verisi)
+    # st.line_chart(sonuc_df[['Piyasa_Kumulatif', 'Strateji_Kumulatif']])
+
+with sekme2:
+    st.markdown("### Tilson & Stokastik 5 Günlük Performans")
+    # BURAYA YENİ STRATEJİNİN SONUÇLARINI KOYACAĞIZ
+    # Örnek:
+    # kisa_vade_getiri = hizli_backtest_yap(hisse_verisi)
+    # st.metric(label="Beklenen 5 Günlük Potansiyel", value=f"% {kisa_vade_getiri}")
 # --- SEKME 0: QUANT GRAFİK ---
 with tabs[0]:
     st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")

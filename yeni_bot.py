@@ -242,25 +242,8 @@ def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
     return bt_df
 
-# --- YENİ EKLENECEK KOD (HEMEN ALTINA YAPIŞTIRIN) ---
-def hizli_backtest_yap(df):
-    """Nokta Atışı (Tilson + Stokastik) için 5 günlük hızlı potansiyel ölçümü"""
-    # Verinin kopyasını al
-    test_df = df.copy()
-    
-    # Sadece son 5 günü filtrele (kısa vadeli performans için)
-    test_df = test_df.tail(5)
-    
-    if len(test_df) < 5:
-        return 0 # Yeterli veri yoksa 0 döndür
-        
-    ilk_fiyat = test_df['Close'].iloc[0]
-    son_fiyat = test_df['Close'].iloc[-1]
-    
-    # 5 Günlük Yüzdelik Getiri
-    getiri_yuzdesi = ((son_fiyat - ilk_fiyat) / ilk_fiyat) * 100
-    return round(getiri_yuzdesi, 2)
 def hizli_backtest_yap(sembol, baslangic, bitis):
+
     """Geçmişe dönük (Backtest) strateji simülatörü."""
     try:
         # Geçmiş veriyi çek
@@ -309,6 +292,37 @@ def hizli_backtest_yap(sembol, baslangic, bitis):
         import logging
         logging.error(f"[{sembol}] Backtest Hatası: {str(e)}")
         return None
+# --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
+def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
+    bt_df = df[['Close']].copy()
+    bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
+    bt_df['Uzun_SMA'] = bt_df['Close'].rolling(window=uzun_periyot).mean()
+    bt_df.dropna(inplace=True)
+    bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
+    bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
+    bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
+    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
+    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
+    return bt_df
+
+# --- YENİ EKLENECEK KOD (HEMEN ALTINA YAPIŞTIRIN) ---
+def hizli_backtest_yap(df):
+    """Nokta Atışı (Tilson + Stokastik) için 5 günlük hızlı potansiyel ölçümü"""
+    # Verinin kopyasını al
+    test_df = df.copy()
+    
+    # Sadece son 5 günü filtrele (kısa vadeli performans için)
+    test_df = test_df.tail(5)
+    
+    if len(test_df) < 5:
+        return 0 # Yeterli veri yoksa 0 döndür
+        
+    ilk_fiyat = test_df['Close'].iloc[0]
+    son_fiyat = test_df['Close'].iloc[-1]
+    
+    # 5 Günlük Yüzdelik Getiri
+    getiri_yuzdesi = ((son_fiyat - ilk_fiyat) / ilk_fiyat) * 100
+    return round(getiri_yuzdesi, 2)
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()

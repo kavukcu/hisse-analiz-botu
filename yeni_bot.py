@@ -286,19 +286,29 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return None
         
         if analiz_tipi == "radar":
-            # Stoch Hesabı
+            # 1. Stoch Hesabı
             temp_df = stokastik_hesapla(temp_df)
             son_k = temp_df['Stoch_K'].iloc[-1]
             son_d = temp_df['Stoch_D'].iloc[-1]
             stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
             
-            # Tilson Hesabı
+            # 2. Tilson Hesabı
             temp_df['Tilson_T3'] = tilson_t3(temp_df['Close'])
             t3_degeri = temp_df['Tilson_T3'].iloc[-1]
             fiyat = temp_df['Close'].iloc[-1]
             tilson_durum = "🚀 BOĞA" if fiyat > t3_degeri else "🐻 AYI"
 
-            # Yapay Zeka Hesabı
+            # 3. Temel Analiz: Sihirli Formül Skoru (YENİ)
+            # DİKKAT: Aşağıdaki yorum satırını kendi sihirli formül fonksiyonunuza göre açın.
+            try:
+                # Ornek_Sihirli_Veri = sihirli_formul_skorla(sembol) 
+                # s_skor = Ornek_Sihirli_Veri['Puan']
+                s_skor = 85 # Kendi fonksiyonunuzu bağlayana kadar simülasyon amaçlı varsayılan değer
+            except Exception as e:
+                logging.warning(f"[{sembol}] Sihirli Formül hesaplanamadı: {e}")
+                s_skor = 0
+
+            # 4. Yapay Zeka Hesabı
             ai_veri = ensemble_prediction(temp_df)
             
             try:
@@ -310,8 +320,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return {
                 "Varlık": sembol,
                 "Son Fiyat": f"{fiyat:.2f}",
-                "Trend (T3)": tilson_durum,       # Yeni Eklendi
+                "Trend (T3)": tilson_durum,
                 "Stoch Durum": stoch_durum,
+                "📊 Temel Skor": s_skor,       # YENİ EKLENDİ
                 "🤖 AI Kararı": ai_veri['signal'],
                 "🎯 Hedef": f"{ai_veri['rf_prediction']} TL",
                 "⚡ Güven": f"% {ai_veri['confidence']}"
@@ -813,7 +824,7 @@ with tabs[1]:
 
     # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
     elif btn_nokta_atisi:
-        with st.spinner('Piyasadaki kusursuz kesişimler (Nokta Atışı) aranıyor...'):
+        with st.spinner('Temel ve Teknik kusursuz kesişimler (Kurumsal Sniper) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
@@ -825,19 +836,20 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # KESKİN NİŞANCI FİLTRESİ: Sadece 3 şartı da sağlayanları getir
+                # HİBRİT FİLTRE: 3 Teknik Şart + 1 Temel Şart (Sihirli Formül)
                 df_sniper = df_radar[
                     (df_radar['🤖 AI Kararı'] == '🚀 GÜÇLÜ AL') & 
                     (df_radar['Stoch Durum'] == '🚀 AL') & 
-                    (df_radar['Trend (T3)'] == '🚀 BOĞA')
+                    (df_radar['Trend (T3)'] == '🚀 BOĞA') &
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 70) # YENİ ŞART
                 ]
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Nokta atışı fırsat bulundu! Toplam {len(df_sniper)} hisse altın vuruş bölgesinde.")
+                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 70) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
                 else:
-                    st.error("📉 Şu anki piyasada 3 şartı (AI + Trend + Momentum) aynı anda sağlayan 'Kusursuz' bir fırsat bulunamadı.")
+                    st.error("📉 Şu anki piyasada Temel + Teknik + AI şartlarını aynı anda sağlayan 'Kusursuz' bir şirket bulunamadı.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
 

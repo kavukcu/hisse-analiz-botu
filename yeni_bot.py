@@ -904,7 +904,7 @@ with tabs[1]:
     if btn_radar:
         with st.spinner('Tüm liste asenkron (paralel) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -921,7 +921,7 @@ with tabs[1]:
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -937,7 +937,7 @@ with tabs[1]:
     elif btn_tilson:
         with st.spinner('Tilson T3 trend analizi taranıyor...'):
             tilson_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -953,7 +953,7 @@ with tabs[1]:
     elif btn_nokta_atisi:
         with st.spinner('Temel ve Teknik kusursuz kesişimler (Kurumsal Sniper) aranıyor...'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()

@@ -95,7 +95,7 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
-tahminleri_degerlendir()
+#veritabani_baslat(
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
@@ -404,14 +404,18 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 logging.warning(f"[{sembol}] Sihirli Formül hesaplanamadı: {e}")
                 s_skor = 0
 
-            # 4. Yapay Zeka Hesabı
-            ai_veri = ensemble_prediction(temp_df, sembol)
-            
-            try:
-                hedef_float = float(ai_veri['rf_prediction'])
-                tahmin_kaydet(sembol, hedef_float)
-            except Exception as e:
-                logging.error(f"Veritabanı kayıt hatası: {e}")
+            # 4. Yapay Zeka Hesabı (HIZLANDIRILMIŞ ÖN ELEME)
+            # Sadece trendi "BOĞA" olan, Stoch "AL" veren veya Temel Skoru yüksek hisselerde AI çalışsın!
+            if tilson_durum == "🚀 BOĞA" or stoch_durum == "🚀 AL" or s_skor >= 50:
+                ai_veri = ensemble_prediction(temp_df, sembol)
+                try:
+                    hedef_float = float(ai_veri['rf_prediction'])
+                    tahmin_kaydet(sembol, hedef_float)
+                except Exception as e:
+                    pass
+            else:
+                # Zayıf hisselerde AI modelini boşuna eğitme, direkt pas geç.
+                ai_veri = {'signal': "ZAYIF (AI Pas Geçti)", 'rf_prediction': 0.0, 'confidence': 0.0}
 
             return {
                 "Varlık": sembol,
@@ -499,7 +503,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
         return mse # Hatayı en aza indirmeye çalışır
 
     study = optuna.create_study(direction='minimize')
-    study.optimize(objective, n_trials=10) # 10 farklı kombinasyon dener
+    study.optimize(objective, n_trials=5) # 10 farklı kombinasyon dener
     
     return study.best_params
 def ensemble_prediction(df, sembol="Genel"):

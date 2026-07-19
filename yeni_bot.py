@@ -144,7 +144,52 @@ def sirket_bilgisi_getir(ticker):
         return yf.Ticker(ticker, session=oturum).info
     except: 
         return {}
-
+@st.cache_data(ttl=86400, show_spinner=False) # Veriyi 24 saatte bir günceller, API'yi yormaz
+def sihirli_formul_skorla(sembol):
+    """
+    Şirketin temel çarpanlarını çeker ve hissenin 
+    'ucuz', 'kârlı' ve 'güvenli' olup olmadığını 0-100 arası puanlar.
+    """
+    try:
+        info = sirket_bilgisi_getir(sembol)
+        if not info:
+            return {'Puan': 0}
+            
+        skor = 0
+        
+        # 1. F/K Oranı (Fiyat/Kazanç) - Hisse ucuz mu? (Maksimum 25 Puan)
+        fk = info.get('trailingPE', 999)
+        if fk is None: fk = 999
+        if 0 < fk <= 10: skor += 25
+        elif 10 < fk <= 15: skor += 15
+        elif 15 < fk <= 20: skor += 5
+        
+        # 2. PD/DD Oranı (Piyasa Değeri / Defter Değeri) - Özkaynaklarına göre ucuz mu? (Maks 25 Puan)
+        pddd = info.get('priceToBook', 999)
+        if pddd is None: pddd = 999
+        if 0 < pddd <= 1.5: skor += 25
+        elif 1.5 < pddd <= 3.0: skor += 15
+        elif 3.0 < pddd <= 5.0: skor += 5
+        
+        # 3. ROE (Özsermaye Kârlılığı) - Parayı iyi yönetip kâr ediyor mu? (Maks 25 Puan)
+        roe = info.get('returnOnEquity', -1)
+        if roe is None: roe = -1
+        if roe > 0.20: skor += 25  # %20 üzeri kârlılık
+        elif roe > 0.10: skor += 15
+        elif roe > 0.05: skor += 5
+        
+        # 4. Cari Oran (Dönen Varlıklar / Kısa Vadeli Yükümlülükler) - Batma/Borç riski var mı? (Maks 25 Puan)
+        cari_oran = info.get('currentRatio', 0)
+        if cari_oran is None: cari_oran = 0
+        if cari_oran >= 1.5: skor += 25
+        elif cari_oran >= 1.0: skor += 15
+        
+        return {'Puan': skor}
+        
+    except Exception as e:
+        import logging
+        logging.warning(f"[{sembol}] Temel veri puanlama hatası: {str(e)}")
+        return {'Puan': 0}
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
@@ -351,12 +396,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             fiyat = temp_df['Close'].iloc[-1]
             tilson_durum = "🚀 BOĞA" if fiyat > t3_degeri else "🐻 AYI"
 
-            # 3. Temel Analiz: Sihirli Formül Skoru (YENİ)
-            # DİKKAT: Aşağıdaki yorum satırını kendi sihirli formül fonksiyonunuza göre açın.
+            # 3. Temel Analiz: Gerçek Sihirli Formül Skoru
             try:
-                # Ornek_Sihirli_Veri = sihirli_formul_skorla(sembol) 
-                # s_skor = Ornek_Sihirli_Veri['Puan']
-                s_skor = 85 # Kendi fonksiyonunuzu bağlayana kadar simülasyon amaçlı varsayılan değer
+                temel_analiz_verisi = sihirli_formul_skorla(sembol) 
+                s_skor = temel_analiz_verisi['Puan']
             except Exception as e:
                 logging.warning(f"[{sembol}] Sihirli Formül hesaplanamadı: {e}")
                 s_skor = 0

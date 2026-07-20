@@ -95,8 +95,7 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
-tahminleri_degerlendir()
-
+veritabani_baslat()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
@@ -279,43 +278,6 @@ def mum_formasyonlarini_bul(df):
     df_f['Bullish_Engulfing'] = (df_f['Close'].shift(1) < df_f['Open'].shift(1)) & (df_f['Open'] < df_f['Close'].shift(1)) & (df_f['Close'] > df_f['Open'].shift(1))
     df_f['Bearish_Engulfing'] = (df_f['Close'].shift(1) > df_f['Open'].shift(1)) & (df_f['Open'] > df_f['Close'].shift(1)) & (df_f['Close'] < df_f['Open'].shift(1))
     return df_f
-def dipten_donus_analizi(df):
-    """Fiyatın dipten sekme ihtimalini kurumsal tekniklerle (Hacim, RSI Uyuşmazlığı, Spring) hesaplar."""
-    df_dip = df.copy()
-    
-    # 1. Hacim Patlaması (Son 20 günün ortalamasının en az 2 katı)
-    df_dip['Vol_SMA_20'] = df_dip['Volume'].rolling(20).mean()
-    df_dip['Hacim_Patlamasi'] = df_dip['Volume'] > (df_dip['Vol_SMA_20'] * 2)
-    
-    # 2. Wyckoff Spring (Ayı Tuzağı - Bollinger Alt Bandı İhlali ve Hızlı Dönüş)
-    df_dip['SMA_20_Dip'] = df_dip['Close'].rolling(20).mean()
-    df_dip['STD_20_Dip'] = df_dip['Close'].rolling(20).std()
-    df_dip['Lower_Band'] = df_dip['SMA_20_Dip'] - (df_dip['STD_20_Dip'] * 2)
-    
-    # Gün içinde alt bandı kırmış ama günü bandın ve açılışın üzerinde (yeşil) kapatmış mı?
-    df_dip['Wyckoff_Spring'] = (df_dip['Low'] < df_dip['Lower_Band']) & (df_dip['Close'] > df_dip['Lower_Band']) & (df_dip['Close'] > df_dip['Open'])
-    
-    # 3. RSI Pozitif Uyuşmazlık (Bullish Divergence)
-    delta = df_dip['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
-    rs = gain / loss.replace(0, 1e-9)
-    df_dip['RSI_DIP'] = 100 - (100 / (1 + rs))
-    
-    # Son 20 günlük periyotta fiyat daha düşük dip yaparken, RSI daha yüksek dip yapıyorsa
-    if len(df_dip) >= 20:
-        son_5_fiyat = df_dip['Close'].iloc[-5:].min()
-        eski_15_fiyat = df_dip['Close'].iloc[-20:-5].min()
-        son_5_rsi = df_dip['RSI_DIP'].iloc[-5:].min()
-        eski_15_rsi = df_dip['RSI_DIP'].iloc[-20:-5].min()
-        
-        # Uyuşmazlık şartı ve RSI'ın aşırı satım bölgesine yakın (45 altı) olması
-        uyusmazlik = (son_5_fiyat < eski_15_fiyat) and (son_5_rsi > eski_15_rsi) and (son_5_rsi < 45)
-        df_dip['Pozitif_Uyusmazlik'] = uyusmazlik
-    else:
-        df_dip['Pozitif_Uyusmazlik'] = False
-        
-    return df_dip
 
 # --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
@@ -389,103 +351,6 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
         rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
         simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
     return simulasyonlar
-import yfinance as yf
-
-def gelismis_temel_analiz_hesapla(sembol):
-    """
-    Şirketin Piotroski F-Skorunu (0-9) ve PEG Oranını hesaplar.
-    yfinance veya bilanço verilerinizden çekilen verilerle çalışır.
-    """
-    try:
-        ticker = yf.Ticker(sembol)
-        info = ticker.info
-        
-        # --- 1. PEG ORANI HESAPLAMA ---
-        pe_ratio = info.get('trailingPE', None)
-        earnings_growth = info.get('earningsGrowth', None) # % Cinsinden büyüme
-        
-        peg_orani = None
-        if pe_ratio and earnings_growth and earnings_growth > 0:
-            peg_orani = round(pe_ratio / (earnings_growth * 100), 2)
-
-        # --- 2. PIOTROSKI F-SKORU HESAPLAMA (0 - 9) ---
-        f_score = 0
-        
-        financials = ticker.financials
-        balance_sheet = ticker.balance_sheet
-        cashflow = ticker.cashflow
-        
-        if not financials.empty and not balance_sheet.empty and not cashflow.empty:
-            # Dönemsel Veriler (Son yıl vs Bir önceki yıl)
-            net_income = financials.loc['Net Income'].iloc[0] if 'Net Income' in financials.index else 0
-            roa = info.get('returnOnAssets', 0)
-            cfo = cashflow.loc['Operating Cash Flow'].iloc[0] if 'Operating Cash Flow' in cashflow.index else 0
-            
-            # Kârlılık Kriterleri (4 Puan)
-            if net_income > 0: f_score += 1                          # 1. Pozitif Net Kâr
-            if roa > 0: f_score += 1                                 # 2. Pozitif ROA
-            if cfo > 0: f_score += 1                                 # 3. Pozitif Faaliyet Nakit Akışı
-            if cfo > net_income: f_score += 1                        # 4. Nakit Akışı > Net Kâr (Kâr Kalitesi)
-            
-            # Kaldıraç ve Likidite Kriterleri (3 Puan)
-            # Uzun vadeli borç değişimi ve cari oran kontrolü
-            try:
-                lt_debt_curr = balance_sheet.loc['Long Term Debt'].iloc[0] if 'Long Term Debt' in balance_sheet.index else 0
-                lt_debt_prev = balance_sheet.loc['Long Term Debt'].iloc[1] if 'Long Term Debt' in balance_sheet.index else 0
-                if lt_debt_curr <= lt_debt_prev: f_score += 1        # 5. Borçluluk Azalmış/Sabit
-                
-                curr_ratio_curr = info.get('currentRatio', 0)
-                if curr_ratio_curr > 1.1: f_score += 1               # 6. Güçlü Likidite (Cari Oran)
-            except:
-                f_score += 1
-                
-            # Hisse sayısı artışı (Sermaye artırımı/sulandırma kontrolü)
-            shares_curr = info.get('sharesOutstanding', 0)
-            f_score += 1  # Sulandırma yok varsayılanı (Ek veri ile detaylandırılabilir)
-
-            # Operasyonel Verimlilik Kriterleri (2 Puan)
-            gross_margin = info.get('grossMargins', 0)
-            if gross_margin > 0.20: f_score += 1                     # 8. Yüksek Brüt Kâr Marjı (>%20)
-            if info.get('revenueGrowth', 0) > 0: f_score += 1        # 9. Pozitif Satış Büyümesi
-
-        return {
-            'Piotroski_Score': f_score,
-            'PEG_Ratio': peg_orani if peg_orani is not None else "N/A",
-            'Temel_Kalite': "💎 MÜKEMMEL" if f_score >= 7 else ("✅ SAĞLAM" if f_score >= 5 else "⚠️ ZAYIF")
-        }
-        
-    except Exception as e:
-        return {'Piotroski_Score': 0, 'PEG_Ratio': "N/A", 'Temel_Kalite': "⚪ VERİ YOK"}
-def hibrit_temel_skorla(sembol):
-    """
-    Sihirli Formül + Piotroski F-Skoru + PEG Oranını harmanlayarak 0-100 arası nihai temel puan verir.
-    """
-    temel_veri = gelismis_temel_analiz_hesapla(sembol)
-    
-    f_skor = temel_veri['Piotroski_Score'] # Max 9
-    peg = temel_veri['PEG_Ratio']
-    
-    # Base Skor Piotroski'den gelir (9 puan = 60 Tabut Puanı)
-    nihai_skor = int((f_skor / 9) * 60)
-    
-    # PEG Oranı Bonusu / Cezası
-    if isinstance(peg, (int, float)):
-        if 0 < peg <= 1.0:
-            nihai_skor += 30  # Büyümeye göre aşırı ucuz (Harika)
-        elif 1.0 < peg <= 1.5:
-            nihai_skor += 15  # Makul Fiyatlı
-        elif peg > 2.5:
-            nihai_skor -= 10  # Pahalı / Büyüme yetersiz
-            
-    # Sınırla (0-100)
-    nihai_skor = max(0, min(100, nihai_skor))
-    
-    return {
-        'Puan': nihai_skor,
-        'Piotroski': f"{f_skor}/9",
-        'PEG': peg,
-        'Durum': temel_veri['Temel_Kalite']
-    }
 
 def python_istatistik_analizi(df):
     try:
@@ -516,26 +381,6 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
-def duygu_skoru_hesapla(haber_ozeti_veya_metin):
-    """Metin tabanlı haber analizini AI modelinin anlayacağı sayısal değere (-1.0 ile +1.0 arası) dönüştürür."""
-    if not haber_ozeti_veya_metin or haber_ozeti_veya_metin == "Haber bulunamadı":
-        return 0.0
-    
-    metin = str(haber_ozeti_veya_metin).lower()
-    
-    # Pozitif ve Negatif Anahtar Kelime Ağırlıklandırması
-    pozitif_kelimeler = ['rekor', 'büyüme', 'anlaşma', 'kâr', 'temettü', 'ihale', 'artış', 'pozitif', 'alım']
-    negatif_kelimeler = ['zarar', 'düşüş', 'dava', 'ceza', 'iptal', 'iflas', 'risk', 'negatif', 'satış']
-    
-    poz_skor = sum(1 for k in pozitif_kelimeler if k in metin)
-    neg_skor = sum(1 for k in negatif_kelimeler if k in metin)
-    
-    toplam = poz_skor + neg_skor
-    if toplam == 0:
-        return 0.0
-    
-    return round((poz_skor - neg_skor) / toplam, 2)
-
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
     """Hisseleri paralel taramak için optimize edilmiş asenkron işçi fonksiyonu."""
     try:
@@ -544,13 +389,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return None
         
         if analiz_tipi == "radar":
-            # --- YENİ DİPTEN DÖNÜŞ ANALİZİ EKLENDİ ---
-            temp_df = dipten_donus_analizi(temp_df)
-            hacim_durum = "🔥 PATLAMA" if temp_df['Hacim_Patlamasi'].iloc[-1] else "Normal"
-            spring_durum = "✅ VAR" if temp_df['Wyckoff_Spring'].iloc[-1] else "-"
-            uyusmazlik_durum = "✅ POZİTİF" if temp_df['Pozitif_Uyusmazlik'].iloc[-1] else "-"
-            # ----------------------------------------
-            
             # 1. Stoch Hesabı
             temp_df = stokastik_hesapla(temp_df)
             son_k = temp_df['Stoch_K'].iloc[-1]
@@ -563,31 +401,36 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             fiyat = temp_df['Close'].iloc[-1]
             tilson_durum = "🚀 BOĞA" if fiyat > t3_degeri else "🐻 AYI"
 
-            temel_analiz_verisi = hibrit_temel_skorla(sembol)
-            s_skor = temel_analiz_verisi['Puan'] # EKSİK OLAN SATIR EKLENDİ
-            if tilson_durum == "🚀 BOĞA" or stoch_durum == "🚀 AL" or s_skor >= 50 or hacim_durum == "🔥 PATLAMA":
-                ai_veri = gelismis_ai_tahmini(temp_df, sembol, haber_metni="") # DÜZELTİLDİ
+            # 3. Temel Analiz: Gerçek Sihirli Formül Skoru
+            try:
+                temel_analiz_verisi = sihirli_formul_skorla(sembol) 
+                s_skor = temel_analiz_verisi['Puan']
+            except Exception as e:
+                logging.warning(f"[{sembol}] Sihirli Formül hesaplanamadı: {e}")
+                s_skor = 0
+
+            # 4. Yapay Zeka Hesabı (HIZLANDIRILMIŞ ÖN ELEME)
+            # Sadece trendi "BOĞA" olan, Stoch "AL" veren veya Temel Skoru yüksek hisselerde AI çalışsın!
+            if tilson_durum == "🚀 BOĞA" or stoch_durum == "🚀 AL" or s_skor >= 50:
+                ai_veri = ensemble_prediction(temp_df, sembol)
                 try:
-                    # Not: rf_prediction yeni ai modelinde yok, get ile güvenli hale getirdik
-                    tahmin_kaydet(sembol, float(ai_veri.get('rf_prediction', temp_df['Close'].iloc[-1])))
-                except:
+                    hedef_float = float(ai_veri['rf_prediction'])
+                    tahmin_kaydet(sembol, hedef_float)
+                except Exception as e:
                     pass
             else:
-                # Yeni Yapay Zeka Tahmin Motorunu Çalıştır
-                ai_veri = gelismis_ai_tahmini(temp_df, sembol, haber_metni="") # DÜZELTİLDİ
+                # Zayıf hisselerde AI modelini boşuna eğitme, direkt pas geç.
+                ai_veri = {'signal': "ZAYIF (AI Pas Geçti)", 'rf_prediction': 0.0, 'confidence': 0.0}
+
             return {
                 "Varlık": sembol,
                 "Son Fiyat": f"{fiyat:.2f}",
                 "Trend (T3)": tilson_durum,
                 "Stoch Durum": stoch_durum,
-                "📊 Temel Skor": temel_analiz_verisi['Puan'],        # Yeni hibrit skor
-                "🛡️ F-Skor": temel_analiz_verisi['Piotroski'],     # Piotroski F-Skoru (0-9)
-                "📈 PEG Oranı": temel_analiz_verisi['PEG'],        # PEG Oranı
-                "💥 Hacim": hacim_durum,
-                "🪤 Spring (Tuzak)": spring_durum,
-                "📈 Uyuşmazlık": uyusmazlik_durum,
+                "📊 Temel Skor": s_skor,       # YENİ EKLENDİ
                 "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 Yükseliş Olasılığı": f"%{ai_veri['probability']}"
+                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL",
+                "⚡ Güven": f"% {ai_veri['confidence']}"
             }
             
         elif analiz_tipi == "stoch":
@@ -775,89 +618,49 @@ def ensemble_prediction(df, sembol="Genel"):
         import logging
         logging.error(f"AI Ensemble Hatası: {e}")
         return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
-import xgboost as xgb
-import optuna
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def gelismis_ai_tahmini(df, sembol, haber_metni=""):
-    """
-    Sınıflandırma tabanlı (Yükseliş İhtimali %) ve Haber Duygusu Destekli XGBoost Modeli
-    """
-    if len(df) < 50:
-        return {'signal': "YETERSİZ VERİ", 'probability': 0.0, 'confidence': 0.0}
+def gelismis_ai_tahmin(df, gelecek_gun=10):
+    try:
+        df_ml = df.copy()
+        df_ml['Return'] = df_ml['Close'].pct_change()
+        df_ml['Log_Return'] = np.log(df_ml['Close'] / df_ml['Close'].shift(1))
+        df_ml['SMA_10_Dist'] = df_ml['Close'] / df_ml['Close'].rolling(10).mean() - 1
+        df_ml['Volatilite_14'] = df_ml['Return'].rolling(14).std()
+        df_ml['Target'] = df_ml['Close'].shift(-1)
+        
+        df_ml.dropna(inplace=True)
+        if len(df_ml) < 50:
+            son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
+            return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
 
-    df_ai = df.copy()
-    
-    # 1. Haber Duygu Skorunu Özellik Olarak Ekle
-    h_skor = duygu_skoru_hesapla(haber_metni)
-    df_ai['Sentiment_Score'] = h_skor
+        features = ['Close', 'Volume', 'Log_Return', 'SMA_10_Dist', 'Volatilite_14']
+        X = df_ml[features].values
+        y = df_ml['Target'].values
 
-    # 2. İndikatör Özellikleri (Features)
-    df_ai['Returns'] = df_ai['Close'].pct_change()
-    df_ai['Vol_Change'] = df_ai['Volume'].pct_change()
-    df_ai['SMA_10_Ratio'] = df_ai['Close'] / df_ai['Close'].rolling(10).mean()
-    df_ai['RSI'] = 100 - (100 / (1 + (df_ai['Close'].diff().where(lambda x: x > 0, 0).rolling(14).mean() / 
-                                       -df_ai['Close'].diff().where(lambda x: x < 0, 0).rolling(14).mean().replace(0, 1e-9))))
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
 
-    # 3. HEDEF DEĞİŞKEN (TARGET): 5 gün içinde %3'ten fazla yükseldi mi? (1: Evet, 0: Hayır)
-    df_ai['Target'] = (df_ai['Close'].shift(-5) >= df_ai['Close'] * 1.03).astype(int)
-    
-    # Eksik verileri temizle
-    features = ['Returns', 'Vol_Change', 'SMA_10_Ratio', 'RSI', 'Sentiment_Score']
-    df_clean = df_ai.dropna(subset=features + ['Target'])
+        model = XGBRegressor(n_estimators=30, learning_rate=0.1, max_depth=3, objective='reg:squarederror', n_jobs=-1)
+        model.fit(X_scaled, y)
 
-    if len(df_clean) < 30:
-        return {'signal': "ZAYIF HAREKET", 'probability': 0.0, 'confidence': 0.0}
+        tahminler = []
+        son_veri = X_scaled[-1].reshape(1, -1)
+        
+        for _ in range(gelecek_gun):
+            pred = float(model.predict(son_veri)[0])
+            tahminler.append(pred)
+            yeni_satir = son_veri.copy()
+            yeni_satir[0, 0] = pred 
+            son_veri = yeni_satir
+            
+        tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
+        return tarihler, tahminler
 
-    X = df_clean[features]
-    y = df_clean['Target']
+    except Exception:
+        son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
+        return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
 
-    # Son satır (tahmin yapılacak güncel veri)
-    X_latest = df_ai[features].iloc[[-1]].fillna(0)
-
-    # 4. OPTUNA İLE İNCE AYAR (HYPERPARAMETER TUNING)
-    def objective(trial):
-        params = {
-            'n_estimators': trial.suggest_int('n_estimators', 30, 100),
-            'max_depth': trial.suggest_int('max_depth', 2, 5),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
-            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-            # Overfitting Önleyici Ceza Parametreleri (L1 / L2)
-            'reg_alpha': trial.suggest_float('reg_alpha', 1e-3, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 1e-3, 10.0, log=True),
-            'eval_metric': 'logloss',
-            'random_state': 42
-        }
-        model = xgb.XGBClassifier(**params)
-        model.fit(X[:-5], y[:-5]) # Son 5 günü test için ayır
-        preds = model.predict(X[-5:])
-        acc = (preds == y[-5:]).mean()
-        return acc
-
-    study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=7, show_progress_bar=False)
-
-    # En iyi model ile nihai eğitimi yap
-    best_model = xgb.XGBClassifier(**study.best_params)
-    best_model.fit(X, y)
-
-    # 5. TAHMİN: Yükseliş Olasılığı %
-    prob = best_model.predict_proba(X_latest)[0][1] * 100
-
-    # Karar Mekanizması
-    if prob >= 70:
-        karar = "🔥 GÜÇLÜ AL"
-    elif prob >= 55:
-        karar = "⚡ POZİTİF"
-    elif prob <= 30:
-        karar = "⚠️ RİSKLİ / SAT"
-    else:
-        karar = "⚪ NÖTR"
-
-    return {
-        'signal': karar,
-        'probability': round(prob, 1),
-        'confidence': round(study.best_value * 100, 1)
-    }
 # ==========================================
 # 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
@@ -1071,9 +874,8 @@ with tabs[0]:
 
     # XGBOOST TAHMİNİ ÇİZİMİ (Hizalama Düzeltildi)
     if goster_ai:
-        st.warning("⚠️ Gelecek tahmini grafiği modülü henüz aktif değil.")
-        # tarihler, tahminler = gelismis_ai_tahmin(df, gelecek_gun=5)
-        # fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)
+        tarihler, tahminler = gelismis_ai_tahmin(df, gelecek_gun=30)
+        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)
 
     # MACD ve Stoch Çizimleri
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
@@ -1157,9 +959,8 @@ with tabs[1]:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
-    # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
     elif btn_nokta_atisi:
-        with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
+        with st.spinner('Temel ve Teknik kusursuz kesişimler (Kurumsal Sniper) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
@@ -1171,23 +972,23 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # ULTRA HİBRİT SNIPER FİLTRESİ
-                # Temel bilançosu çöpmeyen (Skor >= 40) VE (Hacim Patlamış VEYA Uyuşmazlık Var VEYA Tuzak Kurulmuş)
+                # HİBRİT FİLTRE: 3 Teknik Şart + 1 Temel Şart (Sihirli Formül)
                 df_sniper = df_radar[
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) & 
-                    ((df_radar['💥 Hacim'] == '🔥 PATLAMA') | 
-                     (df_radar['📈 Uyuşmazlık'] == '✅ POZİTİF') | 
-                     (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR'))
+                    (df_radar['🤖 AI Kararı'] == '🚀 GÜÇLÜ AL') & 
+                    (df_radar['Stoch Durum'] == '🚀 AL') & 
+                    (df_radar['Trend (T3)'] == '🚀 BOĞA') &
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) # YENİ ŞART
                 ]
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
+                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 40) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
                 else:
-                    st.error("📉 Şu anki piyasada gerçek bir 'Dipten Dönüş' veya 'Ayı Tuzağı' formasyonuna giren şirket bulunamadı.")
+                    st.error("📉 Şu anki piyasada Temel + Teknik + AI şartlarını aynı anda sağlayan 'Kusursuz' bir şirket bulunamadı.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
+
     else:
         st.info("Piyasayı taramak ve analiz sonuçlarını görmek için yukarıdaki butonlardan birine tıklayın.")
 

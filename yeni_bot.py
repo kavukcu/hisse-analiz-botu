@@ -471,7 +471,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "🪤 Spring (Tuzak)": spring_durum,
                 "📈 Uyuşmazlık": uyusmazlik_durum,
                 "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL"
+                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL",
+                "💯 Güven": f"% {ai_veri['confidence']}"
             }
             
         elif analiz_tipi == "stoch":

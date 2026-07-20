@@ -99,7 +99,7 @@ veritabani_baslat()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
-@st.cache_data(ttl=60, show_spinner=False) # Gün içi canlı veri için önbelleği 60 saniyeye indirdik
+@st.cache_data(ttl=300, show_spinner=False) # Gün içi canlı veri için önbelleği 60 saniyeye indirdik
 def veri_yukle(ticker, start, end):
     import time, logging
     

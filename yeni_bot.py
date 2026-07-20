@@ -99,13 +99,18 @@ veritabani_baslat()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False) # Gün içi canlı veri için önbelleği 60 saniyeye indirdik
 def veri_yukle(ticker, start, end):
     import time, logging
+    
+    # yfinance 'end' tarihini dahil etmediği için bugünün canlı mumunu almak adına bitiş gününe +1 gün ekliyoruz
+    bitis_dt = pd.to_datetime(end) + timedelta(days=1)
+    bitis_str = bitis_dt.strftime('%Y-%m-%d')
+    
     for _ in range(3):
         try:
             df = yf.download(
-                ticker, start=start, end=end, session=oturum,
+                ticker, start=start, end=bitis_str, session=oturum,
                 progress=False, auto_adjust=True, threads=True
             )
             if df.empty:
@@ -114,7 +119,7 @@ def veri_yukle(ticker, start, end):
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
                 
-            gerekli=["Open","High","Low","Close","Volume"]
+            gerekli = ["Open", "High", "Low", "Close", "Volume"]
             if any(c not in df.columns for c in gerekli):
                 raise ValueError("Eksik veya boş veri")
                 

@@ -95,7 +95,7 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
-#veritabani_baslat(
+veritabani_baslat()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
@@ -503,7 +503,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
         return mse # Hatayı en aza indirmeye çalışır
 
     study = optuna.create_study(direction='minimize')
-    study.optimize(objective, n_trials=5) # 10 farklı kombinasyon dener
+    study.optimize(objective, n_trials=10) # 10 farklı kombinasyon dener
     
     return study.best_params
 def ensemble_prediction(df, sembol="Genel"):
@@ -972,11 +972,11 @@ with tabs[1]:
                     (df_radar['🤖 AI Kararı'] == '🚀 GÜÇLÜ AL') & 
                     (df_radar['Stoch Durum'] == '🚀 AL') & 
                     (df_radar['Trend (T3)'] == '🚀 BOĞA') &
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 70) # YENİ ŞART
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 60) # YENİ ŞART
                 ]
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 70) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
+                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 60) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
                 else:

@@ -278,7 +278,43 @@ def mum_formasyonlarini_bul(df):
     df_f['Bullish_Engulfing'] = (df_f['Close'].shift(1) < df_f['Open'].shift(1)) & (df_f['Open'] < df_f['Close'].shift(1)) & (df_f['Close'] > df_f['Open'].shift(1))
     df_f['Bearish_Engulfing'] = (df_f['Close'].shift(1) > df_f['Open'].shift(1)) & (df_f['Open'] > df_f['Close'].shift(1)) & (df_f['Close'] < df_f['Open'].shift(1))
     return df_f
-
+def dipten_donus_analizi(df):
+    """Fiyatın dipten sekme ihtimalini kurumsal tekniklerle (Hacim, RSI Uyuşmazlığı, Spring) hesaplar."""
+    df_dip = df.copy()
+    
+    # 1. Hacim Patlaması (Son 20 günün ortalamasının en az 2 katı)
+    df_dip['Vol_SMA_20'] = df_dip['Volume'].rolling(20).mean()
+    df_dip['Hacim_Patlamasi'] = df_dip['Volume'] > (df_dip['Vol_SMA_20'] * 2)
+    
+    # 2. Wyckoff Spring (Ayı Tuzağı - Bollinger Alt Bandı İhlali ve Hızlı Dönüş)
+    df_dip['SMA_20_Dip'] = df_dip['Close'].rolling(20).mean()
+    df_dip['STD_20_Dip'] = df_dip['Close'].rolling(20).std()
+    df_dip['Lower_Band'] = df_dip['SMA_20_Dip'] - (df_dip['STD_20_Dip'] * 2)
+    
+    # Gün içinde alt bandı kırmış ama günü bandın ve açılışın üzerinde (yeşil) kapatmış mı?
+    df_dip['Wyckoff_Spring'] = (df_dip['Low'] < df_dip['Lower_Band']) & (df_dip['Close'] > df_dip['Lower_Band']) & (df_dip['Close'] > df_dip['Open'])
+    
+    # 3. RSI Pozitif Uyuşmazlık (Bullish Divergence)
+    delta = df_dip['Close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+    rs = gain / loss.replace(0, 1e-9)
+    df_dip['RSI_DIP'] = 100 - (100 / (1 + rs))
+    
+    # Son 20 günlük periyotta fiyat daha düşük dip yaparken, RSI daha yüksek dip yapıyorsa
+    if len(df_dip) >= 20:
+        son_5_fiyat = df_dip['Close'].iloc[-5:].min()
+        eski_15_fiyat = df_dip['Close'].iloc[-20:-5].min()
+        son_5_rsi = df_dip['RSI_DIP'].iloc[-5:].min()
+        eski_15_rsi = df_dip['RSI_DIP'].iloc[-20:-5].min()
+        
+        # Uyuşmazlık şartı ve RSI'ın aşırı satım bölgesine yakın (45 altı) olması
+        uyusmazlik = (son_5_fiyat < eski_15_fiyat) and (son_5_rsi > eski_15_rsi) and (son_5_rsi < 45)
+        df_dip['Pozitif_Uyusmazlik'] = uyusmazlik
+    else:
+        df_dip['Pozitif_Uyusmazlik'] = False
+        
+    return df_dip
 # --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
     bt_df = df[['Close']].copy()
@@ -389,6 +425,13 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return None
         
         if analiz_tipi == "radar":
+            # --- YENİ DİPTEN DÖNÜŞ ANALİZİ EKLENDİ ---
+            temp_df = dipten_donus_analizi(temp_df)
+            hacim_durum = "🔥 PATLAMA" if temp_df['Hacim_Patlamasi'].iloc[-1] else "Normal"
+            spring_durum = "✅ VAR" if temp_df['Wyckoff_Spring'].iloc[-1] else "-"
+            uyusmazlik_durum = "✅ POZİTİF" if temp_df['Pozitif_Uyusmazlik'].iloc[-1] else "-"
+            # ----------------------------------------
+            
             # 1. Stoch Hesabı
             temp_df = stokastik_hesapla(temp_df)
             son_k = temp_df['Stoch_K'].iloc[-1]
@@ -406,20 +449,16 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 temel_analiz_verisi = sihirli_formul_skorla(sembol) 
                 s_skor = temel_analiz_verisi['Puan']
             except Exception as e:
-                logging.warning(f"[{sembol}] Sihirli Formül hesaplanamadı: {e}")
                 s_skor = 0
 
-            # 4. Yapay Zeka Hesabı (HIZLANDIRILMIŞ ÖN ELEME)
-            # Sadece trendi "BOĞA" olan, Stoch "AL" veren veya Temel Skoru yüksek hisselerde AI çalışsın!
-            if tilson_durum == "🚀 BOĞA" or stoch_durum == "🚀 AL" or s_skor >= 50:
+            # 4. Yapay Zeka Hesabı
+            if tilson_durum == "🚀 BOĞA" or stoch_durum == "🚀 AL" or s_skor >= 50 or hacim_durum == "🔥 PATLAMA":
                 ai_veri = ensemble_prediction(temp_df, sembol)
                 try:
-                    hedef_float = float(ai_veri['rf_prediction'])
-                    tahmin_kaydet(sembol, hedef_float)
-                except Exception as e:
+                    tahmin_kaydet(sembol, float(ai_veri['rf_prediction']))
+                except:
                     pass
             else:
-                # Zayıf hisselerde AI modelini boşuna eğitme, direkt pas geç.
                 ai_veri = {'signal': "ZAYIF (AI Pas Geçti)", 'rf_prediction': 0.0, 'confidence': 0.0}
 
             return {
@@ -427,10 +466,12 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "Son Fiyat": f"{fiyat:.2f}",
                 "Trend (T3)": tilson_durum,
                 "Stoch Durum": stoch_durum,
-                "📊 Temel Skor": s_skor,       # YENİ EKLENDİ
+                "📊 Temel Skor": s_skor,
+                "💥 Hacim": hacim_durum,
+                "🪤 Spring (Tuzak)": spring_durum,
+                "📈 Uyuşmazlık": uyusmazlik_durum,
                 "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL",
-                "⚡ Güven": f"% {ai_veri['confidence']}"
+                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL"
             }
             
         elif analiz_tipi == "stoch":
@@ -959,8 +1000,9 @@ with tabs[1]:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
+    # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
     elif btn_nokta_atisi:
-        with st.spinner('Temel ve Teknik kusursuz kesişimler (Kurumsal Sniper) aranıyor...'):
+        with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
@@ -972,26 +1014,23 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # HİBRİT FİLTRE: 3 Teknik Şart + 1 Temel Şart (Sihirli Formül)
+                # ULTRA HİBRİT SNIPER FİLTRESİ
+                # Temel bilançosu çöpmeyen (Skor >= 40) VE (Hacim Patlamış VEYA Uyuşmazlık Var VEYA Tuzak Kurulmuş)
                 df_sniper = df_radar[
-                    (df_radar['🤖 AI Kararı'] == '🚀 GÜÇLÜ AL') & 
-                    (df_radar['Stoch Durum'] == '🚀 AL') & 
-                    (df_radar['Trend (T3)'] == '🚀 BOĞA') &
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) # YENİ ŞART
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) & 
+                    ((df_radar['💥 Hacim'] == '🔥 PATLAMA') | 
+                     (df_radar['📈 Uyuşmazlık'] == '✅ POZİTİF') | 
+                     (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR'))
                 ]
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 40) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
+                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
                 else:
-                    st.error("📉 Şu anki piyasada Temel + Teknik + AI şartlarını aynı anda sağlayan 'Kusursuz' bir şirket bulunamadı.")
+                    st.error("📉 Şu anki piyasada gerçek bir 'Dipten Dönüş' veya 'Ayı Tuzağı' formasyonuna giren şirket bulunamadı.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
-
-    else:
-        st.info("Piyasayı taramak ve analiz sonuçlarını görmek için yukarıdaki butonlardan birine tıklayın.")
-
 # --- SEKME 2: CÜZDAN & STOP ---
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")

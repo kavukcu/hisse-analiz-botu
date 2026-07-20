@@ -972,11 +972,11 @@ with tabs[1]:
                     (df_radar['🤖 AI Kararı'] == '🚀 GÜÇLÜ AL') & 
                     (df_radar['Stoch Durum'] == '🚀 AL') & 
                     (df_radar['Trend (T3)'] == '🚀 BOĞA') &
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 60) # YENİ ŞART
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) # YENİ ŞART
                 ]
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 60) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
+                    st.success(f"🎯 Hibrit Fırsat Bulundu! Hem bilançosu sağlam (Skor > 40) hem de grafiği patlamaya hazır {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
                 else:

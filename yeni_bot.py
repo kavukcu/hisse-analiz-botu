@@ -780,7 +780,7 @@ if piyasa_tipi == "Borsa İstanbul (BIST)":
 "BIGTK.IS", "BULGS.IS", "CGCAM.IS", "DGGYO.IS", "DGNMO.IS", "DNISI.IS",
 "DOFRB.IS", "DSTKF.IS", "DUNYH.IS", "DURKN.IS", "ECOGR.IS", "EDIP.IS",
 "EFOR.IS", "EGEGY.IS", "EKDMR.IS", "EKIM.IS", "EKOS.IS", "EMPAE.IS",
-"ENTRA.IS", "KOTON.IS", "LILAK.IS", "QNBFK.IS", "SKYLP.IS", "SVGYO.IS"]
+"ENTRA.IS", "KOTON.IS", "LILAK.IS", "QNBFK.IS", "SKYLP.IS", "AHSGY.IS", "ASCEG.IS", "BEGYO.IS", "BORLS.IS", "GNDG.IS", "HOROZ.IS", "KBORU.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "SVGYO.IS"]
 elif piyasa_tipi == "Amerikan Borsası (ABD)":
     varsayilan_hisse = "AAPL"
     tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]

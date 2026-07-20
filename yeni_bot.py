@@ -711,7 +711,7 @@ piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", 
 
 if piyasa_tipi == "Borsa İstanbul (BIST)":
     varsayilan_hisse = "MIATK.IS"
-    tarama_listesi = ["THYAO.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
+    tarama_listesi = ["ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
 "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", 
 "AKSEN.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", 
 "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ALVES.IS", "ANELE.IS", "ANGEN.IS", 
@@ -776,8 +776,11 @@ if piyasa_tipi == "Borsa İstanbul (BIST)":
 "VAKBN.IS", "VAKFN.IS", "VAKKO.IS", "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", 
 "VKGYO.IS", "VKING.IS", "VRGYO.IS", "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", 
 "YESIL.IS", "YGGYO.IS", "YGYO.IS", "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", 
-"ZEDUR.IS", "ZOREN.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
-"TUPRS.IS", "KCHOL.IS", "GARAN.IS", "BIMAS.IS", "EREGL.IS", "SISE.IS", "SASA.IS"]
+"ZEDUR.IS", "ZOREN.IS", "A1CAP.IS", "ADGYO.IS", "AGROT.IS", "AGYO.IS", "ATAKP.IS", "AVPGY.IS",
+"BIGTK.IS", "BULGS.IS", "CGCAM.IS", "DGGYO.IS", "DGNMO.IS", "DNISI.IS",
+"DOFRB.IS", "DSTKF.IS", "DUNYH.IS", "DURKN.IS", "ECOGR.IS", "EDIP.IS",
+"EFOR.IS", "EGEGY.IS", "EKDMR.IS", "EKIM.IS", "EKOS.IS", "EMPAE.IS",
+"ENTRA.IS", "KOTON.IS", "LILAK.IS", "QNBFK.IS", "SKYLP.IS", "SVGYO.IS"]
 elif piyasa_tipi == "Amerikan Borsası (ABD)":
     varsayilan_hisse = "AAPL"
     tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]

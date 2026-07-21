@@ -452,7 +452,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 s_skor = 0
 
             # 4. Yapay Zeka Hesabı
-            if tilson_durum == "🚀 BOĞA" or stoch_durum == "🚀 AL" or s_skor >= 50 or hacim_durum == "🔥 PATLAMA":
+            # Tilson BOĞA iken VE (Stoch AL veya Hacim Patlaması varsa) AI çalışsın
+            if tilson_durum == "🚀 BOĞA" and (stoch_durum == "🚀 AL" or s_skor >= 50 or hacim_durum == "🔥 PATLAMA"):
                 ai_veri = ensemble_prediction(temp_df, sembol)
                 try:
                     tahmin_kaydet(sembol, float(ai_veri['rf_prediction']))
@@ -1021,10 +1022,11 @@ with tabs[1]:
                 # ULTRA HİBRİT SNIPER FİLTRESİ
                 # Temel bilançosu çöpmeyen (Skor >= 40) VE (Hacim Patlamış VEYA Uyuşmazlık Var VEYA Tuzak Kurulmuş)
                 df_sniper = df_radar[
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) & 
-                    ((df_radar['💥 Hacim'] == '🔥 PATLAMA') | 
-                     (df_radar['📈 Uyuşmazlık'] == '✅ POZİTİF') | 
-                     (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR'))
+                (df_radar['Trend (T3)'] == '🚀 BOĞA') & # YENİ EKLENEN KATI ŞART
+                (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) & 
+                ((df_radar['💥 Hacim'] == '🔥 PATLAMA') | 
+                (df_radar['📈 Uyuşmazlık'] == '✅ POZİTİF') | 
+                (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR'))
                 ]
                 
                 if not df_sniper.empty:

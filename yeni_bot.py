@@ -24,7 +24,6 @@ from xgboost import XGBRegressor
 import sqlite3
 import optuna
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import train_test_split
 # ==========================================
 # SAYFA AYARLARI VE OTURUM
 # ==========================================
@@ -574,16 +573,12 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             except:
                 s_skor = 0
 
+            
             # AI Kararı (Hem 4S hem Günlük Trend Uygunsa veya Hacim/Uyuşmazlık Varsa Çalışır)
             if (g_boga or h4_boga) and (g_stoch_al or h4_stoch_al or h4_hacim or g_uyusmazlik or h4_uyusmazlik):
                 ai_veri = ensemble_prediction(df_g_kapanmis, sembol)
-                try:
-                    tahmin_kaydet(sembol, float(ai_veri['rf_prediction'])) # BURAYI SİLİN
-                except:
-                    pass
             else:
                 ai_veri = {'signal': "ZAYIF (AI Pas Geçti)", 'rf_prediction': 0.0, 'confidence': 0.0}
-
             return {
                 "Varlık": sembol,
                 "Kapanış Fiyatı": f"{g_fiyat:.2f}",
@@ -741,13 +736,33 @@ def ensemble_prediction(df, sembol="Genel"):
 
         best_xgb_params = en_iyi_xgb_parametrelerini_bul(sembol, X, y)
 
+        # Diğer modellerin tanımlandığı yer...
+        # Diğer modellerin tanımlandığı yer...
         model_xgb = XGBRegressor(**best_xgb_params, random_state=42, n_jobs=-1)
-        
         model_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
         model_svr = Pipeline([
             ('scaler', StandardScaler()),
             ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))
         ])
+        
+        # Gradient Boosting modelini tanımlıyoruz
+        model_gb = GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)
+
+        # YENİ: Ridge modelini standartlaştırma (scaler) ile tanımlıyoruz
+        model_ridge = Pipeline([
+            ('scaler', StandardScaler()),
+            ('ridge', Ridge(alpha=1.0))
+        ])
+
+        # YENİ: gb ve ridge'i de oylamaya (VotingRegressor) ekliyoruz
+        ensemble = VotingRegressor(estimators=[
+            ('xgb', model_xgb),
+            ('rf', model_rf),
+            ('svr', model_svr),
+            ('gb', model_gb),
+            ('ridge', model_ridge)
+        ])
+
 
         ensemble = VotingRegressor(estimators=[
             ('xgb', model_xgb),

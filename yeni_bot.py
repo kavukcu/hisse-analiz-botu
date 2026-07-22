@@ -95,7 +95,7 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
-veritabani_baslat()
+tahminleri_degerlendir()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
@@ -149,14 +149,6 @@ def veri_4saatlik_getir(ticker, start, end):
         df_4h = df_4h.iloc[:-1]
         
     return df_4h
-def dipten_donus_analizi(df):
-    # Veri seti çok kısa ise (örn. yeni halka arzlar) çökmemesi için varsayılan boş sonuç dön
-    if df is None or len(df) < 20:
-        df_copy = df.copy() if df is not None else pd.DataFrame()
-        df_copy['Hacim_Patlamasi'] = False
-        df_copy['Pozitif_Uyusmazlik'] = False
-        df_copy['Wyckoff_Spring'] = False
-        return df_copy
 
     # ... Mevcut dipten dönüş hesaplama kodlarınız ...
 def tilson_t3(close, period=5, vfactor=0.7):
@@ -277,8 +269,12 @@ def ileri_teknik_gostergeler(df):
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):
     try:
         df_form = df.copy()
-        df_form['Local_Max'] = df_form['High'] == df_form['High'].rolling(window=window*2+1, center=True).max()
-        df_form['Local_Min'] = df_form['Low'] == df_form['Low'].rolling(window=window*2+1, center=True).min()
+        # Geleceği görme (look-ahead) engellendi. Tepe/Dip onayı 'window' gün sonra verilir.
+        df_form['Roll_Max'] = df_form['High'].rolling(window=window*2+1).max()
+        df_form['Roll_Min'] = df_form['Low'].rolling(window=window*2+1).min()
+        
+        df_form['Local_Max'] = df_form['High'].shift(window) == df_form['Roll_Max']
+        df_form['Local_Min'] = df_form['Low'].shift(window) == df_form['Roll_Min']
         
         ikili_tepeler, ikili_dipler = [], []
         max_idx = df_form[df_form['Local_Max']].index
@@ -319,8 +315,7 @@ def dipten_donus_analizi(df):
         return df_copy
 
     df_dip = df.copy()
-    """Fiyatın dipten sekme ihtimalini kurumsal tekniklerle (Hacim, RSI Uyuşmazlığı, Spring) hesaplar."""
-    df_dip = df.copy()
+   
     
     # 1. Hacim Patlaması (Son 20 günün ortalamasının en az 2 katı)
     df_dip['Vol_SMA_20'] = df_dip['Volume'].rolling(20).mean()
@@ -522,8 +517,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         else:
             al_sat_karari = "🐻 GÜÇLÜ SAT / AYI (4S + Günlük Ayı)"
 
-        # RADAR SEKMESİ İÇİN ÇIKTI
-        # RADAR SEKMESİ İÇİN ÇIKTI
+        
         if analiz_tipi == "radar":
             # 1. Günlük ve 4S Dipten Dönüş Analizlerini Hesapla
             temp_g = dipten_donus_analizi(df_g_kapanmis)
@@ -567,7 +561,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             if (g_boga or h4_boga) and (g_stoch_al or h4_stoch_al or h4_hacim or g_uyusmazlik or h4_uyusmazlik):
                 ai_veri = ensemble_prediction(df_g_kapanmis, sembol)
                 try:
-                    tahmin_kaydet(sembol, float(ai_veri['rf_prediction']))
+                    tahmin_kaydet(sembol, float(ai_veri['rf_prediction'])) # BURAYI SİLİN
                 except:
                     pass
             else:
@@ -635,8 +629,13 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
             'subsample': trial.suggest_float('subsample', 0.7, 1.0)
         }
         # Geçmiş verinin %80'i ile çalışıp, %20'si ile kendini test eder
-        X_train, X_test, y_train, y_test = train_test_split(X_matrisi, y_vektoru, test_size=0.2, random_state=42)
-        
+        # ✅ DOĞRU: Zamansal sıralı bölme
+        # Zamansal Sıralı Kesme (Data Leakage Önlenir)
+        tscv = TimeSeriesSplit(n_splits=5)
+        # Sadece son split'i (en güncel eğitim/test ayrımını) alıyoruz
+        for train_index, test_index in tscv.split(X_matrisi):
+            X_train, X_test = X_matrisi[train_index], X_matrisi[test_index]
+            y_train, y_test = y_vektoru[train_index], y_vektoru[test_index]
         model = XGBRegressor(**param, random_state=42, n_jobs=-1)
         model.fit(X_train, y_train)
         preds = model.predict(X_test)
@@ -796,12 +795,41 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
         tahminler = []
         son_veri = X_scaled[-1].reshape(1, -1)
         
+        # 1. Döngüye girmeden ÖNCE geçmiş kapanış verilerini hafızaya alıyoruz
+        gecmis_kapanislar = df_ml['Close'].tail(20).tolist()
+        
+        # 2. Çok adımlı dinamik tahmin döngüsü
         for _ in range(gelecek_gun):
             pred = float(model.predict(son_veri)[0])
             tahminler.append(pred)
-            yeni_satir = son_veri.copy()
-            yeni_satir[0, 0] = pred 
-            son_veri = yeni_satir
+            
+            # Kapanış listesini yeni tahminle güncelle
+            gecmis_kapanislar.append(pred)
+            gecmis_kapanislar = gecmis_kapanislar[-20:]  # Son 20 günü tut
+            
+            # İndikatörleri yeni tahmine göre dinamik hesapla
+            yeni_log_ret = np.log(gecmis_kapanislar[-1] / gecmis_kapanislar[-2])
+            yeni_sma_10 = np.mean(gecmis_kapanislar[-10:])
+            yeni_sma_10_dist = (gecmis_kapanislar[-1] / yeni_sma_10) - 1
+            
+            getiriler = [np.log(gecmis_kapanislar[i] / gecmis_kapanislar[i-1]) for i in range(1, len(gecmis_kapanislar))]
+            yeni_vol = np.std(getiriler[-14:]) if len(getiriler) >= 14 else np.std(getiriler)
+            
+            # Yeni veriyi ölçeklendirip (Scaler) bir sonraki gün için hazırlar
+            yeni_ham_veri = np.array([[pred, son_veri[0, 1], yeni_log_ret, yeni_sma_10_dist, yeni_vol]])
+            son_veri = scaler.transform(yeni_ham_veri)            
+            # İndikatörleri yeniden hesapla
+            yeni_log_ret = np.log(gecmis_kapanislar[-1] / gecmis_kapanislar[-2])
+            yeni_sma_10 = np.mean(gecmis_kapanislar[-10:])
+            yeni_sma_10_dist = (gecmis_kapanislar[-1] / yeni_sma_10) - 1
+            
+            # Basit volatilite hesabı (Son 14 günün getirilerinin standart sapması)
+            getiriler = [np.log(gecmis_kapanislar[i]/gecmis_kapanislar[i-1]) for i in range(1, len(gecmis_kapanislar))]
+            yeni_vol = np.std(getiriler[-14:])
+            
+            # Yeni satırı oluştur ve scale et (Hacim sabit varsayılıyor)
+            yeni_ham_veri = np.array([[pred, son_veri[0, 1], yeni_log_ret, yeni_sma_10_dist, yeni_vol]])
+            son_veri = scaler.transform(yeni_ham_veri)
             
         tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
         return tarihler, tahminler
@@ -1071,10 +1099,17 @@ with tabs[1]:
                     sonuc = future.result()
                     if sonuc:
                         radar_sonuclari.append(sonuc)
-            
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 st.dataframe(df_radar, use_container_width=True, hide_index=True)
+                
+                # Veritabanı Kilitlenmesini Önlemek İçin Yazma İşlemini Toplu ve Senkron Yapıyoruz
+                for _, row in df_radar.iterrows():
+                    sembol = row['Varlık']
+                    hedef = str(row.get('🎯 AI Hedef', '0')).replace(' TL', '')
+                    if hedef != '0.0' and hedef != '0':
+                        tahmin_kaydet(sembol, float(hedef))
+            
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
                 

@@ -653,10 +653,17 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df = df.copy()
         
         # --- 1. Veri Hazırlığı ve Feature Engineering ---
+        # --- 1. Veri Hazırlığı ve Feature Engineering ---
         if 'Stoch_K' not in t_df.columns:
             low_min = t_df['Low'].rolling(window=14).min()
             high_max = t_df['High'].rolling(window=14).max()
             t_df['Stoch_K'] = 100 * ((t_df['Close'] - low_min) / (high_max - low_min + 1e-9))
+            
+        # 1. Stoch_D (Sinyal Çizgisi) Hesaplaması (%K'nın 3 günlük ortalaması)
+        t_df['Stoch_D'] = t_df['Stoch_K'].rolling(window=3).mean()
+
+        # 2. Kesişim ve Momentum Farkı (%K - %D)
+        t_df['Stoch_Diff'] = t_df['Stoch_K'] - t_df['Stoch_D']
         
         t_df['Tilson_T3'] = tilson_t3(t_df['Close'])
         t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
@@ -695,9 +702,14 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df['Vol_Lag2'] = t_df['Vol_Change'].shift(2)
         
         # Yeni 'Hafıza' verileri (Return_X ve Vol_LagX) eğitim matrisine eklendi
-        features = ['RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Tilson_Dist', 
-                    'Return_1d', 'Return_2d', 'Return_3d', 'Vol_Lag1', 'Vol_Lag2']
-        # --------------------------------------------------
+        # 3. Güncellenmiş Öznitelik (Features) Listesi
+        features = [
+            'RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 
+            'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
+            'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 
+            'Vol_Lag1', 'Vol_Lag2'
+        ]
+        # ----------------------------------------------------------------------------
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)

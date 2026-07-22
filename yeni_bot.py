@@ -233,7 +233,7 @@ def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
         high_max = df['High'].rolling(window=k_periyot).max()
-        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min))
+        df['Stoch_K'] = 100 * ((df['Close'] - low_min) / (high_max - low_min + 1e-9))
         df['Stoch_D'] = df['Stoch_K'].rolling(window=d_periyot).mean()
         return df
     except Exception:

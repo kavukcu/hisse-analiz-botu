@@ -99,23 +99,21 @@ veritabani_baslat()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
-@st.cache_data(ttl=300, show_spinner=False) # Gün içi canlı veri için önbelleği 60 saniyeye indirdik
-def veri_yukle(ticker, start, end):
+@st.cache_data(ttl=300, show_spinner=False)
+def veri_yukle(ticker, start, end, interval="1d"):
     import time, logging
     
-    # yfinance 'end' tarihini dahil etmediği için bugünün canlı mumunu almak adına bitiş gününe +1 gün ekliyoruz
     bitis_dt = pd.to_datetime(end) + timedelta(days=1)
     bitis_str = bitis_dt.strftime('%Y-%m-%d')
     
     for _ in range(3):
         try:
             df = yf.download(
-                ticker, start=start, end=bitis_str, session=oturum,
+                ticker, start=start, end=bitis_str, interval=interval, session=oturum,
                 progress=False, auto_adjust=True, threads=True
             )
             if df.empty:
-                st.warning(f"⚠️ {ticker} sembolü için yeterli veri çekilemedi.")
-                st.stop()
+                return pd.DataFrame()
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
                 
@@ -128,6 +126,39 @@ def veri_yukle(ticker, start, end):
             logging.warning(f"Veri indirilemedi: {e}")
             time.sleep(1)
     return pd.DataFrame()
+def veri_4saatlik_getir(ticker, start, end):
+    """1 saatlik verileri çekip 4 saatlik TAMAMLANMIŞ (kapanmış) mumlara dönüştürür."""
+    # yfinance 1h verisini son 730 gün için destekler
+    baslangic_1h = max(pd.to_datetime(start), pd.to_datetime(datetime.now() - timedelta(days=720)))
+    
+    df_1h = veri_yukle(ticker, baslangic_1h.strftime('%Y-%m-%d'), end, interval="1h")
+    if df_1h.empty:
+        return pd.DataFrame()
+        
+    # 1 Saatlik mumları 4 Saatlik mum gruplarına dönüştür (Resample)
+    df_4h = df_1h.resample('4h').agg({
+        'Open': 'first',
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last',
+        'Volume': 'sum'
+    }).dropna()
+    
+    # HENÜZ KAPANMAMIŞ CANLI 4 SAATLİK MUMU ELE (Sadece Tamamlanmış Kapanışlar)
+    if len(df_4h) > 1:
+        df_4h = df_4h.iloc[:-1]
+        
+    return df_4h
+def dipten_donus_analizi(df):
+    # Veri seti çok kısa ise (örn. yeni halka arzlar) çökmemesi için varsayılan boş sonuç dön
+    if df is None or len(df) < 20:
+        df_copy = df.copy() if df is not None else pd.DataFrame()
+        df_copy['Hacim_Patlamasi'] = False
+        df_copy['Pozitif_Uyusmazlik'] = False
+        df_copy['Wyckoff_Spring'] = False
+        return df_copy
+
+    # ... Mevcut dipten dönüş hesaplama kodlarınız ...
 def tilson_t3(close, period=5, vfactor=0.7):
     ema1 = close.ewm(span=period, adjust=False).mean()
     ema2 = ema1.ewm(span=period, adjust=False).mean()
@@ -280,6 +311,15 @@ def mum_formasyonlarini_bul(df):
     return df_f
 def dipten_donus_analizi(df):
     """Fiyatın dipten sekme ihtimalini kurumsal tekniklerle (Hacim, RSI Uyuşmazlığı, Spring) hesaplar."""
+    if df is None or len(df) < 20:
+        df_copy = df.copy() if df is not None else pd.DataFrame()
+        df_copy['Hacim_Patlamasi'] = False
+        df_copy['Pozitif_Uyusmazlik'] = False
+        df_copy['Wyckoff_Spring'] = False
+        return df_copy
+
+    df_dip = df.copy()
+    """Fiyatın dipten sekme ihtimalini kurumsal tekniklerle (Hacim, RSI Uyuşmazlığı, Spring) hesaplar."""
     df_dip = df.copy()
     
     # 1. Hacim Patlaması (Son 20 günün ortalamasının en az 2 katı)
@@ -418,43 +458,114 @@ def haber_duygu_analizi(ticker):
         return sonuclar
     except: return []
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
-    """Hisseleri paralel taramak için optimize edilmiş asenkron işçi fonksiyonu."""
+    """4 Saatlik ve Günlük KAPANMIŞ mumlar üzerinden çift onaylı analiz yapar."""
     try:
-        temp_df = veri_yukle(sembol, baslangic, bitis)
-        if temp_df.empty: 
-            return None
+        # 1. Günlük ve 4 Saatlik Kapanış Verilerini Çek
+        df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d")
+        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis)
         
-        if analiz_tipi == "radar":
-            # --- YENİ DİPTEN DÖNÜŞ ANALİZİ EKLENDİ ---
-            temp_df = dipten_donus_analizi(temp_df)
-            hacim_durum = "🔥 PATLAMA" if temp_df['Hacim_Patlamasi'].iloc[-1] else "Normal"
-            spring_durum = "✅ VAR" if temp_df['Wyckoff_Spring'].iloc[-1] else "-"
-            uyusmazlik_durum = "✅ POZİTİF" if temp_df['Pozitif_Uyusmazlik'].iloc[-1] else "-"
-            # ----------------------------------------
+        if df_gunluk.empty: 
+            return None
             
-            # 1. Stoch Hesabı
-            temp_df = stokastik_hesapla(temp_df)
-            son_k = temp_df['Stoch_K'].iloc[-1]
-            son_d = temp_df['Stoch_D'].iloc[-1]
-            stoch_durum = "🚀 AL" if (son_k < 20 and son_k > son_d) else ("⚠️ SAT" if (son_k > 80 and son_k < son_d) else "NÖTR")
-            
-            # 2. Tilson Hesabı
-            temp_df['Tilson_T3'] = tilson_t3(temp_df['Close'])
-            t3_degeri = temp_df['Tilson_T3'].iloc[-1]
-            fiyat = temp_df['Close'].iloc[-1]
-            tilson_durum = "🚀 BOĞA" if fiyat > t3_degeri else "🐻 AYI"
+        # Gün içi canlı mumun kırılımlarını önlemek için tamamlanmış mumları alıyoruz
+        if len(df_gunluk) > 1 and datetime.now().hour < 18: 
+            # Piyasa henüz kapanmadıysa günlüğün de son kapanmış gününü baz al
+            df_g_kapanmis = df_gunluk.iloc[:-1].copy()
+        else:
+            df_g_kapanmis = df_gunluk.copy()
 
-            # 3. Temel Analiz: Gerçek Sihirli Formül Skoru
+        # ==========================================
+        # A) GÜNLÜK KAPANIS ANALİZİ (Tilson + Stoch)
+        # ==========================================
+        df_g_kapanmis = stokastik_hesapla(df_g_kapanmis)
+        df_g_kapanmis['Tilson_T3'] = tilson_t3(df_g_kapanmis['Close'])
+        
+        g_fiyat = df_g_kapanmis['Close'].iloc[-1]
+        g_tilson = df_g_kapanmis['Tilson_T3'].iloc[-1]
+        g_stoch_k = df_g_kapanmis['Stoch_K'].iloc[-1]
+        g_stoch_d = df_g_kapanmis['Stoch_D'].iloc[-1]
+        
+        g_boga = g_fiyat > g_tilson
+        g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
+
+        # ==========================================
+        # B) 4 SAATLİK KAPANIS ANALİZİ (Tilson + Stoch)
+        # ==========================================
+        if not df_4h.empty and len(df_4h) >= 20:
+            df_4h = stokastik_hesapla(df_4h)
+            df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
+            
+            h4_fiyat = df_4h['Close'].iloc[-1]
+            h4_tilson = df_4h['Tilson_T3'].iloc[-1]
+            h4_stoch_k = df_4h['Stoch_K'].iloc[-1]
+            h4_stoch_d = df_4h['Stoch_D'].iloc[-1]
+            
+            h4_boga = h4_fiyat > h4_tilson
+            h4_stoch_al = (h4_stoch_k < 35) and (h4_stoch_k > h4_stoch_d)
+        else:
+            h4_boga, h4_stoch_al = g_boga, g_stoch_al
+
+        # ==========================================
+        # C) NİHAİ AL / SAT KARARI (Çift Onay Sistemi)
+        # ==========================================
+        if g_boga and h4_boga:
+            if g_stoch_al and h4_stoch_al:
+                al_sat_karari = "🚀 GÜÇLÜ AL (4S + Günlük Onaylı)"
+            elif g_stoch_al or h4_stoch_al:
+                al_sat_karari = "🟢 AL (Tek Zaman Dilimi Erken Sinyal)"
+            else:
+                al_sat_karari = "📈 BOĞA TRENDİ (Düzeltmede)"
+        elif g_boga and not h4_boga:
+            al_sat_karari = "⚠️ DÜZELTME (Günlük Boğa / 4S Ayı)"
+        elif not g_boga and h4_boga:
+            al_sat_karari = "⚡ TEPKİ YÜKSELİŞİ (4S Boğa / Günlük Ayı)"
+        else:
+            al_sat_karari = "🐻 GÜÇLÜ SAT / AYI (4S + Günlük Ayı)"
+
+        # RADAR SEKMESİ İÇİN ÇIKTI
+        # RADAR SEKMESİ İÇİN ÇIKTI
+        if analiz_tipi == "radar":
+            # 1. Günlük ve 4S Dipten Dönüş Analizlerini Hesapla
+            temp_g = dipten_donus_analizi(df_g_kapanmis)
+            temp_4h = dipten_donus_analizi(df_4h) if not df_4h.empty else temp_g
+            
+            # Hacim Patlaması Kararı (4S ve Günlük Kıyaslaması)
+            g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
+            h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1]
+            
+            if g_hacim and h4_hacim:
+                hacim_durum = "🔥 GÜÇLÜ PATLAMA (4S+Günlük)"
+            elif h4_hacim:
+                hacim_durum = "⚡ 4S HACİM PATLAMASI (Erken)"
+            elif g_hacim:
+                hacim_durum = "💥 GÜNLÜK HACİM PATLAMASI"
+            else:
+                hacim_durum = "Normal"
+
+            # Pozitif Uyuşmazlık Kararı (4S ve Günlük Kıyaslaması)
+            g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
+            h4_uyusmazlik = temp_4h['Pozitif_Uyusmazlik'].iloc[-1]
+            
+            if g_uyusmazlik and h4_uyusmazlik:
+                uyusmazlik_durum = "✅✅ ÇİFT UYUŞMAZLIK (4S+Günlük)"
+            elif h4_uyusmazlik:
+                uyusmazlik_durum = "⚡ 4S UYUŞMAZLIK (Erken Sinyal)"
+            elif g_uyusmazlik:
+                uyusmazlik_durum = "📈 GÜNLÜK UYUŞMAZLIK"
+            else:
+                uyusmazlik_durum = "-"
+
+            # Spring (Tuzak) Kararı
+            spring_durum = "✅ VAR" if (temp_g['Wyckoff_Spring'].iloc[-1] or temp_4h['Wyckoff_Spring'].iloc[-1]) else "-"
+            
             try:
-                temel_analiz_verisi = sihirli_formul_skorla(sembol) 
-                s_skor = temel_analiz_verisi['Puan']
-            except Exception as e:
+                s_skor = sihirli_formul_skorla(sembol)['Puan']
+            except:
                 s_skor = 0
 
-            # 4. Yapay Zeka Hesabı
-            # Tilson BOĞA iken VE (Stoch AL veya Hacim Patlaması varsa) AI çalışsın
-            if tilson_durum == "🚀 BOĞA" and (stoch_durum == "🚀 AL" or s_skor >= 50 or hacim_durum == "🔥 PATLAMA"):
-                ai_veri = ensemble_prediction(temp_df, sembol)
+            # AI Kararı (Hem 4S hem Günlük Trend Uygunsa veya Hacim/Uyuşmazlık Varsa Çalışır)
+            if (g_boga or h4_boga) and (g_stoch_al or h4_stoch_al or h4_hacim or g_uyusmazlik or h4_uyusmazlik):
+                ai_veri = ensemble_prediction(df_g_kapanmis, sembol)
                 try:
                     tahmin_kaydet(sembol, float(ai_veri['rf_prediction']))
                 except:
@@ -464,52 +575,34 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
 
             return {
                 "Varlık": sembol,
-                "Son Fiyat": f"{fiyat:.2f}",
-                "Trend (T3)": tilson_durum,
-                "Stoch Durum": stoch_durum,
+                "Kapanış Fiyatı": f"{g_fiyat:.2f}",
+                "🎯 AL/SAT Kararı": al_sat_karari,
+                "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
+                "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
                 "📊 Temel Skor": s_skor,
-                "💥 Hacim": hacim_durum,
+                "💥 Hacim Analizi": hacim_durum,
+                "📈 Pozitif Uyuşmazlık": uyusmazlik_durum,
                 "🪤 Spring (Tuzak)": spring_durum,
-                "📈 Uyuşmazlık": uyusmazlik_durum,
                 "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 Hedef": f"{ai_veri['rf_prediction']} TL",
-                "💯 Güven": f"% {ai_veri['confidence']}"
+                "🎯 AI Hedef": f"{ai_veri['rf_prediction']} TL"
             }
-            
+
         elif analiz_tipi == "stoch":
-            temp_df = stokastik_hesapla(temp_df)
-            son_k = temp_df['Stoch_K'].iloc[-1]
-            son_d = temp_df['Stoch_D'].iloc[-1]
-            
-            if son_k < 20 and son_k > son_d:
-                detay_durum = "🟢 AŞIRI SATIM - GÜÇLÜ AL (K > D)"
-            elif son_k > 80 and son_k < son_d:
-                detay_durum = "🔴 AŞIRI ALIM - GÜÇLÜ SAT (K < D)"
-            elif son_k > son_d:
-                detay_durum = "↗️ POZİTİF EĞİLİM (K > D)"
-            else:
-                detay_durum = "↘️ NEGATİF EĞİLİM (K < D)"
-                
             return {
                 "Varlık": sembol,
-                "Son Fiyat": f"{temp_df['Close'].iloc[-1]:.2f}",
-                "Stoch %K": round(son_k, 2),
-                "Stoch %D": round(son_d, 2),
-                "Durum Analizi": detay_durum
+                "Son Fiyat": f"{g_fiyat:.2f}",
+                "Günlük Stoch %K": round(g_stoch_k, 2),
+                "4S Stoch %K": round(h4_stoch_k, 2),
+                "Durum": "🟢 Çift Dip/Al" if (g_stoch_al and h4_stoch_al) else ("↗️ Pozitif" if h4_stoch_al else "⚪ Nötr")
             }
-            
+
         elif analiz_tipi == "tilson":
-            temp_df['Tilson_T3'] = tilson_t3(temp_df['Close'])
-            t3_degeri = temp_df['Tilson_T3'].iloc[-1]
-            fiyat = temp_df['Close'].iloc[-1]
-            
-            tilson_durum = "🚀 BOĞA (Fiyat > T3)" if fiyat > t3_degeri else "🐻 AYI (Fiyat < T3)"
-            
             return {
                 "Varlık": sembol,
-                "Son Fiyat": f"{fiyat:.2f}",
-                "T3 Değeri": f"{t3_degeri:.2f}",
-                "Trend Analizi": tilson_durum
+                "Son Fiyat": f"{g_fiyat:.2f}",
+                "Günlük Tilson": f"{g_tilson:.2f} ({'🚀 BOĞA' if g_boga else '🐻 AYI'})",
+                "4S Tilson": f"{h4_tilson:.2f} ({'🚀 BOĞA' if h4_boga else '🐻 AYI'})",
+                "Trend Uyumu": "✅ ÇİFT BOĞA" if (g_boga and h4_boga) else ("⚠️ UYUMSUZ" if (g_boga != h4_boga) else "❌ ÇİFT AYI")
             }
 
     except Exception as e:
@@ -938,8 +1031,8 @@ with tabs[0]:
     fig.update_layout(template="plotly_dark", height=900, xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
-# --- SEKME 1: RADAR ---
-# --- SEKME 1: RADAR ---
+
+# --- SEKME 1: AKILLI RADAR ---
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
@@ -958,9 +1051,9 @@ with tabs[1]:
     
     # 1. GENEL RADAR BUTONU İŞLEVİ
     if btn_radar:
-        with st.spinner('Tüm liste asenkron (paralel) taranıyor... Lütfen bekleyin.'):
+        with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -977,7 +1070,7 @@ with tabs[1]:
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -993,7 +1086,7 @@ with tabs[1]:
     elif btn_tilson:
         with st.spinner('Tilson T3 trend analizi taranıyor...'):
             tilson_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -1006,11 +1099,10 @@ with tabs[1]:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
-    # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
     elif btn_nokta_atisi:
         with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
@@ -1020,14 +1112,15 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # ULTRA HİBRİT SNIPER FİLTRESİ
-                # Temel bilançosu çöpmeyen (Skor >= 40) VE (Hacim Patlamış VEYA Uyuşmazlık Var VEYA Tuzak Kurulmuş)
+                # SÜTUN İSİMLERİ VE FİLTRELER DÜZELTİLDİ:
                 df_sniper = df_radar[
-                (df_radar['Trend (T3)'] == '🚀 BOĞA') & # YENİ EKLENEN KATI ŞART
-                (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 40) & 
-                ((df_radar['💥 Hacim'] == '🔥 PATLAMA') | 
-                (df_radar['📈 Uyuşmazlık'] == '✅ POZİTİF') | 
-                (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR'))
+                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
+                    (
+                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
+                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK', na=False)) | 
+                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+                    )
                 ]
                 
                 if not df_sniper.empty:
@@ -1035,7 +1128,7 @@ with tabs[1]:
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
                 else:
-                    st.error("📉 Şu anki piyasada gerçek bir 'Dipten Dönüş' veya 'Ayı Tuzağı' formasyonuna giren şirket bulunamadı.")
+                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
 # --- SEKME 2: CÜZDAN & STOP ---

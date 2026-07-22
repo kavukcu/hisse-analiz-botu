@@ -8,7 +8,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import concurrent.futures
 import logging
@@ -127,29 +127,41 @@ def veri_yukle(ticker, start, end, interval="1d"):
             time.sleep(1)
     return pd.DataFrame()
 def veri_4saatlik_getir(ticker, start, end):
-    """1 saatlik verileri çekip 4 saatlik TAMAMLANMIŞ (kapanmış) mumlara dönüştürür."""
-    # yfinance 1h verisini son 730 gün için destekler
-    baslangic_1h = max(pd.to_datetime(start), pd.to_datetime(datetime.now() - timedelta(days=720)))
-    
-    df_1h = veri_yukle(ticker, baslangic_1h.strftime('%Y-%m-%d'), end, interval="1h")
-    if df_1h.empty:
-        return pd.DataFrame()
+    try:
+        # 1. Önce 1 saatlik veriyi çek (Eksik olan tanımlama burasıydı)
+        import yfinance as yf # Eğer en üstte tanımlıysa bunu silebilirsiniz
+        import pandas as pd
         
-    # 1 Saatlik mumları 4 Saatlik mum gruplarına dönüştür (Resample)
-    df_4h = df_1h.resample('4h').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-        'Volume': 'sum'
-    }).dropna()
-    
-    # HENÜZ KAPANMAMIŞ CANLI 4 SAATLİK MUMU ELE (Sadece Tamamlanmış Kapanışlar)
-    if len(df_4h) > 1:
-        df_4h = df_4h.iloc[:-1]
+        df_1h = yf.download(ticker, start=start, end=end, interval="1h", progress=False)
         
-    return df_4h
+        if df_1h.empty:
+            return pd.DataFrame()
 
+        # 2. 1 Saatlik mumları 4 Saatlik mum gruplarına dönüştür (Resample)
+        df_4h = df_1h.resample('4h').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+        
+        # 3. TÜRKİYE SAATİ İLE PİYASA KONTROLÜ
+        tz_tr = timezone(timedelta(hours=3))
+        suan = datetime.now(tz_tr)
+        
+        # Saat 18:15'ten önceyse piyasa açık kabul et (Kapanış marjı)
+        piyasa_acik = suan.hour < 18 or (suan.hour == 18 and suan.minute < 15)
+        
+        # SADECE PİYASA AÇIKKEN CANLI 4 SAATLİK MUMU ELE
+        if len(df_4h) > 1 and piyasa_acik:
+            df_4h = df_4h.iloc[:-1]
+            
+        return df_4h
+        
+    except Exception as e:
+        print(f"{ticker} 4H veri çekilirken hata: {e}")
+        return pd.DataFrame()
     # ... Mevcut dipten dönüş hesaplama kodlarınız ...
 def tilson_t3(close, period=5, vfactor=0.7):
     ema1 = close.ewm(span=period, adjust=False).mean()
@@ -453,7 +465,6 @@ def haber_duygu_analizi(ticker):
         return sonuclar
     except: return []
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
-    """4 Saatlik ve Günlük KAPANMIŞ mumlar üzerinden çift onaylı analiz yapar."""
     try:
         # 1. Günlük ve 4 Saatlik Kapanış Verilerini Çek
         df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d")
@@ -462,13 +473,19 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         if df_gunluk.empty: 
             return None
             
-        # Gün içi canlı mumun kırılımlarını önlemek için tamamlanmış mumları alıyoruz
-        if len(df_gunluk) > 1 and datetime.now().hour < 18: 
-            # Piyasa henüz kapanmadıysa günlüğün de son kapanmış gününü baz al
+        # TÜRKİYE SAATİ İLE PİYASA KONTROLÜ (Zaman dilimi kaymasını önler)
+        tz_tr = timezone(timedelta(hours=3))
+        suan = datetime.now(tz_tr)
+        piyasa_acik = suan.hour < 18 or (suan.hour == 18 and suan.minute < 15)
+
+        # Gün içi canlı mumun kırılımlarını önlemek için SADECE PİYASA AÇIKKEN bugünü at
+        if len(df_gunluk) > 1 and piyasa_acik: 
             df_g_kapanmis = df_gunluk.iloc[:-1].copy()
         else:
             df_g_kapanmis = df_gunluk.copy()
 
+        # ==========================================
+        # ... (Kodun geri kalanı tamamen aynı kalacak) ...
         # ==========================================
         # A) GÜNLÜK KAPANIS ANALİZİ (Tilson + Stoch)
         # ==========================================

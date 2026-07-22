@@ -764,12 +764,6 @@ def ensemble_prediction(df, sembol="Genel"):
         ])
 
 
-        ensemble = VotingRegressor(estimators=[
-            ('xgb', model_xgb),
-            ('rf', model_rf),
-            ('svr', model_svr)
-        ])
-
         ensemble.fit(X, y)
 
         # --- 3. ÇIKARIM VE KARAR ---
@@ -850,18 +844,8 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
             # Yeni veriyi ölçeklendirip (Scaler) bir sonraki gün için hazırlar
             yeni_ham_veri = np.array([[pred, son_veri[0, 1], yeni_log_ret, yeni_sma_10_dist, yeni_vol]])
             son_veri = scaler.transform(yeni_ham_veri)            
-            # İndikatörleri yeniden hesapla
-            yeni_log_ret = np.log(gecmis_kapanislar[-1] / gecmis_kapanislar[-2])
-            yeni_sma_10 = np.mean(gecmis_kapanislar[-10:])
-            yeni_sma_10_dist = (gecmis_kapanislar[-1] / yeni_sma_10) - 1
             
-            # Basit volatilite hesabı (Son 14 günün getirilerinin standart sapması)
-            getiriler = [np.log(gecmis_kapanislar[i]/gecmis_kapanislar[i-1]) for i in range(1, len(gecmis_kapanislar))]
-            yeni_vol = np.std(getiriler[-14:])
             
-            # Yeni satırı oluştur ve scale et (Hacim sabit varsayılıyor)
-            yeni_ham_veri = np.array([[pred, son_veri[0, 1], yeni_log_ret, yeni_sma_10_dist, yeni_vol]])
-            son_veri = scaler.transform(yeni_ham_veri)
             
         tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
         return tarihler, tahminler

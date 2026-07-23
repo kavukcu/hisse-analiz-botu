@@ -1174,7 +1174,7 @@ with tabs[1]:
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()

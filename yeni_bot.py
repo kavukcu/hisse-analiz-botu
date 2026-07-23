@@ -514,24 +514,18 @@ def haber_duygu_analizi(ticker):
     except: return []
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
     try:
-        # 1. Günlük ve 4 Saatlik Kapanış Verilerini Çek
+        # 1. ÖNCE SADECE GÜNLÜK VERİYİ ÇEK (Çok Hızlı İşlem)
         df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d")
-        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis)
         
         if df_gunluk.empty: 
             return None
             
-        # TÜRKİYE SAATİ İLE PİYASA KONTROLÜ (Zaman dilimi kaymasını önler)
-        
         df_g_kapanmis = df_gunluk.copy()
 
-        # ==========================================
-        # ... (Kodun geri kalanı tamamen aynı kalacak) ...
-        # ==========================================
-        # A) GÜNLÜK KAPANIS ANALİZİ (Tilson + Stoch)
-        # ==========================================
+        # Günlük bazda temel göstergeleri hemen hesapla
         df_g_kapanmis = stokastik_hesapla(df_g_kapanmis)
         df_g_kapanmis['Tilson_T3'] = tilson_t3(df_g_kapanmis['Close'])
+        temp_g = dipten_donus_analizi(df_g_kapanmis)
         
         g_fiyat = df_g_kapanmis['Close'].iloc[-1]
         g_tilson = df_g_kapanmis['Tilson_T3'].iloc[-1]
@@ -540,10 +534,38 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         
         g_boga = g_fiyat > g_tilson
         g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
+        g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
+        g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
+        g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
 
         # ==========================================
-        # B) 4 SAATLİK KAPANIS ANALİZİ (Tilson + Stoch)
+        # ⚡ AKILLI FİLTRE: ERKEN ÇIKIŞ (EARLY EXIT) 
         # ==========================================
+        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_spring
+        
+        if not umut_var_mi and analiz_tipi == "radar":
+            return {
+                "Varlık": sembol,
+                "Kapanış Fiyatı": f"{g_fiyat:.2f}",
+                "🎯 AL/SAT Kararı": "🐻 PAS GEÇİLDİ (Ölü Trend)",
+                "Günlük T3": "🐻 AYI",
+                "4S T3": "-",
+                "📊 Temel Skor": "-",
+                "💥 Hacim Analizi": "Normal",
+                "📈 Pozitif Uyuşmazlık": "-",
+                "🪤 Spring (Tuzak)": "-",
+                "🤖 AI Kararı": "Zaman Tasarrufu",
+                "🎯 AI Hedef": "-"
+            }
+
+        # ==========================================
+        # 2. SADECE UMUT VAAT EDEN HİSSELER İÇİN AĞIR İŞLEMLER
+        # ==========================================
+        # Eğer hissede yukarı yönlü bir sinyal (hacim, boğa trendi vs.) varsa 
+        # API'yi yoracak olan 4 Saatlik veri ve Temel Analiz bilgilerini ŞİMDİ çekiyoruz.
+        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis)
+        
+        # B) 4 SAATLİK KAPANIS ANALİZİ (Tilson + Stoch)
         if not df_4h.empty and len(df_4h) >= 20:
             df_4h = stokastik_hesapla(df_4h)
             df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
@@ -558,9 +580,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         else:
             h4_boga, h4_stoch_al = g_boga, g_stoch_al
 
-        # ==========================================
         # C) NİHAİ AL / SAT KARARI (Çift Onay Sistemi)
-        # ==========================================
         if g_boga and h4_boga:
             if g_stoch_al and h4_stoch_al:
                 al_sat_karari = "🚀 GÜÇLÜ AL (4S + Günlük Onaylı)"
@@ -575,14 +595,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         else:
             al_sat_karari = "🐻 GÜÇLÜ SAT / AYI (4S + Günlük Ayı)"
 
-        
         if analiz_tipi == "radar":
-            # 1. Günlük ve 4S Dipten Dönüş Analizlerini Hesapla
-            temp_g = dipten_donus_analizi(df_g_kapanmis)
             temp_4h = dipten_donus_analizi(df_4h) if not df_4h.empty else temp_g
-            
-            # Hacim Patlaması Kararı (4S ve Günlük Kıyaslaması)
-            g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
             h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1]
             
             if g_hacim and h4_hacim:
@@ -594,10 +608,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             else:
                 hacim_durum = "Normal"
 
-            # Pozitif Uyuşmazlık Kararı (4S ve Günlük Kıyaslaması)
-            g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
             h4_uyusmazlik = temp_4h['Pozitif_Uyusmazlik'].iloc[-1]
-            
             if g_uyusmazlik and h4_uyusmazlik:
                 uyusmazlik_durum = "✅✅ ÇİFT UYUŞMAZLIK (4S+Günlük)"
             elif h4_uyusmazlik:
@@ -607,20 +618,19 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             else:
                 uyusmazlik_durum = "-"
 
-            # Spring (Tuzak) Kararı
-            spring_durum = "✅ VAR" if (temp_g['Wyckoff_Spring'].iloc[-1] or temp_4h['Wyckoff_Spring'].iloc[-1]) else "-"
+            spring_durum = "✅ VAR" if (g_spring or temp_4h['Wyckoff_Spring'].iloc[-1]) else "-"
             
             try:
                 s_skor = sihirli_formul_skorla(sembol)['Puan']
             except:
                 s_skor = 0
 
-            
-            # AI Kararı (Hem 4S hem Günlük Trend Uygunsa veya Hacim/Uyuşmazlık Varsa Çalışır)
+            # AI Kararı 
             if (g_boga or h4_boga) and (g_stoch_al or h4_stoch_al or h4_hacim or g_uyusmazlik or h4_uyusmazlik):
                 ai_veri = ensemble_prediction(df_g_kapanmis, sembol)
             else:
                 ai_veri = {'signal': "ZAYIF (AI Pas Geçti)", 'rf_prediction': 0.0, 'confidence': 0.0}
+
             return {
                 "Varlık": sembol,
                 "Kapanış Fiyatı": f"{g_fiyat:.2f}",

@@ -94,7 +94,7 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
-tahminleri_degerlendir()
+
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
@@ -1339,6 +1339,7 @@ with tabs[9]:
 # --- SEKME 10: AI BAŞARI KARNESİ ---
 with tabs[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
+    tahminleri_degerlendir()
     st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")
     
     try:

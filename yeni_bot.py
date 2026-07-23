@@ -912,6 +912,7 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
 # ==========================================
 # 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
+@st.cache_data(ttl=86400, show_spinner=False)
 def tum_bist_hisselerini_getir():
     """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
     try:

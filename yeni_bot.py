@@ -909,14 +909,29 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
 # ==========================================
 # 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
+# ==========================================
+# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
+# ==========================================
+def tum_bist_hisselerini_getir():
+    """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
+    try:
+        url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseOzet"
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        # Sembollerin sonuna .IS ekleyerek Yahoo Finance (yfinance) formatına uygun hale getiriyoruz
+        return [f"{row['kod']}.IS" for row in data['value']]
+    except Exception as e:
+        import logging
+        logging.error(f"BIST Hisseleri çekilemedi: {e}")
+        # Bağlantı hatası olursa acil durum listesi (Fallback)
+        return ["XU100.IS", "THYAO.IS", "TUPRS.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS"]
+
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
 
 if piyasa_tipi == "Borsa İstanbul (BIST)":
     varsayilan_hisse = "XU100.IS"
-    tarama_listesi = ["TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", 
-"TTRAK.IS", "TUCLK.IS", "TUKAS.IS", "TUPRS.IS",
-"ENTRA.IS", "KOTON.IS", "LILAK.IS", "QNBFK.IS", "SKYLP.IS", "AHSGY.IS", "ASCEG.IS", "BEGYO.IS", "BORLS.IS", "GNDG.IS", "HOROZ.IS", "KBORU.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "SVGYO.IS"]
+    tarama_listesi = tum_bist_hisselerini_getir() # <-- 700 HISSEYI OTOMATIK ÇEKEN YENI FONKSIYON
 elif piyasa_tipi == "Amerikan Borsası (ABD)":
     varsayilan_hisse = "AAPL"
     tarama_listesi = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]
@@ -954,8 +969,6 @@ df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
 df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
 df['Tilson_T3'] = tilson_t3(df['Close'])
 
-df['MACD'] = df['EMA_12'] - df['EMA_26']
-df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
 delta = df['Close'].diff()
 gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
 loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
@@ -1120,9 +1133,16 @@ with tabs[1]:
                 # Veritabanı Kilitlenmesini Önlemek İçin Yazma İşlemini Toplu ve Senkron Yapıyoruz
                 for _, row in df_radar.iterrows():
                     sembol = row['Varlık']
-                    hedef = str(row.get('🎯 AI Hedef', '0')).replace(' TL', '')
-                    if hedef != '0.0' and hedef != '0':
-                        tahmin_kaydet(sembol, float(hedef))
+                    hedef_raw = str(row.get('🎯 AI Hedef', '0')).replace(' TL', '').strip()
+    
+    # Metni sayıya dönüştürmeyi güvenli bir şekilde dene
+                    try:
+                        hedef_float = float(hedef_raw)
+                        if hedef_float > 0:
+                            tahmin_kaydet(sembol, hedef_float)
+                    except ValueError:
+        # Metin ' - ' veya başka bir string ise hatayı yoksayıp devam eder
+                        continue
             
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")

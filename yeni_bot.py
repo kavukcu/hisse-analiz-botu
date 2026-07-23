@@ -987,42 +987,55 @@ bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
 
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
+# ---------------------------------------------------------
+# BURASI SİZİN KODUNUZDA 536. SATIR CİVARINDAN BAŞLIYOR
+# ---------------------------------------------------------
 with st.spinner('Kurumsal teknik analiz verileri hesaplanıyor...'):
     df = veri_yukle(hisse_kodu, baslangic, bitis)
     info = sirket_bilgisi_getir(hisse_kodu)
 
-if not df.empty:
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()   
-    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()    
-    df['MACD'] = df['EMA_12'] - df['EMA_26']
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
-    df['Tilson_T3'] = tilson_t3(df['Close'])
-    
-    df['MACD'] = df['EMA_12'] - df['EMA_26']
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    delta = df['Close'].diff()
-    gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-    loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
-    rs = gain / (loss + 1e-9)
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    min_val = df['RSI'].rolling(window=14).min()
-    max_val = df['RSI'].rolling(window=14).max()
-    df['Stoch_RSI'] = (df['RSI'] - min_val) / (max_val - min_val)
-    df['Stoch_RSI_K'] = df['Stoch_RSI'].rolling(window=3).mean() * 100
-    df['Stoch_RSI_D'] = df['Stoch_RSI_K'].rolling(window=3).mean()
+# YENİ EKLENECEK HAYAT KURTARICI BLOK:
+if df.empty:
+    st.error("⚠️ Yahoo Finance'tan veri çekilemedi (API yoğunluğu veya ağ hatası). Lütfen 1-2 dakika bekleyip sayfayı yenileyin veya farklı bir hisse kodu girin.")
+    st.stop() # Veri yoksa kodun aşağıya inip hata vermesini engeller!
 
-    df['True_Range'] = np.max(pd.concat([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift()), np.abs(df['Low'] - df['Close'].shift())], axis=1), axis=1)
-    df['ATR_14'] = df['True_Range'].rolling(14).mean()
-    df['VWAP_20'] = (df['Close'] * df['Volume']).rolling(20).sum() / df['Volume'].rolling(20).sum()
+# "if not df.empty:" SİLİNDİ, ARTIK GİRİNTİYE (BOŞLUĞA) GEREK YOK
+# HİZALAMAYI EN SOLA ÇEKİYORUZ:
+df['SMA_20'] = df['Close'].rolling(window=20).mean()
+df['SMA_50'] = df['Close'].rolling(window=50).mean()
+df['SMA_200'] = df['Close'].rolling(window=200).mean()
+df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()   
+df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()    
+df['MACD'] = df['EMA_12'] - df['EMA_26']
+df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+df['Tilson_T3'] = tilson_t3(df['Close'])
 
-    df = smc_hesapla(df)
-    df = stokastik_hesapla(df)
+df['MACD'] = df['EMA_12'] - df['EMA_26']
+df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+delta = df['Close'].diff()
+gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
+rs = gain / (loss + 1e-9)
+df['RSI'] = 100 - (100 / (1 + rs))
 
+min_val = df['RSI'].rolling(window=14).min()
+max_val = df['RSI'].rolling(window=14).max()
+df['Stoch_RSI'] = (df['RSI'] - min_val) / (max_val - min_val)
+df['Stoch_RSI_K'] = df['Stoch_RSI'].rolling(window=3).mean() * 100
+df['Stoch_RSI_D'] = df['Stoch_RSI_K'].rolling(window=3).mean()
+
+df['True_Range'] = np.max(pd.concat([df['High'] - df['Low'], np.abs(df['High'] - df['Close'].shift()), np.abs(df['Low'] - df['Close'].shift())], axis=1), axis=1)
+df['ATR_14'] = df['True_Range'].rolling(14).mean()
+df['VWAP_20'] = (df['Close'] * df['Volume']).rolling(20).sum() / df['Volume'].rolling(20).sum()
+
+df = smc_hesapla(df)
+df = stokastik_hesapla(df)
+
+# ==========================================
+# 4. ARAYÜZ (TABS) SEKMELERİ
+# ==========================================
+# Buradan sonrası aynı kalıyor...
 # ==========================================
 # 4. ARAYÜZ (TABS) SEKMELERİ
 # ==========================================

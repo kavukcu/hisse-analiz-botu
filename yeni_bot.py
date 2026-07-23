@@ -1093,15 +1093,15 @@ df = stokastik_hesapla(df)
 tabs = st.tabs([
     "📈 SMC & Quant Grafiği", 
     "🔍 Akıllı Radar", 
-    "🤖 AI Ensemble Karar",
-    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi",
     "💼 Cüzdan & Stop", 
     "🏢 Temel Analiz", 
     "📰 Haber", 
     "📊 Isı Haritası", 
     "⚙️ Backtest", 
     "🎲 Risk Simülasyonu", 
-    "🧬 İstatistik"
+    "🧬 İstatistik",
+    "🤖 AI Ensemble Karar",
+    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
     
     
     

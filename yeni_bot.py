@@ -98,27 +98,32 @@ tahminleri_degerlendir()
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
 # ==========================================
+# ==========================================
+# 1. GÜNLÜK VERİ ÇEKME FONKSİYONU
+# ==========================================
 @st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d"):
-    import time, logging
     import yfinance as yf
     import pandas as pd
-    from datetime import timedelta
-    
-    # 1. BIST ve GMT uyumsuzluğunu aşmak için API'yi kandırıyoruz.
-    # Bitiş tarihini API'ye 3 gün fazladan veriyoruz ki veriyi asla erken kesmesin.
-    bitis_dt = pd.to_datetime(end) + timedelta(days=3)
-    bitis_str = bitis_dt.strftime('%Y-%m-%d')
+    import time
+    import logging
     
     for _ in range(3):
         try:
+            # 1. 'end' ve 'session' PARAMETRELERİNİ KALDIRDIK!
+            # Böylece Yahoo Finance eski cache'den değil, canlı olarak o anki en son veriye kadar her şeyi getirmek ZORUNDA kalır.
             df = yf.download(
-                ticker, start=start, end=bitis_str, interval=interval, session=oturum,
-                progress=False, auto_adjust=True, threads=True
+                ticker, 
+                start=start, 
+                interval=interval, 
+                progress=False, 
+                auto_adjust=True, 
+                threads=True
             )
             
             if df.empty:
-                return pd.DataFrame()
+                time.sleep(1)
+                continue
                 
             # Yfinance MultiIndex hatası koruması
             if isinstance(df.columns, pd.MultiIndex):
@@ -130,16 +135,23 @@ def veri_yukle(ticker, start, end, interval="1d"):
                 
             df = df.dropna(subset=['Close'])
             
-            # 2. Saat dilimi farklarını (Timezone) sil ve asıl istenen tarihe kadar lokal olarak filtrele
+            # 2. Saat dilimlerini sıfırla ve Pandas ile kendi içimizde filtrele
             df.index = df.index.tz_localize(None)
-            asil_bitis = pd.to_datetime(end) + timedelta(days=1) # Son kapanışı tam kapsaması için
-            df = df[df.index < asil_bitis]
             
-            return df
+            # Kullanıcının Streamlit'ten seçtiği bitiş tarihini baz alıyoruz
+            bitis_tarihi = pd.to_datetime(end).date()
+            df = df[df.index.date <= bitis_tarihi]
+            
+            if not df.empty:
+                return df
         except Exception as e:
-            logging.warning(f"Veri indirilemedi: {e}")
+            logging.warning(f"{ticker} Günlük veri indirilemedi: {e}")
             time.sleep(1)
     return pd.DataFrame()
+
+# ==========================================
+# 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
+# ==========================================
 def veri_4saatlik_getir(ticker, start, end):
     import yfinance as yf
     import pandas as pd
@@ -148,35 +160,25 @@ def veri_4saatlik_getir(ticker, start, end):
     import logging
 
     try:
-        # 1. 730 GÜN KONTROLÜ: Yahoo 1h veriyi maksimum 730 gün geriye dönük verir.
+        # Yahoo 1h veriyi en fazla 730 gün geriye dönük verir, sınırı aşıyorsa dinamik olarak kırp.
         start_dt = pd.to_datetime(start)
-        fark = datetime.now() - start_dt
-        if fark.days > 729:
-            # Eğer tarih 730 günden eskiyse, başlangıcı zorla 729 gün öncesine çekiyoruz
+        if (datetime.now() - start_dt).days > 729:
             start_dt = datetime.now() - timedelta(days=729)
             start = start_dt.strftime('%Y-%m-%d')
-            logging.info(f"{ticker} için 1h/4h verisi 730 gün ile sınırlandırıldı.")
 
-        bitis_dt = pd.to_datetime(end) + timedelta(days=3)
-        bitis_str = bitis_dt.strftime('%Y-%m-%d')
-        
-        # 2. RATE LIMIT VE YENİDEN DENEME (RETRY) MEKANİZMASI
-        max_deneme = 3
-        for deneme in range(max_deneme):
+        for deneme in range(3):
             try:
-                # Yahoo'nun IP engellemesini aşmak için her hisse arasında bilinçli gecikme (0.5 - 1 saniye)
-                time.sleep(0.5) 
+                time.sleep(0.5) # Anti-Ban beklemesi
                 
+                # Burada da 'end' parametresini sildik! En güncel saniyeye kadar çekecek.
                 df_1h = yf.download(
                     ticker, 
                     start=start, 
-                    end=bitis_str, 
                     interval="1h", 
                     progress=False
                 )
                 
                 if df_1h.empty:
-                    # Veri boş döndüyse anlık bir kesinti olabilir, biraz bekle ve tekrar dene
                     time.sleep(1)
                     continue
 
@@ -184,9 +186,12 @@ def veri_4saatlik_getir(ticker, start, end):
                     df_1h.columns = df_1h.columns.droplevel(1)
 
                 df_1h.index = df_1h.index.tz_localize(None)
-                asil_bitis = pd.to_datetime(end) + timedelta(days=1)
-                df_1h = df_1h[df_1h.index < asil_bitis]
+                bitis_tarihi = pd.to_datetime(end).date()
+                
+                # İndirilen ham veriyi, kullanıcının seçtiği güne kadar kırp
+                df_1h = df_1h[df_1h.index.date <= bitis_tarihi]
 
+                # 1 Saatliği 4 Saatliğe çevir
                 df_4h = df_1h.resample('4h').agg({
                     'Open': 'first',
                     'High': 'max',
@@ -198,11 +203,9 @@ def veri_4saatlik_getir(ticker, start, end):
                 return df_4h
                 
             except Exception as e:
-                # Hata alınırsa (Connection Error vs.), 2 saniye dinlen ve tekrar dene
-                logging.debug(f"{ticker} indirme denemesi {deneme+1} başarısız: {e}")
+                logging.debug(f"{ticker} 4H deneme {deneme+1} başarısız: {e}")
                 time.sleep(2)
                 
-        # 3 denemede de başarısız olursa boş dön
         return pd.DataFrame()
         
     except Exception as e:

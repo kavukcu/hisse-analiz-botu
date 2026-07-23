@@ -1093,15 +1093,16 @@ df = stokastik_hesapla(df)
 tabs = st.tabs([
     "📈 SMC & Quant Grafiği", 
     "🔍 Akıllı Radar", 
+    "🤖 AI Ensemble Karar",
+    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi",
     "💼 Cüzdan & Stop", 
     "🏢 Temel Analiz", 
     "📰 Haber", 
     "📊 Isı Haritası", 
     "⚙️ Backtest", 
     "🎲 Risk Simülasyonu", 
-    "🧬 İstatistik",
-    "🤖 AI Ensemble Karar",
-    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
+    "🧬 İstatistik"
+    
     
     
 ])
@@ -1314,7 +1315,7 @@ with tabs[2]:
     st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
 
 # --- SEKME 3, 4, 5, 6, 7, 8: DİĞER MODÜLLER ---
-with tabs[10]:
+with tabs[3]:
     st.subheader("🏢 Temel Analiz")
     c1, c2, c3 = st.columns(3)
     c1.metric("F/K Oranı", info.get('trailingPE', '-'))
@@ -1347,7 +1348,7 @@ with tabs[8]:
 
 # --- SEKME 9: YAPAY ZEKA ---
 # --- SEKME 9: YAPAY ZEKA ---
-with tabs[2]:
+with tabs[9]:
     st.subheader("🧠 v100 AI Ensemble & Kurumsal Karar Motoru")
     
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
@@ -1385,7 +1386,7 @@ with tabs[2]:
 
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
-with tabs[3]:
+with tabs[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
     tahminleri_degerlendir()
     st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")

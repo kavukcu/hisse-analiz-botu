@@ -101,8 +101,13 @@ tahminleri_degerlendir()
 @st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d"):
     import time, logging
+    import yfinance as yf
+    import pandas as pd
+    from datetime import timedelta
     
-    bitis_dt = pd.to_datetime(end) + timedelta(days=1)
+    # 1. BIST ve GMT uyumsuzluğunu aşmak için API'yi kandırıyoruz.
+    # Bitiş tarihini API'ye 3 gün fazladan veriyoruz ki veriyi asla erken kesmesin.
+    bitis_dt = pd.to_datetime(end) + timedelta(days=3)
     bitis_str = bitis_dt.strftime('%Y-%m-%d')
     
     for _ in range(3):
@@ -111,8 +116,11 @@ def veri_yukle(ticker, start, end, interval="1d"):
                 ticker, start=start, end=bitis_str, interval=interval, session=oturum,
                 progress=False, auto_adjust=True, threads=True
             )
+            
             if df.empty:
                 return pd.DataFrame()
+                
+            # Yfinance MultiIndex hatası koruması
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
                 
@@ -120,40 +128,86 @@ def veri_yukle(ticker, start, end, interval="1d"):
             if any(c not in df.columns for c in gerekli):
                 raise ValueError("Eksik veya boş veri")
                 
-            return df.dropna()
+            df = df.dropna(subset=['Close'])
+            
+            # 2. Saat dilimi farklarını (Timezone) sil ve asıl istenen tarihe kadar lokal olarak filtrele
+            df.index = df.index.tz_localize(None)
+            asil_bitis = pd.to_datetime(end) + timedelta(days=1) # Son kapanışı tam kapsaması için
+            df = df[df.index < asil_bitis]
+            
+            return df
         except Exception as e:
             logging.warning(f"Veri indirilemedi: {e}")
             time.sleep(1)
     return pd.DataFrame()
 def veri_4saatlik_getir(ticker, start, end):
+    import yfinance as yf
+    import pandas as pd
+    import time
+    from datetime import datetime, timedelta
+    import logging
+
     try:
-        import yfinance as yf
-        import pandas as pd
-        from datetime import timedelta # timedelta eklendi
-        
-        # 1. DÜZELTME: Bitiş tarihine 1 gün ekleyerek bugünü dahil ediyoruz
-        bitis_dt = pd.to_datetime(end) + timedelta(days=1)
+        # 1. 730 GÜN KONTROLÜ: Yahoo 1h veriyi maksimum 730 gün geriye dönük verir.
+        start_dt = pd.to_datetime(start)
+        fark = datetime.now() - start_dt
+        if fark.days > 729:
+            # Eğer tarih 730 günden eskiyse, başlangıcı zorla 729 gün öncesine çekiyoruz
+            start_dt = datetime.now() - timedelta(days=729)
+            start = start_dt.strftime('%Y-%m-%d')
+            logging.info(f"{ticker} için 1h/4h verisi 730 gün ile sınırlandırıldı.")
+
+        bitis_dt = pd.to_datetime(end) + timedelta(days=3)
         bitis_str = bitis_dt.strftime('%Y-%m-%d')
         
-        df_1h = yf.download(ticker, start=start, end=bitis_str, interval="1h", progress=False)
-        
-        if df_1h.empty:
-            return pd.DataFrame()
+        # 2. RATE LIMIT VE YENİDEN DENEME (RETRY) MEKANİZMASI
+        max_deneme = 3
+        for deneme in range(max_deneme):
+            try:
+                # Yahoo'nun IP engellemesini aşmak için her hisse arasında bilinçli gecikme (0.5 - 1 saniye)
+                time.sleep(0.5) 
+                
+                df_1h = yf.download(
+                    ticker, 
+                    start=start, 
+                    end=bitis_str, 
+                    interval="1h", 
+                    progress=False
+                )
+                
+                if df_1h.empty:
+                    # Veri boş döndüyse anlık bir kesinti olabilir, biraz bekle ve tekrar dene
+                    time.sleep(1)
+                    continue
 
-        df_4h = df_1h.resample('4h').agg({
-            'Open': 'first',
-            'High': 'max',
-            'Low': 'min',
-            'Close': 'last',
-            'Volume': 'sum'
-        }).dropna()
-           
-        return df_4h
+                if isinstance(df_1h.columns, pd.MultiIndex):
+                    df_1h.columns = df_1h.columns.droplevel(1)
+
+                df_1h.index = df_1h.index.tz_localize(None)
+                asil_bitis = pd.to_datetime(end) + timedelta(days=1)
+                df_1h = df_1h[df_1h.index < asil_bitis]
+
+                df_4h = df_1h.resample('4h').agg({
+                    'Open': 'first',
+                    'High': 'max',
+                    'Low': 'min',
+                    'Close': 'last',
+                    'Volume': 'sum'
+                }).dropna()
+                   
+                return df_4h
+                
+            except Exception as e:
+                # Hata alınırsa (Connection Error vs.), 2 saniye dinlen ve tekrar dene
+                logging.debug(f"{ticker} indirme denemesi {deneme+1} başarısız: {e}")
+                time.sleep(2)
+                
+        # 3 denemede de başarısız olursa boş dön
+        return pd.DataFrame()
         
     except Exception as e:
-        # Hataları daha temiz görmek için print yerine pass veya logging kullanın
+        logging.error(f"{ticker} 4H Genel Hata: {e}")
         return pd.DataFrame()
-    # ... Mevcut dipten dönüş hesaplama kodlarınız ...
 def tilson_t3(close, period=5, vfactor=0.7):
     ema1 = close.ewm(span=period, adjust=False).mean()
     ema2 = ema1.ewm(span=period, adjust=False).mean()

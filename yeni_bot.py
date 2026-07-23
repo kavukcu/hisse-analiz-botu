@@ -127,16 +127,19 @@ def veri_yukle(ticker, start, end, interval="1d"):
     return pd.DataFrame()
 def veri_4saatlik_getir(ticker, start, end):
     try:
-        # 1. Önce 1 saatlik veriyi çek (Eksik olan tanımlama burasıydı)
-        import yfinance as yf # Eğer en üstte tanımlıysa bunu silebilirsiniz
+        import yfinance as yf
         import pandas as pd
+        from datetime import timedelta # timedelta eklendi
         
-        df_1h = yf.download(ticker, start=start, end=end, interval="1h", progress=False)
+        # 1. DÜZELTME: Bitiş tarihine 1 gün ekleyerek bugünü dahil ediyoruz
+        bitis_dt = pd.to_datetime(end) + timedelta(days=1)
+        bitis_str = bitis_dt.strftime('%Y-%m-%d')
+        
+        df_1h = yf.download(ticker, start=start, end=bitis_str, interval="1h", progress=False)
         
         if df_1h.empty:
             return pd.DataFrame()
 
-        # 2. 1 Saatlik mumları 4 Saatlik mum gruplarına dönüştür (Resample)
         df_4h = df_1h.resample('4h').agg({
             'Open': 'first',
             'High': 'max',
@@ -144,22 +147,11 @@ def veri_4saatlik_getir(ticker, start, end):
             'Close': 'last',
             'Volume': 'sum'
         }).dropna()
-        
-        # 3. TÜRKİYE SAATİ İLE PİYASA KONTROLÜ
-        tz_tr = timezone(timedelta(hours=3))
-        suan = datetime.now(tz_tr)
-        
-        # Saat 18:15'ten önceyse piyasa açık kabul et (Kapanış marjı)
-        piyasa_acik = suan.hour < 18 or (suan.hour == 18 and suan.minute < 15)
-        
-        # SADECE PİYASA AÇIKKEN CANLI 4 SAATLİK MUMU ELE
-        if len(df_4h) > 1 and piyasa_acik:
-            df_4h = df_4h.iloc[:-1]
-            
+           
         return df_4h
         
     except Exception as e:
-        print(f"{ticker} 4H veri çekilirken hata: {e}")
+        # Hataları daha temiz görmek için print yerine pass veya logging kullanın
         return pd.DataFrame()
     # ... Mevcut dipten dönüş hesaplama kodlarınız ...
 def tilson_t3(close, period=5, vfactor=0.7):
@@ -473,15 +465,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return None
             
         # TÜRKİYE SAATİ İLE PİYASA KONTROLÜ (Zaman dilimi kaymasını önler)
-        tz_tr = timezone(timedelta(hours=3))
-        suan = datetime.now(tz_tr)
-        piyasa_acik = suan.hour < 18 or (suan.hour == 18 and suan.minute < 15)
-
-        # Gün içi canlı mumun kırılımlarını önlemek için SADECE PİYASA AÇIKKEN bugünü at
-        if len(df_gunluk) > 1 and piyasa_acik: 
-            df_g_kapanmis = df_gunluk.iloc[:-1].copy()
-        else:
-            df_g_kapanmis = df_gunluk.copy()
+        
+        df_g_kapanmis = df_gunluk.copy()
 
         # ==========================================
         # ... (Kodun geri kalanı tamamen aynı kalacak) ...
@@ -658,7 +643,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     study.optimize(objective, n_trials=5) # 10 farklı kombinasyon dener
     
     return study.best_params
-@st.cache_data(ttl=7200, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
     try:
         t_df = df.copy()
@@ -1109,7 +1094,7 @@ with tabs[1]:
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()

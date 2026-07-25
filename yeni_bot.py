@@ -24,6 +24,8 @@ from xgboost import XGBRegressor
 import sqlite3
 import optuna
 from sklearn.metrics import mean_squared_error
+from tvDatafeed import TvDatafeed, Interval
+import isyatirimhisse
 # ==========================================
 # SAYFA AYARLARI VE OTURUM
 # ==========================================
@@ -102,16 +104,80 @@ veritabani_baslat()
 # 1. GÜNLÜK VERİ ÇEKME FONKSİYONU
 # ==========================================
 @st.cache_data(ttl=300, show_spinner=False)
-def veri_yukle(ticker, start, end, interval="1d"):
+def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf
     import pandas as pd
     import time
     import logging
     
+    # 1. İŞ YATIRIM (SADECE BIST VE GÜNLÜK VERİ İÇİN)
+    if kaynak == "İş Yatırım (Sadece BIST)" and ".IS" in ticker:
+        try:
+            sembol = ticker.replace(".IS", "")
+            start_str = pd.to_datetime(start).strftime('%d-%m-%Y')
+            
+            # End tarihi verilmezse bugünü al
+            if isinstance(end, str) and end == "":
+                end_str = pd.Timestamp.today().strftime('%d-%m-%Y')
+            else:
+                end_str = pd.to_datetime(end).strftime('%d-%m-%Y')
+                
+            df = isyatirimhisse.fetch_data(
+                symbol=sembol, 
+                start_date=start_str, 
+                end_date=end_str
+            )
+            
+            if df is not None and not df.empty:
+                # Sütun isimlerini God Mode Terminal standartlarına uyarla
+                df = df.rename(columns={
+                    'TARIH': 'Date', 'ACILIS_FIYATI': 'Open', 
+                    'EN_YUKSEK_FIYAT': 'High', 'EN_DUSUK_FIYAT': 'Low', 
+                    'KAPANIS_FIYATI': 'Close', 'ISLEM_ADEDI': 'Volume'
+                })
+                df['Date'] = pd.to_datetime(df['Date'])
+                df.set_index('Date', inplace=True)
+                return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+        except Exception as e:
+            logging.warning(f"İş Yatırım veri çekme hatası ({ticker}): {e}. Yahoo'ya geçiliyor.")
+
+    # 2. TRADINGVIEW VERİSİ
+    elif kaynak == "TradingView (tvdatafeed)":
+        try:
+            tv = TvDatafeed() # Anonim giriş (şifresiz)
+            
+            # Hangi borsadan çekeceğimizi otomatik belirle
+            if ".IS" in ticker:
+                exchange = 'BIST'
+                tv_symbol = ticker.replace(".IS", "")
+            elif "-" in ticker:
+                exchange = 'CRYPTO'
+                tv_symbol = ticker.replace("-", "")
+            else:
+                exchange = 'NASDAQ' # Default ABD
+                tv_symbol = ticker
+                
+            df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
+            
+            if df is not None and not df.empty:
+                df = df.rename(columns={
+                    'open': 'Open', 'high': 'High', 'low': 'Low', 
+                    'close': 'Close', 'volume': 'Volume'
+                })
+                df.index = df.index.tz_localize(None)
+                
+                # Tarih filtrelemesi
+                bitis_tarihi = pd.to_datetime(end).date()
+                baslangic_tarihi = pd.to_datetime(start).date()
+                df = df[(df.index.date <= bitis_tarihi) & (df.index.date >= baslangic_tarihi)]
+                
+                return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+        except Exception as e:
+            logging.warning(f"TradingView veri çekme hatası ({ticker}): {e}. Yahoo'ya geçiliyor.")
+
+    # 3. YAHOO FINANCE (Varsayılan ve Fallback/Yedek)
     for _ in range(3):
         try:
-            # 1. 'end' ve 'session' PARAMETRELERİNİ KALDIRDIK!
-            # Böylece Yahoo Finance eski cache'den değil, canlı olarak o anki en son veriye kadar her şeyi getirmek ZORUNDA kalır.
             df = yf.download(
                 ticker, 
                 start=start, 
@@ -125,7 +191,6 @@ def veri_yukle(ticker, start, end, interval="1d"):
                 time.sleep(1)
                 continue
                 
-            # Yfinance MultiIndex hatası koruması
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
                 
@@ -134,33 +199,59 @@ def veri_yukle(ticker, start, end, interval="1d"):
                 raise ValueError("Eksik veya boş veri")
                 
             df = df.dropna(subset=['Close'])
-            
-            # 2. Saat dilimlerini sıfırla ve Pandas ile kendi içimizde filtrele
             df.index = df.index.tz_localize(None)
             
-            # Kullanıcının Streamlit'ten seçtiği bitiş tarihini baz alıyoruz
-            bitis_tarihi = pd.to_datetime(end).date()
-            df = df[df.index.date <= bitis_tarihi]
+            if end:
+                bitis_tarihi = pd.to_datetime(end).date()
+                df = df[df.index.date <= bitis_tarihi]
             
             if not df.empty:
                 return df
         except Exception as e:
-            logging.warning(f"{ticker} Günlük veri indirilemedi: {e}")
+            logging.warning(f"{ticker} YFinance hatası: {e}")
             time.sleep(1)
+            
     return pd.DataFrame()
-
 # ==========================================
 # 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
 # ==========================================
-def veri_4saatlik_getir(ticker, start, end):
+def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf
     import pandas as pd
     import time
     from datetime import datetime, timedelta
     import logging
 
+    # 1. TRADINGVIEW (DOĞRUDAN 4 SAATLİK VERİ - ÇOK DAHA HIZLI)
+    if kaynak == "TradingView (tvdatafeed)":
+        try:
+            from tvDatafeed import TvDatafeed, Interval
+            tv = TvDatafeed()
+            
+            if ".IS" in ticker:
+                exchange = 'BIST'
+                tv_symbol = ticker.replace(".IS", "")
+            elif "-" in ticker:
+                exchange = 'CRYPTO'
+                tv_symbol = ticker.replace("-", "")
+            else:
+                exchange = 'NASDAQ'
+                tv_symbol = ticker
+                
+            # tvdatafeed'in doğrudan 4 saatlik veri çekme desteği var!
+            df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=1000)
+            
+            if df_4h is not None and not df_4h.empty:
+                df_4h = df_4h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                df_4h.index = df_4h.index.tz_localize(None)
+                bitis_tarihi = pd.to_datetime(end).date()
+                df_4h = df_4h[df_4h.index.date <= bitis_tarihi]
+                return df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+        except Exception as e:
+            logging.debug(f"{ticker} TV 4H hatası: {e}. YFinance'a geçiliyor.")
+
+    # 2. YAHOO FINANCE (Varsayılan veya İş Yatırım Seçildiğinde Devreye Giren Yedek)
     try:
-        # Yahoo 1h veriyi en fazla 730 gün geriye dönük verir, sınırı aşıyorsa dinamik olarak kırp.
         start_dt = pd.to_datetime(start)
         if (datetime.now() - start_dt).days > 729:
             start_dt = datetime.now() - timedelta(days=729)
@@ -168,9 +259,8 @@ def veri_4saatlik_getir(ticker, start, end):
 
         for deneme in range(3):
             try:
-                time.sleep(0.1) # Anti-Ban beklemesi
+                time.sleep(0.1) 
                 
-                # Burada da 'end' parametresini sildik! En güncel saniyeye kadar çekecek.
                 df_1h = yf.download(
                     ticker, 
                     start=start, 
@@ -187,8 +277,6 @@ def veri_4saatlik_getir(ticker, start, end):
 
                 df_1h.index = df_1h.index.tz_localize(None)
                 bitis_tarihi = pd.to_datetime(end).date()
-                
-                # İndirilen ham veriyi, kullanıcının seçtiği güne kadar kırp
                 df_1h = df_1h[df_1h.index.date <= bitis_tarihi]
 
                 # 1 Saatliği 4 Saatliğe çevir
@@ -563,7 +651,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         # ==========================================
         # Eğer hissede yukarı yönlü bir sinyal (hacim, boğa trendi vs.) varsa 
         # API'yi yoracak olan 4 Saatlik veri ve Temel Analiz bilgilerini ŞİMDİ çekiyoruz.
-        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis)
+        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
         
         # B) 4 SAATLİK KAPANIS ANALİZİ (Tilson + Stoch)
         if not df_4h.empty and len(df_4h) >= 20:
@@ -925,103 +1013,15 @@ def tum_bist_hisselerini_getir():
         import logging
         logging.error(f"BIST Hisseleri çekilemedi: {e}")
         # Bağlantı hatası olursa acil durum listesi (Fallback)
-        return ["XU100.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
-"AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", 
-"AKSEN.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", 
-"ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ALVES.IS", "ANELE.IS", "ANGEN.IS", 
-"ANHYT.IS", "ANSGR.IS", "ARADA.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", 
-"ARTMS.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATACP.IS", "ATAGY.IS", 
-"ATATP.IS", "ATEKS.IS", "ATLAS.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVTUR.IS", "AYCES.IS", 
-"AYDEM.IS", "AYEN.IS", "AYGAZ.IS", "AZTEK.IS", "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", 
-"BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", 
-"BIMAS.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", 
-"BNTAS.IS", "BOBET.IS", "BORSK.IS", "BOSSA.IS", "BOYP.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", 
-"BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", 
-"BURCE.IS", "BURVA.IS", "BVSAN.IS", "BYDNR.IS", "CANTE.IS", "CASA.IS", "CATES.IS", "CCOLA.IS", 
-"CELHA.IS", "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS", 
-"CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGHL.IS", 
-"DAGI.IS", "DAPGM.IS", "DARDL.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", 
-"DIRIT.IS", "DITAS.IS", "DMRGD.IS", "DOAS.IS", "DOCO.IS", "DOFER.IS", "DOGUB.IS", "DOHOL.IS", 
-"DOKTA.IS", "DURDO.IS", "DYOBY.IS", "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECZYT.IS", "EDATA.IS", 
-"EFFE.IS", "EGCEY.IS", "EGCYO.IS", "EGEEN.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKGYO.IS", 
-"EKIZ.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "ENERY.IS", "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", 
-"ENTGO.IS", "EPLAS.IS", "ERBOS.IS", "EREGL.IS", "ERSU.IS", "ESCAR.IS", "ESCOM.IS", "ESEN.IS", 
-"ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUPWR.IS", "EUREN.IS", "EUYO.IS", "EYGYO.IS", "FADE.IS", 
-"FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS", "FORMT.IS", "FORTE.IS", "FRIGO.IS", "FROTO.IS", 
-"FZLGY.IS", "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS", "GENIL.IS", "GENTS.IS", "GEREL.IS", 
-"GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLCVY.IS", "GLRYH.IS", "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", 
-"GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS", "GRTRK.IS", "GSDDE.IS", "GSDHO.IS", 
-"GSRAY.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", "HALKB.IS", "HATEK.IS", "HATSN.IS", "HDFGS.IS", 
-"HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HRKET.IS", "HTTBT.IS", "HUBVC.IS", "HUNER.IS", 
-"HURGZ.IS", "ICBCT.IS", "IDEAS.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS", "IHEVA.IS", "IHGZT.IS", 
-"IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS", "INGRM.IS", "INTEM.IS", 
-"INVEO.IS", "INVES.IS", "IPEKE.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS", "ISGSY.IS", 
-"ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "ITTFH.IS", "IYISM.IS", 
-"IZENR.IS", "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS", "KAPLM.IS", "KAREL.IS", "KARSN.IS", 
-"KARTN.IS", "KARYE.IS", "KATMR.IS", "KAYSE.IS", "KCAER.IS", "KCHOL.IS", "KENT.IS", "KERVN.IS", 
-"KERVT.IS", "KFEIN.IS", "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS", "KLNMA.IS", 
-"KLRHO.IS", "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS", 
-"KORDS.IS", "KOZAA.IS", "KOZAL.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", 
-"KRPLS.IS", "KRSTL.IS", "KRTEK.IS", "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", 
-"KUVVA.IS", "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS", "LINK.IS", "LKMNH.IS", 
-"LMOUR.IS", "LOGO.IS", "LRSHO.IS", "LUKSK.IS", "MAALT.IS", "MACKO.IS", "MACRO.IS", "MAGEN.IS", 
-"MAKIM.IS", "MAKTK.IS", "MANAS.IS", "MARBL.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", 
-"MEGAP.IS", "MEKAG.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "METUR.IS", 
-"MGROS.IS", "MHRGY.IS", "MIATK.IS", "MIPAZ.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", 
-"MOGAN.IS", "MPARK.IS", "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", 
-"NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "OBASE.IS", 
-"OBAMS.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", 
-"OSTIM.IS", "OTKAR.IS", "OUAKY.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", 
-"OZKGY.IS", "OZRDN.IS", "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", 
-"PATEK.IS", "PCILT.IS", "PEGYO.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", 
-"PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", 
-"POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", 
-"QNBFL.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "REEDR.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", 
-"RUBNS.IS", "RYGYO.IS", "RYSAS.IS", "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", 
-"SARKY.IS", "SASA.IS", "SAYAS.IS", "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", 
-"SELGD.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SMART.IS", 
-"SMRTG.IS", "SNGYO.IS", "SNICA.IS", "SNKRN.IS", "SNPAM.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", 
-"SRVGY.IS", "SUMAS.IS", "SUNTK.IS", "SURGY.IS", "SUWEN.IS", "TABGD.IS", "TARKM.IS", "TATEN.IS", 
-"TATGD.IS", "TAVHL.IS", "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS", "TETMT.IS", 
-"TEZOL.IS", "TGSAS.IS", "THYAO.IS", "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS", 
-"TOASO.IS", "TRCAS.IS", "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", 
-"TTRAK.IS", "TUCLK.IS", "TUKAS.IS", "TUPRS.IS", "TUREX.IS", "TURGG.IS", "TURSG.IS", "UFUK.IS", 
-"ULAS.IS", "ULUFA.IS", "ULUSE.IS", "ULUUN.IS", "UMPAS.IS", "UNLU.IS", "USAK.IS", "UZERB.IS", 
-"VAKBN.IS", "VAKFN.IS", "VAKKO.IS", "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", 
-"VKGYO.IS", "VKING.IS", "VRGYO.IS", "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", 
-"YESIL.IS", "YGGYO.IS", "YGYO.IS", "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", 
-"ZEDUR.IS", "ZOREN.IS", "A1CAP.IS",
-"ADGYO.IS",
-"AGROT.IS",
-"AGYO.IS",
-"ATAKP.IS",
-"AVPGY.IS",
-"BIGTK.IS",
-"BULGS.IS",
-"CGCAM.IS",
-"DGGYO.IS",
-"DGNMO.IS",
-"DNISI.IS",
-"DOFRB.IS",
-"DSTKF.IS",
-"DUNYH.IS",
-"DURKN.IS",
-"ECOGR.IS",
-"EDIP.IS",
-"EFOR.IS",
-"EGEGY.IS",
-"EKDMR.IS",
-"EKIM.IS",
-"EKOS.IS",
-"EMPAE.IS",
-"ENTRA.IS",
-"KOTON.IS",
-"LILAK.IS",
-"QNBFK.IS",
-"SKYLP.IS",
-"SVGYO.IS", "AHSGY.IS", "ASCEG.IS", "BEGYO.IS", "BORLS.IS", "GNDG.IS", "HOROZ.IS", "KBORU.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "THYAO.IS", "TUPRS.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS"]
+        return ["XU100.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS" 
+]
 
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
+veri_kaynagi = st.sidebar.selectbox(
+    "Veri Çekilecek Kaynak:", 
+    ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)", "İş Yatırım (Sadece BIST)"]
+)
+# Küresel Piyasa Ayarları (Mevcut kodun buradan devam edecek...)
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
 
 if piyasa_tipi == "Borsa İstanbul (BIST)":
@@ -1044,7 +1044,7 @@ st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Qu
 # BURASI SİZİN KODUNUZDA 536. SATIR CİVARINDAN BAŞLIYOR
 # ---------------------------------------------------------
 with st.spinner('Kurumsal teknik analiz verileri hesaplanıyor...'):
-    df = veri_yukle(hisse_kodu, baslangic, bitis)
+    df = veri_yukle(hisse_kodu, baslangic, bitis, kaynak=veri_kaynagi)
     info = sirket_bilgisi_getir(hisse_kodu)
 
 # YENİ EKLENECEK HAYAT KURTARICI BLOK:

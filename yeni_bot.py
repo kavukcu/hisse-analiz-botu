@@ -230,6 +230,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     from datetime import datetime, timedelta
     import logging
     from tvDatafeed import TvDatafeed, Interval
+    
 
     kaynaklar = ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)"]
     if kaynak in kaynaklar:
@@ -1289,11 +1290,14 @@ with tabs[0]:
 
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR ---
+# --- SEKME 1: AKILLI RADAR ---
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
+    import os # Sayfa yenilendiğinde dosyadan okumak için gerekli
+    
     # ============================================================
-    # YENİ EKLENEN: SESSION STATE (TARAMA HAFIZASI) BAŞLATMA
+    # YENİ EKLENEN: SESSION STATE VE YEREL DOSYA HAFIZASI
     # ============================================================
     if 'son_tarama_df' not in st.session_state:
         st.session_state.son_tarama_df = None
@@ -1303,7 +1307,6 @@ with tabs[1]:
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    # 4 sütunu 5 sütuna çıkarıyoruz ki yeni buton sığsın
     col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
     with col_btn1:
         btn_radar = st.button("🚀 Genel Radar")
@@ -1314,10 +1317,9 @@ with tabs[1]:
     with col_btn4:
         btn_nokta_atisi = st.button("🎯 Nokta Atışı", type="primary")
     with col_btn5:
-        # YENİ BUTON
         btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary")
     
-    # 1. GENEL RADAR BUTONU İŞLEVİ
+    # 1. GENEL RADAR
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
@@ -1330,9 +1332,12 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # HAFIZAYA KAYDET
+                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                 st.session_state.son_tarama_df = df_radar
                 st.session_state.son_tarama_tipi = "Genel Radar Taraması"
+                df_radar.to_pickle("son_tarama.pkl")
+                with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
+                    f.write("Genel Radar Taraması")
                 
                 st.dataframe(df_radar, use_container_width=True, hide_index=True)
                 
@@ -1349,7 +1354,7 @@ with tabs[1]:
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
                 
-    # 2. STOCH ANALİZİ BUTONU İŞLEVİ
+    # 2. STOCH ANALİZİ
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []
@@ -1362,15 +1367,19 @@ with tabs[1]:
             
             if stoch_sonuclari:
                 df_stoch = pd.DataFrame(stoch_sonuclari)
-                # HAFIZAYA KAYDET
+                
+                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                 st.session_state.son_tarama_df = df_stoch
                 st.session_state.son_tarama_tipi = "Stoch Analizi"
+                df_stoch.to_pickle("son_tarama.pkl")
+                with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
+                    f.write("Stoch Analizi")
                 
                 st.dataframe(df_stoch, use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
-    # 3. TİLSON ANALİZİ BUTONU İŞLEVİ
+    # 3. TİLSON ANALİZİ
     elif btn_tilson:
         with st.spinner('Tilson T3 trend analizi taranıyor...'):
             tilson_sonuclari = []
@@ -1383,15 +1392,19 @@ with tabs[1]:
             
             if tilson_sonuclari:
                 df_tilson = pd.DataFrame(tilson_sonuclari)
-                # HAFIZAYA KAYDET
+                
+                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                 st.session_state.son_tarama_df = df_tilson
                 st.session_state.son_tarama_tipi = "Tilson (T3) Analizi"
+                df_tilson.to_pickle("son_tarama.pkl")
+                with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
+                    f.write("Tilson (T3) Analizi")
                 
                 st.dataframe(df_tilson, use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
-    # 4. NOKTA ATIŞI (SNIPER) BUTONU İŞLEVİ
+    # 4. NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
         with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
             radar_sonuclari = []
@@ -1416,9 +1429,12 @@ with tabs[1]:
                 ]
                 
                 if not df_sniper.empty:
-                    # HAFIZAYA KAYDET
+                    # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                     st.session_state.son_tarama_df = df_sniper
                     st.session_state.son_tarama_tipi = "Nokta Atışı (Sniper)"
+                    df_sniper.to_pickle("son_tarama.pkl")
+                    with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
+                        f.write("Nokta Atışı (Sniper)")
                     
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
@@ -1428,19 +1444,28 @@ with tabs[1]:
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
                 
-    # 5. EN SON TARAMAYI GETİR BUTONU (YENİ EKLENEN İŞLEV)
+    # 5. EN SON TARAMAYI GETİR (YENİLENMİŞ VE GÜÇLENDİRİLMİŞ)
     elif btn_son_tarama:
+        # 1. Eğer Streamlit hafızası (RAM) boşsa ama fiziksel dosya varsa, veriyi dosyadan geri çek
+        if st.session_state.son_tarama_df is None and os.path.exists("son_tarama.pkl"):
+            try:
+                st.session_state.son_tarama_df = pd.read_pickle("son_tarama.pkl")
+                if os.path.exists("son_tarama_tipi.txt"):
+                    with open("son_tarama_tipi.txt", "r", encoding="utf-8") as f:
+                        st.session_state.son_tarama_tipi = f.read()
+            except Exception as e:
+                pass # Dosya bozuksa yoksay
+
+        # 2. Veri varsa ekrana bas
         if st.session_state.son_tarama_df is not None:
-            st.info(f"💾 Hafızadan Yüklenen Tablo: **{st.session_state.son_tarama_tipi}**")
+            st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
             
-            # Eğer önceki tarama nokta atışı ise ona uygun görsel efekt ver
             if st.session_state.son_tarama_tipi == "Nokta Atışı (Sniper)":
                 st.success(f"🎯 Dipten Dönüş Fırsatı! {len(st.session_state.son_tarama_df)} hisse listeleniyor.")
                 
             st.dataframe(st.session_state.son_tarama_df, use_container_width=True, hide_index=True)
         else:
-            st.error("⚠️ Hafızada kayıtlı bir tarama bulunamadı. Lütfen önce bir tarama yapın.")
-# --- SEKME 2: CÜZDAN & STOP ---
+            st.error("⚠️ Hafızada veya yerel dosyada kayıtlı bir tarama bulunamadı. Lütfen önce bir tarama yapın.")    
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")
     tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)

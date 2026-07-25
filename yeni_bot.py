@@ -139,10 +139,7 @@ print(f"İş Yatırım için: {semboller['isyatirim']}")
 # ==========================================
 # 1. GÜNLÜK VERİ ÇEKME FONKSİYONU
 # ==========================================
-import time
-import yfinance as yf
-import streamlit as st
-import time
+import time as tm
 import yfinance as yf
 import streamlit as st
 @st.cache_data(ttl=300, show_spinner=False)
@@ -160,14 +157,14 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
             return None
             
         # Çok hızlı istek atmamak için her başarılı/başarısız işlemde çeyrek saniye bekle
-        time.sleep(0.25) 
+        tm.sleep(0.25) 
         
         return df
 
     except Exception as e:
         # Bağlantı kopsa bile bot çökmez, sadece o hisseyi atlar
         # st.error(f"{formatli_ticker} verisi çekilemedi: {e}") # İstersen ekranda gösterebilirsin
-        time.sleep(1) # Hata alırsak biraz daha uzun bekle (Yahoo'nun engelini kaldırması için)
+        tm.sleep(1) # Hata alırsak biraz daha uzun bekle (Yahoo'nun engelini kaldırması için)
         return None
     
     import yfinance as yf

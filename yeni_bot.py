@@ -681,20 +681,34 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
         # ==========================================
         # Eğer hissede yukarı yönlü bir sinyal (hacim, boğa trendi vs.) varsa 
         # API'yi yoracak olan 4 Saatlik veri ve Temel Analiz bilgilerini ŞİMDİ çekiyoruz.
+        # ==========================================
+        # 2. SADECE UMUT VAAT EDEN HİSSELER İÇİN AĞIR İŞLEMLER
+        # ==========================================
         df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
         
+        # 🛡️ 2. KALKAN: Değişkenleri önceden tanımlama (Hata almamak için)
+        # Eğer 4 saatlik veri gelmezse, kodun çökmemesi için günlük verileri (g_*) varsayılan (None veya yedek) olarak atıyoruz.
+        h4_fiyat = g_fiyat
+        h4_tilson = g_tilson
+        h4_stoch_k = g_stoch_k
+        h4_stoch_d = g_stoch_d
+
         # B) 4 SAATLİK KAPANIS ANALİZİ (Tilson + Stoch)
         if not df_4h.empty and len(df_4h) >= 20:
-            df_4h = stokastik_hesapla(df_4h)
-            df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
-            
-            h4_fiyat = df_4h['Close'].iloc[-1]
-            h4_tilson = df_4h['Tilson_T3'].iloc[-1]
-            h4_stoch_k = df_4h['Stoch_K'].iloc[-1]
-            h4_stoch_d = df_4h['Stoch_D'].iloc[-1]
-            
-            h4_boga = h4_fiyat > h4_tilson
-            h4_stoch_al = (h4_stoch_k < 35) and (h4_stoch_k > h4_stoch_d)
+            try: # Analiz hatası kalkanı
+                df_4h = stokastik_hesapla(df_4h)
+                df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
+                
+                h4_fiyat = df_4h['Close'].iloc[-1]
+                h4_tilson = df_4h['Tilson_T3'].iloc[-1]
+                h4_stoch_k = df_4h['Stoch_K'].iloc[-1]
+                h4_stoch_d = df_4h['Stoch_D'].iloc[-1]
+                
+                h4_boga = h4_fiyat > h4_tilson
+                h4_stoch_al = (h4_stoch_k < 35) and (h4_stoch_k > h4_stoch_d)
+            except Exception as e:
+                logging.error(f"[{sembol}] 4S Analiz Hatası: {e}")
+                h4_boga, h4_stoch_al = g_boga, g_stoch_al
         else:
             h4_boga, h4_stoch_al = g_boga, g_stoch_al
 

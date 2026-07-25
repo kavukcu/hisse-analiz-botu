@@ -1015,7 +1015,10 @@ hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).uppe
 baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365)) 
 bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
 
-st.title("WhatsApp Image 2026-07-25 at 12.35.35.jpeg Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
+st.title(" ️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
+
+
+
 
 # ---------------------------------------------------------
 # BURASI SİZİN KODUNUZDA 536. SATIR CİVARINDAN BAŞLIYOR

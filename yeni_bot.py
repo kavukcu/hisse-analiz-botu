@@ -109,108 +109,96 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
     import pandas as pd
     import time
     import logging
+    from tvDatafeed import TvDatafeed, Interval
+    import isyatirimhisse
+
+    # Öncelikli kaynak listesi oluştur (Seçilen kaynak en başta yer alır)
+    tum_kaynaklar = ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)"]
+    if ".IS" in ticker:
+        tum_kaynaklar.append("İş Yatırım (Sadece BIST)")
     
-    # 1. İŞ YATIRIM (SADECE BIST VE GÜNLÜK VERİ İÇİN)
-    if kaynak == "İş Yatırım (Sadece BIST)" and ".IS" in ticker:
-        try:
-            sembol = ticker.replace(".IS", "")
-            start_str = pd.to_datetime(start).strftime('%d-%m-%Y')
-            
-            # End tarihi verilmezse bugünü al
-            if isinstance(end, str) and end == "":
-                end_str = pd.Timestamp.today().strftime('%d-%m-%Y')
-            else:
-                end_str = pd.to_datetime(end).strftime('%d-%m-%Y')
-                
-            df = isyatirimhisse.fetch_data(
-                symbol=sembol, 
-                start_date=start_str, 
-                end_date=end_str
-            )
-            
-            if df is not None and not df.empty:
-                # Sütun isimlerini God Mode Terminal standartlarına uyarla
-                df = df.rename(columns={
-                    'TARIH': 'Date', 'ACILIS_FIYATI': 'Open', 
-                    'EN_YUKSEK_FIYAT': 'High', 'EN_DUSUK_FIYAT': 'Low', 
-                    'KAPANIS_FIYATI': 'Close', 'ISLEM_ADEDI': 'Volume'
-                })
-                df['Date'] = pd.to_datetime(df['Date'])
-                df.set_index('Date', inplace=True)
-                return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-        except Exception as e:
-            logging.warning(f"İş Yatırım veri çekme hatası ({ticker}): {e}. Yahoo'ya geçiliyor.")
+    if kaynak in tum_kaynaklar:
+        tum_kaynaklar.remove(kaynak)
+        tum_kaynaklar.insert(0, kaynak)
 
-    # 2. TRADINGVIEW VERİSİ
-    elif kaynak == "TradingView (tvdatafeed)":
-        try:
-            tv = TvDatafeed() # Anonim giriş (şifresiz)
-            
-            # Hangi borsadan çekeceğimizi otomatik belirle
-            if ".IS" in ticker:
-                exchange = 'BIST'
-                tv_symbol = ticker.replace(".IS", "")
-            elif "-" in ticker:
-                exchange = 'CRYPTO'
-                tv_symbol = ticker.replace("-", "")
-            else:
-                exchange = 'NASDAQ' # Default ABD
-                tv_symbol = ticker
-                
-            df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
-            
-            if df is not None and not df.empty:
-                df = df.rename(columns={
-                    'open': 'Open', 'high': 'High', 'low': 'Low', 
-                    'close': 'Close', 'volume': 'Volume'
-                })
-                df.index = df.index.tz_localize(None)
-                
-                # Tarih filtrelemesi
-                bitis_tarihi = pd.to_datetime(end).date()
-                baslangic_tarihi = pd.to_datetime(start).date()
-                df = df[(df.index.date <= bitis_tarihi) & (df.index.date >= baslangic_tarihi)]
-                
-                return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-        except Exception as e:
-            logging.warning(f"TradingView veri çekme hatası ({ticker}): {e}. Yahoo'ya geçiliyor.")
+    df = pd.DataFrame()
 
-    # 3. YAHOO FINANCE (Varsayılan ve Fallback/Yedek)
-    for _ in range(3):
-        try:
-            df = yf.download(
-                ticker, 
-                start=start, 
-                interval=interval, 
-                progress=False, 
-                auto_adjust=True, 
-                threads=True
-            )
-            
-            if df.empty:
-                time.sleep(1)
-                continue
+    for aktif_kaynak in tum_kaynaklar:
+        # 1. YAHOO FINANCE DENEMESİ
+        if aktif_kaynak == "Yahoo Finance (yfinance)":
+            for _ in range(2):
+                try:
+                    df = yf.download(
+                        ticker, 
+                        start=start, 
+                        interval=interval, 
+                        progress=False, 
+                        auto_adjust=True, 
+                        threads=True
+                    )
+                    if not df.empty:
+                        if isinstance(df.columns, pd.MultiIndex):
+                            df.columns = df.columns.droplevel(1)
+                        gerekli = ["Open", "High", "Low", "Close", "Volume"]
+                        if all(c in df.columns for c in gerekli):
+                            df = df.dropna(subset=['Close'])
+                            df.index = df.index.tz_localize(None)
+                            if end:
+                                df = df[df.index.date <= pd.to_datetime(end).date()]
+                            if not df.empty:
+                                return df
+                except Exception as e:
+                    logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
+                time.sleep(0.5)
+
+        # 2. TRADINGVIEW DENEMESİ
+        elif aktif_kaynak == "TradingView (tvdatafeed)":
+            try:
+                tv = TvDatafeed()
+                if ".IS" in ticker:
+                    exchange = 'BIST'
+                    tv_symbol = ticker.replace(".IS", "")
+                elif "-" in ticker:
+                    exchange = 'CRYPTO'
+                    tv_symbol = ticker.replace("-", "")
+                else:
+                    exchange = 'NASDAQ'
+                    tv_symbol = ticker
+                    
+                df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
+                if df is not None and not df.empty:
+                    df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                    df.index = df.index.tz_localize(None)
+                    if end:
+                        df = df[df.index.date <= pd.to_datetime(end).date()]
+                    if start:
+                        df = df[df.index.date >= pd.to_datetime(start).date()]
+                    if not df.empty:
+                        return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            except Exception as e:
+                logging.debug(f"TradingView deneme hatası ({ticker}): {e}")
+
+        # 3. İŞ YATIRIM DENEMESİ (Sadece BIST)
+        elif aktif_kaynak == "İş Yatırım (Sadece BIST)" and ".IS" in ticker:
+            try:
+                sembol = ticker.replace(".IS", "")
+                start_str = pd.to_datetime(start).strftime('%d-%m-%Y')
+                end_str = pd.Timestamp.today().strftime('%d-%m-%Y') if not end else pd.to_datetime(end).strftime('%d-%m-%Y')
                 
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.droplevel(1)
-                
-            gerekli = ["Open", "High", "Low", "Close", "Volume"]
-            if any(c not in df.columns for c in gerekli):
-                raise ValueError("Eksik veya boş veri")
-                
-            df = df.dropna(subset=['Close'])
-            df.index = df.index.tz_localize(None)
-            
-            if end:
-                bitis_tarihi = pd.to_datetime(end).date()
-                df = df[df.index.date <= bitis_tarihi]
-            
-            if not df.empty:
-                return df
-        except Exception as e:
-            logging.warning(f"{ticker} YFinance hatası: {e}")
-            time.sleep(1)
-            
+                df = isyatirimhisse.fetch_data(symbol=sembol, start_date=start_str, end_date=end_str)
+                if df is not None and not df.empty:
+                    df = df.rename(columns={
+                        'TARIH': 'Date', 'ACILIS_FIYATI': 'Open', 
+                        'EN_YUKSEK_FIYAT': 'High', 'EN_DUSUK_FIYAT': 'Low', 
+                        'KAPANIS_FIYATI': 'Close', 'ISLEM_ADEDI': 'Volume'
+                    })
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df.set_index('Date', inplace=True)
+                    if not df.empty:
+                        return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            except Exception as e:
+                logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
+
     return pd.DataFrame()
 # ==========================================
 # 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
@@ -221,84 +209,73 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     import time
     from datetime import datetime, timedelta
     import logging
+    from tvDatafeed import TvDatafeed, Interval
 
-    # 1. TRADINGVIEW (DOĞRUDAN 4 SAATLİK VERİ - ÇOK DAHA HIZLI)
-    if kaynak == "TradingView (tvdatafeed)":
-        try:
-            from tvDatafeed import TvDatafeed, Interval
-            tv = TvDatafeed()
-            
-            if ".IS" in ticker:
-                exchange = 'BIST'
-                tv_symbol = ticker.replace(".IS", "")
-            elif "-" in ticker:
-                exchange = 'CRYPTO'
-                tv_symbol = ticker.replace("-", "")
-            else:
-                exchange = 'NASDAQ'
-                tv_symbol = ticker
-                
-            # tvdatafeed'in doğrudan 4 saatlik veri çekme desteği var!
-            df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=1000)
-            
-            if df_4h is not None and not df_4h.empty:
-                df_4h = df_4h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
-                df_4h.index = df_4h.index.tz_localize(None)
-                bitis_tarihi = pd.to_datetime(end).date()
-                df_4h = df_4h[df_4h.index.date <= bitis_tarihi]
-                return df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-        except Exception as e:
-            logging.debug(f"{ticker} TV 4H hatası: {e}. YFinance'a geçiliyor.")
+    kaynaklar = ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)"]
+    if kaynak in kaynaklar:
+        kaynaklar.remove(kaynak)
+        kaynaklar.insert(0, kaynak)
 
-    # 2. YAHOO FINANCE (Varsayılan veya İş Yatırım Seçildiğinde Devreye Giren Yedek)
-    try:
-        start_dt = pd.to_datetime(start)
-        if (datetime.now() - start_dt).days > 729:
-            start_dt = datetime.now() - timedelta(days=729)
-            start = start_dt.strftime('%Y-%m-%d')
-
-        for deneme in range(3):
+    for aktif_kaynak in kaynaklar:
+        # 1. TRADINGVIEW 4 SAATLİK DENEMESİ
+        if aktif_kaynak == "TradingView (tvdatafeed)":
             try:
-                time.sleep(0.1) 
-                
-                df_1h = yf.download(
-                    ticker, 
-                    start=start, 
-                    interval="1h", 
-                    progress=False
-                )
-                
-                if df_1h.empty:
-                    time.sleep(1)
-                    continue
-
-                if isinstance(df_1h.columns, pd.MultiIndex):
-                    df_1h.columns = df_1h.columns.droplevel(1)
-
-                df_1h.index = df_1h.index.tz_localize(None)
-                bitis_tarihi = pd.to_datetime(end).date()
-                df_1h = df_1h[df_1h.index.date <= bitis_tarihi]
-
-                # 1 Saatliği 4 Saatliğe çevir
-                df_4h = df_1h.resample('4h').agg({
-                    'Open': 'first',
-                    'High': 'max',
-                    'Low': 'min',
-                    'Close': 'last',
-                    'Volume': 'sum'
-                }).dropna()
-                   
-                return df_4h
-                
+                tv = TvDatafeed()
+                if ".IS" in ticker:
+                    exchange = 'BIST'
+                    tv_symbol = ticker.replace(".IS", "")
+                elif "-" in ticker:
+                    exchange = 'CRYPTO'
+                    tv_symbol = ticker.replace("-", "")
+                else:
+                    exchange = 'NASDAQ'
+                    tv_symbol = ticker
+                    
+                df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=1000)
+                if df_4h is not None and not df_4h.empty:
+                    df_4h = df_4h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                    df_4h.index = df_4h.index.tz_localize(None)
+                    if end:
+                        df_4h = df_4h[df_4h.index.date <= pd.to_datetime(end).date()]
+                    if not df_4h.empty:
+                        return df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
             except Exception as e:
-                logging.debug(f"{ticker} 4H deneme {deneme+1} başarısız: {e}")
-                time.sleep(2)
-                
-        return pd.DataFrame()
-        
-    except Exception as e:
-        logging.error(f"{ticker} 4H Genel Hata: {e}")
-        return pd.DataFrame()
+                logging.debug(f"TV 4H deneme hatası ({ticker}): {e}")
+
+        # 2. YAHOO FINANCE 1 SAATLİK -> 4 SAATLİK RESAMPLE DENEMESİ
+        elif aktif_kaynak == "Yahoo Finance (yfinance)":
+            try:
+                start_dt = pd.to_datetime(start)
+                if (datetime.now() - start_dt).days > 729:
+                    start_dt = datetime.now() - timedelta(days=729)
+                    s_str = start_dt.strftime('%Y-%m-%d')
+                else:
+                    s_str = start
+
+                for _ in range(2):
+                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False)
+                    if not df_1h.empty:
+                        if isinstance(df_1h.columns, pd.MultiIndex):
+                            df_1h.columns = df_1h.columns.droplevel(1)
+                        df_1h.index = df_1h.index.tz_localize(None)
+                        if end:
+                            df_1h = df_1h[df_1h.index.date <= pd.to_datetime(end).date()]
+                        
+                        df_4h = df_1h.resample('4h').agg({
+                            'Open': 'first',
+                            'High': 'max',
+                            'Low': 'min',
+                            'Close': 'last',
+                            'Volume': 'sum'
+                        }).dropna()
+                        
+                        if not df_4h.empty:
+                            return df_4h
+                    time.sleep(0.5)
+            except Exception as e:
+                logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
+
+    return pd.DataFrame()
 def tilson_t3(close, period=5, vfactor=0.7):
     ema1 = close.ewm(span=period, adjust=False).mean()
     ema2 = ema1.ewm(span=period, adjust=False).mean()
@@ -1038,7 +1015,7 @@ hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).uppe
 baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365)) 
 bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
 
-st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
+st.title("WhatsApp Image 2026-07-25 at 12.35.35.jpeg Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
 # ---------------------------------------------------------
 # BURASI SİZİN KODUNUZDA 536. SATIR CİVARINDAN BAŞLIYOR

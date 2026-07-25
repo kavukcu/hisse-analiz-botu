@@ -1288,21 +1288,34 @@ with tabs[0]:
 
 
 # --- SEKME 1: AKILLI RADAR ---
+# --- SEKME 1: AKILLI RADAR ---
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
+    # ============================================================
+    # YENİ EKLENEN: SESSION STATE (TARAMA HAFIZASI) BAŞLATMA
+    # ============================================================
+    if 'son_tarama_df' not in st.session_state:
+        st.session_state.son_tarama_df = None
+    if 'son_tarama_tipi' not in st.session_state:
+        st.session_state.son_tarama_tipi = None
+
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
     
-    col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
+    # 4 sütunu 5 sütuna çıkarıyoruz ki yeni buton sığsın
+    col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
     with col_btn1:
-        btn_radar = st.button("🚀 Genel Radar Taraması")
+        btn_radar = st.button("🚀 Genel Radar")
     with col_btn2:
         btn_stoch = st.button("📊 Stoch Analizi")
     with col_btn3:
         btn_tilson = st.button("📈 Tilson (T3)")
     with col_btn4:
-        btn_nokta_atisi = st.button("🎯 Nokta Atışı (Sniper)", type="primary")
+        btn_nokta_atisi = st.button("🎯 Nokta Atışı", type="primary")
+    with col_btn5:
+        # YENİ BUTON
+        btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary")
     
     # 1. GENEL RADAR BUTONU İŞLEVİ
     if btn_radar:
@@ -1316,22 +1329,23 @@ with tabs[1]:
                         radar_sonuclari.append(sonuc)
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
+                
+                # HAFIZAYA KAYDET
+                st.session_state.son_tarama_df = df_radar
+                st.session_state.son_tarama_tipi = "Genel Radar Taraması"
+                
                 st.dataframe(df_radar, use_container_width=True, hide_index=True)
                 
-                # Veritabanı Kilitlenmesini Önlemek İçin Yazma İşlemini Toplu ve Senkron Yapıyoruz
+                # Veritabanı Kaydı
                 for _, row in df_radar.iterrows():
                     sembol = row['Varlık']
                     hedef_raw = str(row.get('🎯 AI Hedef', '0')).replace(' TL', '').strip()
-    
-    # Metni sayıya dönüştürmeyi güvenli bir şekilde dene
                     try:
                         hedef_float = float(hedef_raw)
                         if hedef_float > 0:
                             tahmin_kaydet(sembol, hedef_float)
                     except ValueError:
-        # Metin ' - ' veya başka bir string ise hatayı yoksayıp devam eder
                         continue
-            
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
                 
@@ -1347,7 +1361,12 @@ with tabs[1]:
                         stoch_sonuclari.append(sonuc)
             
             if stoch_sonuclari:
-                st.dataframe(pd.DataFrame(stoch_sonuclari), use_container_width=True, hide_index=True)
+                df_stoch = pd.DataFrame(stoch_sonuclari)
+                # HAFIZAYA KAYDET
+                st.session_state.son_tarama_df = df_stoch
+                st.session_state.son_tarama_tipi = "Stoch Analizi"
+                
+                st.dataframe(df_stoch, use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
@@ -1363,7 +1382,12 @@ with tabs[1]:
                         tilson_sonuclari.append(sonuc)
             
             if tilson_sonuclari:
-                st.dataframe(pd.DataFrame(tilson_sonuclari), use_container_width=True, hide_index=True)
+                df_tilson = pd.DataFrame(tilson_sonuclari)
+                # HAFIZAYA KAYDET
+                st.session_state.son_tarama_df = df_tilson
+                st.session_state.son_tarama_tipi = "Tilson (T3) Analizi"
+                
+                st.dataframe(df_tilson, use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
@@ -1381,7 +1405,6 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # SÜTUN İSİMLERİ VE FİLTRELER DÜZELTİLDİ:
                 df_sniper = df_radar[
                     (df_radar['Günlük T3'] == '🚀 BOĞA') & 
                     (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
@@ -1393,6 +1416,10 @@ with tabs[1]:
                 ]
                 
                 if not df_sniper.empty:
+                    # HAFIZAYA KAYDET
+                    st.session_state.son_tarama_df = df_sniper
+                    st.session_state.son_tarama_tipi = "Nokta Atışı (Sniper)"
+                    
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
@@ -1400,6 +1427,19 @@ with tabs[1]:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
+                
+    # 5. EN SON TARAMAYI GETİR BUTONU (YENİ EKLENEN İŞLEV)
+    elif btn_son_tarama:
+        if st.session_state.son_tarama_df is not None:
+            st.info(f"💾 Hafızadan Yüklenen Tablo: **{st.session_state.son_tarama_tipi}**")
+            
+            # Eğer önceki tarama nokta atışı ise ona uygun görsel efekt ver
+            if st.session_state.son_tarama_tipi == "Nokta Atışı (Sniper)":
+                st.success(f"🎯 Dipten Dönüş Fırsatı! {len(st.session_state.son_tarama_df)} hisse listeleniyor.")
+                
+            st.dataframe(st.session_state.son_tarama_df, use_container_width=True, hide_index=True)
+        else:
+            st.error("⚠️ Hafızada kayıtlı bir tarama bulunamadı. Lütfen önce bir tarama yapın.")
 # --- SEKME 2: CÜZDAN & STOP ---
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")

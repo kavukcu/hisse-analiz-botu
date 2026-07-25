@@ -30,3 +30,8 @@ joblib
 shap
 tensorflow
 optuna
+streamlit
+pandas
+yfinance
+isyatirimhisse
+git+https://github.com/rongardF/tvdatafeed.git

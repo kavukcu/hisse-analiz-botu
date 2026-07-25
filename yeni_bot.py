@@ -113,6 +113,24 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
+def sembol_formatla(hisse_kodu):
+    # Eğer gelen kodda '.IS' veya 'BIST:' varsa temizleyip ana sembolü (örneğin THYAO) bulalım
+    ana_sembol = hisse_kodu.replace('.IS', '').replace('BIST:', '').strip().upper()
+    
+    # 3 farklı platform için doğru formatları döndürüyoruz
+    formatlar = {
+        'yfinance': f"{ana_sembol}.IS",
+        'isyatirim': ana_sembol,
+        'tradingview': f"BIST:{ana_sembol}", # tvDatafeed kütüphanesi için sadece ana_sembol yeterli olabilir
+        'saf_sembol': ana_sembol
+    }
+    
+    return formatlar
+
+# Örnek Kullanım:
+semboller = sembol_formatla("THYAO.IS")
+print(f"Yahoo için: {semboller['yfinance']}")
+print(f"İş Yatırım için: {semboller['isyatirim']}")
 # Kodun en üst kısımlarına ekle:
 
 # ==========================================
@@ -121,6 +139,7 @@ veritabani_baslat()
 # ==========================================
 # 1. GÜNLÜK VERİ ÇEKME FONKSİYONU
 # ==========================================
+
 @st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf

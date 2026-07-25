@@ -1185,7 +1185,7 @@ with st.spinner('Kurumsal teknik analiz verileri hesaplanıyor...'):
     info = sirket_bilgisi_getir(hisse_kodu)
 
 # YENİ EKLENECEK HAYAT KURTARICI BLOK:
-if df.empty:
+if df is None or df.empty:
     st.error("⚠️ Yahoo Finance'tan veri çekilemedi (API yoğunluğu veya ağ hatası). Lütfen 1-2 dakika bekleyip sayfayı yenileyin veya farklı bir hisse kodu girin.")
     st.stop() # Veri yoksa kodun aşağıya inip hata vermesini engeller!
 

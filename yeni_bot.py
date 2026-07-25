@@ -157,7 +157,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
             return None
             
         # Çok hızlı istek atmamak için her başarılı/başarısız işlemde çeyrek saniye bekle
-        tm.sleep(0.25) 
+        tm.sleep(0.5) 
         
         return df
 

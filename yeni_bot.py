@@ -1696,8 +1696,9 @@ with tabs[1]:
 
     # 4. NOKTA ATIŞI (SNIPER)
     # 4. NOKTA ATIŞI (SNIPER)
+    # 4. YUMUŞATILMIŞ NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
-        with st.spinner('🎯 Kurumsal dip oluşumları, likidite avı, AI ve RSI onayı (Sniper) aranıyor...'):
+        with st.spinner('🎯 Kurumsal ayak izi, AI onayı ve düzeltme fırsatları (Sniper) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
@@ -1710,40 +1711,39 @@ with tabs[1]:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
                 # ==========================================
-                # 🎯 KUSURSUZ FIRTINA (SNIPER) FİLTRESİ
+                # 🎯 YUMUŞATILMIŞ SNIPER FİLTRESİ
                 # ==========================================
                 
-                # 1. TREND ONAYI: Hem Günlük hem 4 Saatlik Tilson T3 BOĞA olmalı
-                sart_trend = (df_radar['Günlük T3'] == '🚀 BOĞA') & (df_radar['4S T3'] == '🚀 BOĞA')
+                # 1. TREND ONAYI: Günlük VEYA 4 Saatlikten EN AZ BİRİ BOĞA olmalı (Trend paradoksunu çözdük)
+                sart_trend = (df_radar['Günlük T3'] == '🚀 BOĞA') | (df_radar['4S T3'] == '🚀 BOĞA')
                 
-                # 2. TEMEL SAĞLAMLIK: Sihirli Formül skoru en az 30 olmalı
+                # 2. TEMEL SAĞLAMLIK: Skoru 20'ye çektik (Çöp olmayan ama fırsat veren hisseler)
                 df_radar['📊 Temel Skor'] = pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce').fillna(0)
-                sart_temel = df_radar['📊 Temel Skor'] >= 30
+                sart_temel = df_radar['📊 Temel Skor'] >= 20
                 
-                # 3. KURUMSAL AYAK İZİ: Hacim patlaması, uyuşmazlık veya Spring tuzaklarından biri olmalı
+                # 3. KURUMSAL AYAK İZİ: Aynı kaldı (Dip/Dönüş için bu hacim ve tuzak sinyalleri şart)
                 sart_kurumsal = (
                     (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
                     (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK', na=False)) | 
                     (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
                 )
                 
-                # 4. YAPAY ZEKA ONAYI: Ensemble model (XGBoost vb.) "AL" demeli
+                # 4. YAPAY ZEKA ONAYI: XGBoost/AI "AL" demeli
                 sart_ai = df_radar['🤖 AI Kararı'].str.contains('AL', na=False)
 
                 # 5. DİP/DÖNÜŞ ONAYI (RSI Katmanı): 
-                # RSI kolonu yoksa hata vermemesi için önce kontrol ediyoruz
+                # 40 sınırı çok sertti. Hisse şişmemiş olsun (55 altı), bize yeter dedik.
                 if 'RSI' not in df_radar.columns:
-                    df_radar['RSI'] = 50  # Nötr değer ata
+                    df_radar['RSI'] = 50 
                 
-                # RSI'ı sayısal değere çevirip 40 (veya altı) seviyesinden dönüş arıyoruz
                 df_radar['RSI'] = pd.to_numeric(df_radar['RSI'], errors='coerce').fillna(50)
-                sart_rsi = df_radar['RSI'] <= 40
+                sart_rsi = df_radar['RSI'] <= 55
 
-                # TÜM ŞARTLARI BİRLEŞTİR (Sıkı Filtre)
+                # TÜM ŞARTLARI BİRLEŞTİR
                 df_sniper = df_radar[sart_trend & sart_temel & sart_kurumsal & sart_ai & sart_rsi].copy()
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Kusursuz şartları sağlayan {len(df_sniper)} adet hisse bulundu!")
+                    st.success(f"🎯 Fırsat bölgesindeki {len(df_sniper)} adet potansiyel hisse bulundu!")
                     
                     # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                     st.session_state.son_tarama_df = df_sniper
@@ -1755,7 +1755,7 @@ with tabs[1]:
                     # Çıktıyı Ekrana Yazdır
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Şu anki piyasa koşullarında 'Kusursuz Fırtına' şartlarını sağlayan hisse bulunamadı. Sabırla beklemek veya Radar sekmesinden genel görünüme bakmak en iyisi.")
+                    st.warning("⚠️ Şartlar yumuşatılmasına rağmen hisse bulunamadı. Endekste çok sert bir satış dalgası olabilir.")
             else:
                 st.error("⚠️ Tarama yapılamadı veya API kaynaklı veri çekilemedi.")
 with tabs[2]:

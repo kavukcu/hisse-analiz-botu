@@ -10,6 +10,10 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, timezone
 import requests
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
 import concurrent.futures
 import logging
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')

@@ -1496,29 +1496,38 @@ tabs = st.tabs([
 ])
 
 # --- SEKME 0: QUANT GRAFİK ---
+# --- SEKME 0: QUANT GRAFİK ---
 with tabs[0]:
     st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
     
     c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
-with c_ayar1:
-    goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True, key="chk_vpvr")
-    goster_smc = st.checkbox("🏦 FVG & Likidite (SMC)", value=True, key="chk_smc")
-    goster_fibo = st.checkbox("📐 Altın Oran (Fibo)", value=True, key="chk_fibo")
-with c_ayar2:
-    goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip", value=True, key="chk_form1")
-    goster_formasyon = st.checkbox("🕯️ Mum Formasyonları", value=False, key="chk_form2")
-with c_ayar3:
-    goster_vwap = st.checkbox("⚖️ VWAP (Maliyet)", value=False, key="chk_vwap")
-    goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True, key="chk_ai")
-    goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True)
+    with c_ayar1:
+        goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True, key="chk_vpvr")
+        goster_smc = st.checkbox("🏦 FVG & Likidite (SMC)", value=True, key="chk_smc")
+        goster_fibo = st.checkbox("📐 Altın Oran (Fibo)", value=True, key="chk_fibo")
+    with c_ayar2:
+        goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip", value=True, key="chk_form1")
+        goster_formasyon = st.checkbox("🕯️ Mum Formasyonları", value=False, key="chk_form2")
+    with c_ayar3:
+        goster_vwap = st.checkbox("⚖️ VWAP (Maliyet)", value=False, key="chk_vwap")
+        goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True, key="chk_ai")
+        # (Burada fazladan yazılmış kopya goster_ai satırını da temizledim)
         
+    # ========================================================
+    # 🎯 KRİTİK DÜZELTME BURASI:
+    # Aşağıdaki kodların girintisini (TAB) sola çektik. 
+    # Artık 3. sütunun içinde değil, sayfanın tam genişliğinde çalışacak!
+    # ========================================================
+    
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
+    
     if goster_vwap:
         fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
 
     # TİLSON ÇİZGİSİNİ GRAFİĞE EKLEME SATIRI:
     fig.add_trace(go.Scatter(x=df.index, y=df['Tilson_T3'], name="Tilson T3", line=dict(color='yellow', width=2)), row=1, col=1)
+    
     if goster_vpvr:
         hacim_bolumleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
         bolum_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2
@@ -1555,15 +1564,11 @@ with c_ayar3:
         for dip in ikili_dipler:
             fig.add_shape(type="line", x0=dip[0], y0=dip[2], x1=dip[1], y1=dip[3], line=dict(color="green", width=3, dash="dot"), row=1, col=1)
 
-    if goster_vwap:
-        fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
-
     if goster_formasyon:
         df_form = mum_formasyonlarini_bul(df)
         yutan_boga = df_form[df_form['Bullish_Engulfing']]
         fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
-    # XGBOOST TAHMİNİ ÇİZİMİ (Hizalama Düzeltildi)
     if goster_ai:
         tarihler, tahminler = gelismis_ai_tahmin(df, gelecek_gun=30)
         fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)
@@ -1579,18 +1584,11 @@ with c_ayar3:
     fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
     fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
 
-    # ... fig.add_trace() kodlarınız ...
-
     fig.update_layout(template="plotly_dark", height=900, xaxis_rangeslider_visible=False)
     
-    # Doğrudan st.plotly_chart çağırmak yerine st.empty() kullanın:
     grafik_alani = st.empty()
     with grafik_alani:
         st.plotly_chart(fig, use_container_width=True)
-
-
-# --- SEKME 1: AKILLI RADAR ---
-# --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR ---
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")

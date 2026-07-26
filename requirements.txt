@@ -50,3 +50,4 @@ scikit-learn
 optuna
 keras
 tensorflow
+aiohttp

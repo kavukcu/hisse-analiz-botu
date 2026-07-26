@@ -1500,17 +1500,17 @@ with tabs[0]:
     st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
     
     c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
-    with c_ayar1:
-        goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True)
-        goster_smc = st.checkbox("🏦 FVG & Likidite (SMC)", value=True)
-        goster_fibo = st.checkbox("📐 Altın Oran (Fibo)", value=True)
-    with c_ayar2:
-        goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip", value=True)
-        goster_formasyon = st.checkbox("🕯️ Mum Formasyonları", value=False)
-    with c_ayar3:
-        goster_vwap = st.checkbox("⚖️ VWAP (Maliyet)", value=False)
-    
-        goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True)
+with c_ayar1:
+    goster_vpvr = st.checkbox("📊 Hacim Profili (VPVR)", value=True, key="chk_vpvr")
+    goster_smc = st.checkbox("🏦 FVG & Likidite (SMC)", value=True, key="chk_smc")
+    goster_fibo = st.checkbox("📐 Altın Oran (Fibo)", value=True, key="chk_fibo")
+with c_ayar2:
+    goster_grafik_formasyon = st.checkbox("📉 İkili Tepe/Dip", value=True, key="chk_form1")
+    goster_formasyon = st.checkbox("🕯️ Mum Formasyonları", value=False, key="chk_form2")
+with c_ayar3:
+    goster_vwap = st.checkbox("⚖️ VWAP (Maliyet)", value=False, key="chk_vwap")
+    goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True, key="chk_ai")
+    goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True)
         
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.6, 0.2, 0.2])
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Fiyat"), row=1, col=1)
@@ -1579,8 +1579,14 @@ with tabs[0]:
     fig.add_hline(y=80, line_dash="dot", line_color="red", row=3, col=1)
     fig.add_hline(y=20, line_dash="dot", line_color="green", row=3, col=1)
 
+    # ... fig.add_trace() kodlarınız ...
+
     fig.update_layout(template="plotly_dark", height=900, xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, use_container_width=True)
+    
+    # Doğrudan st.plotly_chart çağırmak yerine st.empty() kullanın:
+    grafik_alani = st.empty()
+    with grafik_alani:
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # --- SEKME 1: AKILLI RADAR ---
@@ -1604,16 +1610,15 @@ with tabs[1]:
     
     col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
     with col_btn1:
-        btn_radar = st.button("🚀 Genel Radar")
+        btn_radar = st.button("🚀 Genel Radar", key="btn_radar")
     with col_btn2:
-        btn_stoch = st.button("📊 Stoch Analizi")
+        btn_stoch = st.button("📊 Stoch Analizi", key="btn_stoch")
     with col_btn3:
-        btn_tilson = st.button("📈 Tilson (T3)")
+        btn_tilson = st.button("📈 Tilson (T3)", key="btn_tilson")
     with col_btn4:
-        btn_nokta_atisi = st.button("🎯 Nokta Atışı", type="primary")
+        btn_nokta_atisi = st.button("🎯 Nokta Atışı", type="primary", key="btn_nokta")
     with col_btn5:
-        btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary")
-    
+        btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary", key="btn_son")
     # 1. GENEL RADAR
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):

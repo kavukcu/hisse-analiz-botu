@@ -1,7 +1,6 @@
 # ==========================================
 # KÜTÜPHANELER (En üste taşındı ve hızlandırıldı)
 # ==========================================
-import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -20,7 +19,6 @@ logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s -
 # Yapay Zeka Kütüphaneleri
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
 from sklearn.svm import SVR
-from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
@@ -52,6 +50,7 @@ from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
+st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
 def get_tv_datafeed():
     """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
@@ -66,7 +65,6 @@ def get_tv_datafeed():
 # ==========================================
 # SAYFA AYARLARI VE OTURUM
 # ==========================================
-st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 
 oturum = requests.Session()
 oturum.headers.update({
@@ -155,16 +153,10 @@ print(f"İş Yatırım için: {semboller['isyatirim']}")
 
 # ==========================================
 # 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
-# ==========================================
-# ==========================================
-# 1. GÜNLÜK VERİ ÇEKME FONKSİYONU
-# ==========================================
-# ==========================================
-# 1. GÜNLÜK VERİ ÇEKME FONKSİYONU
-# ==========================================
+
+
 import time as tm
 import yfinance as yf
-import streamlit as st
 import pandas as pd
 import logging
 from tvDatafeed import TvDatafeed, Interval
@@ -745,14 +737,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "🤖 AI Kararı": "Zaman Tasarrufu",
                 "🎯 AI Hedef": "-"
             }
-
-        # ==========================================
-        # 2. SADECE UMUT VAAT EDEN HİSSELER İÇİN AĞIR İŞLEMLER
-        # ==========================================
-        # Eğer hissede yukarı yönlü bir sinyal (hacim, boğa trendi vs.) varsa 
-        # API'yi yoracak olan 4 Saatlik veri ve Temel Analiz bilgilerini ŞİMDİ çekiyoruz.
-        # ==========================================
-        # 2. SADECE UMUT VAAT EDEN HİSSELER İÇİN AĞIR İŞLEMLER
         # ==========================================
         df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
         
@@ -1632,7 +1616,12 @@ with tabs[1]:
                         radar_sonuclari.append(sonuc)
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
+                df_sniper = df_radar[
+                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                    (df_radar['4S T3'] == '🚀 BOĞA')
+                ]
                 
+                st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                 # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                 st.session_state.son_tarama_df = df_radar
                 st.session_state.son_tarama_tipi = "Genel Radar Taraması"
@@ -1718,7 +1707,12 @@ with tabs[1]:
             
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
+                df_sniper = df_radar[
+                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                    (df_radar['4S T3'] == '🚀 BOĞA')
+                ]
                 
+                st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                 df_sniper = df_radar[
                     (df_radar['Günlük T3'] == '🚀 BOĞA') & 
                     (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 

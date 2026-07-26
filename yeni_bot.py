@@ -33,8 +33,8 @@ import shap
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
 import gymnasium as gym
 import gym_anytrading

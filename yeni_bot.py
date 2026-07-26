@@ -26,6 +26,25 @@ import optuna
 from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import IsolationForest
+import shap
+import streamlit as st
+import matplotlib.pyplot as plt
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.preprocessing import MinMaxScaler
+import gymnasium as gym
+import gym_anytrading
+from stable_baselines3 import A2C
+import asyncio
+import aiohttp
+import pandas as pd
+from pypfopt import expected_returns, risk_models
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
@@ -348,6 +367,26 @@ def sirket_bilgisi_getir(ticker):
     except: 
         return {}
 @st.cache_data(ttl=86400, show_spinner=False) # Veriyi 24 saatte bir günceller, API'yi yormaz
+def anomali_tespit_et(df):
+    """
+    Son 100 günlük veriye bakarak son gündeki hareketin anomali olup olmadığını test eder.
+    """
+    # İlgili özellikleri seç (Örn: Hacim değişimi, Kapanış değişimi, RSI vb.)
+    features = df[['Close', 'Volume']].pct_change().dropna()
+    
+    if len(features) < 20:
+        return "Veri yetersiz"
+        
+    # contamination=0.02: Verinin %2'sini "anormal" kabul edecek şekilde eğit
+    iso_forest = IsolationForest(contamination=0.02, random_state=42)
+    features['Anomaly'] = iso_forest.fit_predict(features)
+    
+    # Son günün anomali durumu (-1 = Anomali, 1 = Normal)
+    son_durum = features['Anomaly'].iloc[-1]
+    
+    if son_durum == -1:
+        return "⚠️ RİSKLİ: Fiyat/Hacim hareketlerinde anomali tespit edildi!"
+    return "✅ Piyasaya uygun, normal hareket."
 def sihirli_formul_skorla(sembol):
     """
     Şirketin temel çarpanlarını çeker ve hissenin 
@@ -587,6 +626,20 @@ def hizli_backtest_yap(sembol, baslangic, bitis):
         import logging
         logging.error(f"[{sembol}] Backtest Hatası: {str(e)}")
         return None
+def stacking_model_olustur(xgb_model, rf_model, svr_model):
+    estimators = [
+        ('xgb', xgb_model),
+        ('rf', rf_model),
+        ('svr', svr_model)
+    ]
+    
+    # Meta-model olarak Ridge Regresyon kullanıyoruz (aşırı öğrenmeyi engeller)
+    stack_model = StackingRegressor(
+        estimators=estimators,
+        final_estimator=Ridge()
+    )
+    
+    return stack_model
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()
@@ -597,7 +650,23 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
         rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
         simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
     return simulasyonlar
-
+def shap_aciklamasi_goster(model, X_train, hisse_adi):
+    """
+    Ağaç bazlı (XGBoost, Random Forest) modeller için feature önem grafiğini çizer.
+    """
+    st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
+    
+    try:
+        # TreeExplainer kullanıyoruz (Stacking içinde XGBoost'u çekmek gerekebilir)
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_train)
+        
+        # Streamlit'te plt figürü göstermek
+        fig, ax = plt.subplots()
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        st.pyplot(fig)
+    except Exception as e:
+        st.warning(f"SHAP grafiği oluşturulurken hata: {e}")
 def python_istatistik_analizi(df):
     try:
         getiriler = df['Close'].pct_change().dropna()
@@ -1034,13 +1103,172 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
     except Exception:
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
+def rl_ajani_egit(df):
+    """
+    Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.
+    Veride 'Open', 'High', 'Low', 'Close', 'Volume' sütunları olmalıdır.
+    """
+    # Veri setini RL çevresine (environment) yükle
+    window_size = 30
+    start_index = window_size
+    end_index = len(df)
+    
+    env = gym.make('stocks-v0', 
+                   df=df, 
+                   frame_bound=(start_index, end_index), 
+                   window_size=window_size)
+    
+    # Advantage Actor-Critic (A2C) algoritmasını seçiyoruz (Finans için idealdir)
+    model = A2C('MlpPolicy', env, verbose=0)
+    
+    # Ajanı eğit (10.000 adım boyunca sanal al-sat yapar)
+    model.learn(total_timesteps=10000)
+    
+    # Son durumu test et ve ajanın güncel önerisini al (Al=1, Sat=0)
+    obs = env.reset()[0] # Gymnasium güncel yapısında observation ilk elemandır
+    action, _states = model.predict(obs, deterministic=True)
+    
+    aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
+    return aksiyon_metni
+def lstm_tahmin_yap(df, lookback_days=60):
+    # Kapanış fiyatlarını hazırla
+    data = df['Close'].values.reshape(-1, 1)
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data)
+    
+    # LSTM giriş formatına çevir (X: Son 60 gün, y: 61. gün)
+    X_train, y_train = [], []
+    for i in range(lookback_days, len(scaled_data)):
+        X_train.append(scaled_data[i-lookback_days:i, 0])
+        y_train.append(scaled_data[i, 0])
+        
+    X_train, y_train = np.array(X_train), np.array(y_train)
+    X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+    
+    # Model Mimarisi
+    model = Sequential([
+        LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)),
+        Dropout(0.2),
+        LSTM(50, return_sequences=False),
+        Dropout(0.2),
+        Dense(25),
+        Dense(1)
+    ])
+    
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    
+    # Pratiklik için düşük epoch kullanılıyor, performansa göre artırabilirsin
+    model.fit(X_train, y_train, batch_size=32, epochs=10, verbose=0)
+    
+    # Gelecek Tahmini (Son 60 güne bakarak bir sonraki günü tahmin et)
+    son_veri = scaled_data[-lookback_days:]
+    X_test = np.reshape(son_veri, (1, son_veri.shape[0], 1))
+    tahmin_olcekli = model.predict(X_test, verbose=0)
+    gercek_tahmin = scaler.inverse_transform(tahmin_olcekli)
+    
+    return gercek_tahmin[0][0]
+# ==========================================
+# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
+# ==========================================
+# ==========================================
+# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
+# ==========================================
+async def tek_hisse_getir(session, sem, hisse_kodu):
+    """
+    Tek bir hissenin verisini asenkron olarak çeker.
+    Yahoo Finance (veya kullandığın API) için örnek bir endpoint.
+    """
+    # Aynı anda API'ye yüklenmemek için kilit mekanizması
+    async with sem:
+        # BIST hisseleri için Yahoo Finance formatı genelde 'ISCTR.IS' şeklindedir
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{hisse_kodu}.IS?interval=1d&range=1y"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        
+        try:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Gelen JSON'ı okuyup basit bir DataFrame'e çevirme işlemi
+                    timestamps = data['chart']['result'][0]['timestamp']
+                    quotes = data['chart']['result'][0]['indicators']['quote'][0]
+                    
+                    df = pd.DataFrame({
+                        'Date': pd.to_datetime(timestamps, unit='s'),
+                        'Close': quotes['close'],
+                        'Volume': quotes['volume']
+                    })
+                    df.set_index('Date', inplace=True)
+                    return hisse_kodu, df
+                else:
+                    return hisse_kodu, None
+        except Exception as e:
+            return hisse_kodu, None
 
-# ==========================================
-# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
-# ==========================================
-# ==========================================
-# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
-# ==========================================
+async def tum_piyasayi_tara_async(hisse_listesi):
+    """
+    Tüm hisse listesini asenkron motorla saniyeler içinde tarar.
+    """
+    # Aynı anda maksimum 50 istek atacak şekilde sınırlandırıyoruz (API ban yememek için)
+    sem = asyncio.Semaphore(50) 
+    
+    async with aiohttp.ClientSession() as session:
+        # Tüm görevleri (task) hazırlıyoruz
+        gorevler = [tek_hisse_getir(session, sem, hisse) for hisse in hisse_listesi]
+        
+        # Görevleri çalıştır ve sonuçları bekle
+        sonuclar = await asyncio.gather(*gorevler)
+        
+        # Başarılı çekilen verileri bir sözlükte topla
+        basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
+        return basarili_veriler
+async def tek_hisse_getir(session, sem, hisse_kodu):
+    """
+    Tek bir hissenin verisini asenkron olarak çeker.
+    Yahoo Finance (veya kullandığın API) için örnek bir endpoint.
+    """
+    # Aynı anda API'ye yüklenmemek için kilit mekanizması
+    async with sem:
+        # BIST hisseleri için Yahoo Finance formatı genelde 'ISCTR.IS' şeklindedir
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{hisse_kodu}.IS?interval=1d&range=1y"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        
+        try:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Gelen JSON'ı okuyup basit bir DataFrame'e çevirme işlemi
+                    timestamps = data['chart']['result'][0]['timestamp']
+                    quotes = data['chart']['result'][0]['indicators']['quote'][0]
+                    
+                    df = pd.DataFrame({
+                        'Date': pd.to_datetime(timestamps, unit='s'),
+                        'Close': quotes['close'],
+                        'Volume': quotes['volume']
+                    })
+                    df.set_index('Date', inplace=True)
+                    return hisse_kodu, df
+                else:
+                    return hisse_kodu, None
+        except Exception as e:
+            return hisse_kodu, None
+
+async def tum_piyasayi_tara_async(hisse_listesi):
+    """
+    Tüm hisse listesini asenkron motorla saniyeler içinde tarar.
+    """
+    # Aynı anda maksimum 50 istek atacak şekilde sınırlandırıyoruz (API ban yememek için)
+    sem = asyncio.Semaphore(50) 
+    
+    async with aiohttp.ClientSession() as session:
+        # Tüm görevleri (task) hazırlıyoruz
+        gorevler = [tek_hisse_getir(session, sem, hisse) for hisse in hisse_listesi]
+        
+        # Görevleri çalıştır ve sonuçları bekle
+        sonuclar = await asyncio.gather(*gorevler)
+        
+        # Başarılı çekilen verileri bir sözlükte topla
+        basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
+        return basarili_veriler
 @st.cache_data(ttl=86400, show_spinner=False)
 def tum_bist_hisselerini_getir():
     """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
@@ -1101,7 +1329,7 @@ def tum_bist_hisselerini_getir():
 "OZKGY.IS", "OZRDN.IS", "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", 
 "PATEK.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", 
 "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", 
-"POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "REEDR.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", 
+"POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "REEDR.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", 
 "RUBNS.IS", "RYGYO.IS", "RYSAS.IS", "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", 
 "SARKY.IS", "SASA.IS", "SAYAS.IS", "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SMART.IS", 
 "SMRTG.IS", "SNGYO.IS", "SNICA.IS", "SNPAM.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", 
@@ -1145,7 +1373,37 @@ def tum_bist_hisselerini_getir():
 "SKYLP.IS",
 "SVGYO.IS", "AHSGY.IS", "BEGYO.IS", "BORLS.IS", "HOROZ.IS", "KBORU.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "THYAO.IS", "TUPRS.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS" 
 ]
-
+def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
+    """
+    fiyat_df: Sütunlarında hisse isimleri, satırlarında ise son 1 yıllık 
+    'Günlük Kapanış (Close)' fiyatları olan bir DataFrame olmalıdır.
+    """
+    try:
+        # 1. Beklenen Getiri (Mu) ve Risk (Kovaryans Matrisi - S) Hesaplanması
+        mu = expected_returns.mean_historical_return(fiyat_df)
+        S = risk_models.sample_cov(fiyat_df)
+        
+        # 2. Etkin Sınır (Efficient Frontier) Optimizasyonu
+        ef = EfficientFrontier(mu, S)
+        
+        # Maksimum Sharpe oranına göre (Risk/Getiri dengesi en iyi olan) ağırlıkları bul
+        agirliklar = ef.max_sharpe() 
+        temiz_agirliklar = ef.clean_weights() # Çok küçük oranları (örn %0.001) sıfırlar
+        
+        # 3. Gerçek Bütçeye Göre Hisse Adedi Dağılımı
+        son_fiyatlar = get_latest_prices(fiyat_df)
+        da = DiscreteAllocation(temiz_agirliklar, son_fiyatlar, total_portfolio_value=toplam_butce)
+        
+        # Hangi hisseden tam sayı olarak kaç LOT alınacağını hesaplar
+        lot_dagilimi, kalan_nakit = da.lp_portfolio()
+        
+        # Portföyün beklenen yıllık getiri ve risk oranlarını (volatilite) al
+        beklenen_getiri, volatilite, sharpe = ef.portfolio_performance(verbose=False)
+        
+        return lot_dagilimi, kalan_nakit, beklenen_getiri, sharpe
+        
+    except Exception as e:
+        return None, None, None, f"Optimizasyon Hatası: {e}"
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 veri_kaynagi = st.sidebar.selectbox(
     "Veri Çekilecek Kaynak:", 

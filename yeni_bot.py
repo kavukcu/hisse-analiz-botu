@@ -1695,10 +1695,8 @@ with tabs[1]:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     # 4. NOKTA ATIŞI (SNIPER)
-    # 4. NOKTA ATIŞI (SNIPER)
-    # 4. YUMUŞATILMIŞ NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
-        with st.spinner('🎯 Kurumsal ayak izi, AI onayı ve düzeltme fırsatları (Sniper) aranıyor...'):
+        with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
                 gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
@@ -1709,55 +1707,60 @@ with tabs[1]:
             
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
+                df_sniper = df_radar[
+                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                    (df_radar['4S T3'] == '🚀 BOĞA')
+                ]
                 
-                # ==========================================
-                # 🎯 YUMUŞATILMIŞ SNIPER FİLTRESİ
-                # ==========================================
-                
-                # 1. TREND ONAYI: Günlük VEYA 4 Saatlikten EN AZ BİRİ BOĞA olmalı (Trend paradoksunu çözdük)
-                sart_trend = (df_radar['Günlük T3'] == '🚀 BOĞA') | (df_radar['4S T3'] == '🚀 BOĞA')
-                
-                # 2. TEMEL SAĞLAMLIK: Skoru 20'ye çektik (Çöp olmayan ama fırsat veren hisseler)
-                df_radar['📊 Temel Skor'] = pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce').fillna(0)
-                sart_temel = df_radar['📊 Temel Skor'] >= 20
-                
-                # 3. KURUMSAL AYAK İZİ: Aynı kaldı (Dip/Dönüş için bu hacim ve tuzak sinyalleri şart)
-                sart_kurumsal = (
-                    (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
-                    (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK', na=False)) | 
-                    (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
-                )
-                
-                # 4. YAPAY ZEKA ONAYI: XGBoost/AI "AL" demeli
-                sart_ai = df_radar['🤖 AI Kararı'].str.contains('AL', na=False)
-
-                # 5. DİP/DÖNÜŞ ONAYI (RSI Katmanı): 
-                # 40 sınırı çok sertti. Hisse şişmemiş olsun (55 altı), bize yeter dedik.
-                if 'RSI' not in df_radar.columns:
-                    df_radar['RSI'] = 50 
-                
-                df_radar['RSI'] = pd.to_numeric(df_radar['RSI'], errors='coerce').fillna(50)
-                sart_rsi = df_radar['RSI'] <= 55
-
-                # TÜM ŞARTLARI BİRLEŞTİR
-                df_sniper = df_radar[sart_trend & sart_temel & sart_kurumsal & sart_ai & sart_rsi].copy()
+                st.dataframe(df_sniper, use_container_width=True, hide_index=True)
+                df_sniper = df_radar[
+                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
+                    (
+                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
+                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK', na=False)) | 
+                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+                    )
+                ]
                 
                 if not df_sniper.empty:
-                    st.success(f"🎯 Fırsat bölgesindeki {len(df_sniper)} adet potansiyel hisse bulundu!")
-                    
                     # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
                     st.session_state.son_tarama_df = df_sniper
                     st.session_state.son_tarama_tipi = "Nokta Atışı (Sniper)"
                     df_sniper.to_pickle("son_tarama.pkl")
                     with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
                         f.write("Nokta Atışı (Sniper)")
-                        
-                    # Çıktıyı Ekrana Yazdır
+                    
+                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
+                    st.balloons()
                 else:
-                    st.warning("⚠️ Şartlar yumuşatılmasına rağmen hisse bulunamadı. Endekste çok sert bir satış dalgası olabilir.")
+                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
-                st.error("⚠️ Tarama yapılamadı veya API kaynaklı veri çekilemedi.")
+                st.warning("⚠️ Tarama yapılamadı.")
+                
+    # 5. EN SON TARAMAYI GETİR (YENİLENMİŞ VE GÜÇLENDİRİLMİŞ)
+    elif btn_son_tarama:
+        # 1. Eğer Streamlit hafızası (RAM) boşsa ama fiziksel dosya varsa, veriyi dosyadan geri çek
+        if st.session_state.son_tarama_df is None and os.path.exists("son_tarama.pkl"):
+            try:
+                st.session_state.son_tarama_df = pd.read_pickle("son_tarama.pkl")
+                if os.path.exists("son_tarama_tipi.txt"):
+                    with open("son_tarama_tipi.txt", "r", encoding="utf-8") as f:
+                        st.session_state.son_tarama_tipi = f.read()
+            except Exception as e:
+                pass # Dosya bozuksa yoksay
+
+        # 2. Veri varsa ekrana bas
+        if st.session_state.son_tarama_df is not None:
+            st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
+            
+            if st.session_state.son_tarama_tipi == "Nokta Atışı (Sniper)":
+                st.success(f"🎯 Dipten Dönüş Fırsatı! {len(st.session_state.son_tarama_df)} hisse listeleniyor.")
+                
+            st.dataframe(st.session_state.son_tarama_df, use_container_width=True, hide_index=True)
+        else:
+            st.error("⚠️ Hafızada veya yerel dosyada kayıtlı bir tarama bulunamadı. Lütfen önce bir tarama yapın.")    
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")
     tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)

@@ -389,7 +389,6 @@ def anomali_tespit_et(df):
     if son_durum == -1:
         return "⚠️ RİSKLİ: Fiyat/Hacim hareketlerinde anomali tespit edildi!"
     return "✅ Piyasaya uygun, normal hareket."
-
 def sihirli_formul_skorla(sembol):
     """
     Şirketin temel çarpanlarını çeker ve hissenin 
@@ -435,7 +434,6 @@ def sihirli_formul_skorla(sembol):
         import logging
         logging.warning(f"[{sembol}] Temel veri puanlama hatası: {str(e)}")
         return {'Puan': 0}
-
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
@@ -532,29 +530,7 @@ def grafik_formasyon_bul(df, window=10, tolerans=0.03):
         return ikili_tepeler, ikili_dipler
     except:
         return [], []
-def yukselis_tespit(row):
-    bulunanlar = []
-    
-    # 1 değeri formasyonun varlığını (veya bullish durumunu) temsil ediyorsa:
-    if row.get('Ikili_Dip', 0) > 0:  
-        bulunanlar.append("İkili Dip")
-        
-    if row.get('Yukselen_Ucgen', 0) > 0:
-        bulunanlar.append("Yükselen Üçgen")
-        
-    # Yutan Boğa (Engulfing) ve Pinbar için (1 değerinin Alış yönlü olduğunu varsayıyoruz)
-    if row.get('P_Engulfing', 0) == 1:  
-        bulunanlar.append("Yutan Boğa")
-        
-    if row.get('P_Pinbar', 0) == 1: 
-        bulunanlar.append("Boğa Pinbar")
-        
-    # Eğer AI Formasyon Skoru da belirli bir güven eşiğini aşıyorsa eklenebilir
-    if row.get('AI_Formasyon_Skoru', 0) > 0.75: # Örnek eşik değeri
-        bulunanlar.append("Yüksek AI Skoru")
 
-    # Eğer birden fazla formasyon varsa aralarına virgül koyarak birleştirir, yoksa "Yok" yazar
-    return ", ".join(bulunanlar) if bulunanlar else "Yok"
 def yapay_zeka_icin_formasyon_bul(df):
     """
     Mum formasyonlarını yapay zekanın anlayacağı sayısal değerlere (-1, 0, 1) dönüştürür.
@@ -886,19 +862,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         df_g = stokastik_hesapla(df_g)
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)
-
-# -------------------------------
-# FORMASYONLARI HESAPLA
-# -------------------------------
-        df_g = yapay_zeka_icin_formasyon_bul(df_g)
-        df_g = makro_formasyonlari_bul(df_g)
-        df_g = trend_ve_harmonik_bul(df_g)
-
-        df_g["Yükseliş Formasyonu"] = df_g.apply(
-            yukselis_tespit,
-                axis=1
-        )
-
         temp_g = dipten_donus_analizi(df_g)
         
         g_fiyat = df_g['Close'].iloc[-1]
@@ -935,8 +898,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "📈 Pozitif Uyuşmazlık": "-",
                 "🪤 Spring (Tuzak)": "-",
                 "🤖 AI Kararı": "Zaman Tasarrufu",
-                "📈 Yükseliş Formasyonu": df_g["Yükseliş Formasyonu"].iloc[-1],
-                "🎯 AI Hedef": "-",
+                "🎯 AI Hedef": "-"
             }
 
         # 2. 4 Saatlik Veri Çekme
@@ -1080,7 +1042,6 @@ def ensemble_prediction(df, sembol="Genel"):
         # 🌟 GRAFİK (MAKRO) FORMASYONLARI 🌟
         t_df = makro_formasyonlari_bul(t_df, window=20)
         t_df = trend_ve_harmonik_bul(t_df)
-        t_df["Yükseliş Formasyonu"] = t_df.apply(yukselis_tespit, axis=1)
         if 'Stoch_K' not in t_df.columns:
             low_min = t_df['Low'].rolling(window=14).min()
             high_max = t_df['High'].rolling(window=14).max()
@@ -1152,7 +1113,7 @@ def ensemble_prediction(df, sembol="Genel"):
             'Vol_Lag1', 'Vol_Lag2',
             'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13',
             # 👇 YENİ EKLENEN FORMASYON ÖZNİTELİKLERİ 👇
-            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', # <--- VİRGÜL EKLENDİ
+            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', 
            # Mikro Mum Formasyonları
             # Makro Grafik Formasyonları (YENİ)
             'Ikili_Tepe', 'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen',
@@ -1294,7 +1255,6 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
     except Exception:
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
-
 def rl_ajani_egit(df):
     """
     Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.
@@ -1852,11 +1812,6 @@ with tabs[1]:
         btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary", key="btn_son")
 
     # Yardımcı Fonksiyon: Taramayı hem RAM'e (Session State) hem Diske Standart Kaydeder
-    
-    def color_formasyon(x):
-        if x != "Yok":
-            return "background-color:#145A32;color:#00ff66;font-weight:bold;"
-        return ""
     def taramayi_kaydet(df, tip_adi):
         st.session_state.son_tarama_df = df
         st.session_state.son_tarama_tipi = tip_adi
@@ -1880,51 +1835,11 @@ with tabs[1]:
                         
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
-
                 taramayi_kaydet(df_radar, "Genel Radar Taraması")
-
-                ilk = [
-                    "Varlık",
-                    "🤖 AI Kararı",
-                    "📈 Yükseliş Formasyonu"
-                ]
-
-                kalan = [c for c in df_radar.columns if c not in ilk]
-                df_radar = df_radar[ilk + kalan]
-
-                def color_formasyon(x):
-                    if x != "Yok":
-                        return "background-color:#145A32;color:#00ff66;font-weight:bold;"
-                    return ""
-
-                st.dataframe(
-                    df_radar.style.map(
-                        color_formasyon,
-                        subset=["📈 Yükseliş Formasyonu"]
-                    ),
-                    use_container_width=True,
-                    hide_index=True
-                )
-
+                st.dataframe(df_radar, use_container_width=True, hide_index=True)
                 st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
-
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
-
-                def color_formasyon(x):
-                    if x != "Yok":
-                        return "background-color:#145A32;color:#00ff66;font-weight:bold;"
-                    return ""
-
-            st.dataframe(
-                df_radar.style.map(
-                    color_formasyon,
-                    subset=["📈 Yükseliş Formasyonu"]
-                ),
-                use_container_width=True,
-                hide_index=True
-    )
-                
 
     # 2. STOCH ANALİZİ
     elif btn_stoch:
@@ -2000,24 +1915,9 @@ with tabs[1]:
                 
                 if not df_sniper.empty:
                     taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
-                    ilk = [
-                        "Varlık",
-                        "🤖 AI Kararı",
-                        "📈 Yükseliş Formasyonu"
-                    ]
-
-                    kalan = [c for c in df_sniper.columns if c not in ilk]
-
-                    df_sniper = df_sniper[ilk + kalan]
-
-                    st.dataframe(
-                        df_sniper.style.map(
-                            color_formasyon,
-                            subset=["📈 Yükseliş Formasyonu"]
-                        ),
-                        use_container_width=True,
-                        hide_index=True
-)
+                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
+                    st.dataframe(df_sniper, use_container_width=True, hide_index=True)
+                    st.balloons()
                 else:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:

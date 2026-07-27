@@ -1113,7 +1113,7 @@ def ensemble_prediction(df, sembol="Genel"):
             'Vol_Lag1', 'Vol_Lag2',
             'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13',
             # 👇 YENİ EKLENEN FORMASYON ÖZNİTELİKLERİ 👇
-            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru' 
+            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', # <--- VİRGÜL EKLENDİ
            # Mikro Mum Formasyonları
             # Makro Grafik Formasyonları (YENİ)
             'Ikili_Tepe', 'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen',

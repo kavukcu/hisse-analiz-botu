@@ -125,12 +125,6 @@ def tahminleri_degerlendir():
                               (gercek_fiyat, durum, rowid))
             except Exception as e:
                 logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
-<<<<<<< HEAD
-                
-    # Commit ve close işlemleri fonksiyonun içine (doğru hizaya) taşındı
-=======
-vghgfhfg
->>>>>>> d25a32c067e328457779d470364ab2e32177cb46
     conn.commit()
     conn.close()
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et

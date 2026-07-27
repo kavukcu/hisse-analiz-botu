@@ -985,11 +985,27 @@ def ensemble_prediction(df, sembol="Genel"):
         
         # Yeni 'Hafıza' verileri (Return_X ve Vol_LagX) eğitim matrisine eklendi
         # 3. Güncellenmiş Öznitelik (Features) Listesi
+        # --- 5, 8, 13 EMA HESAPLAMALARI VE YAPAY ZEKA MANTIĞI ---
+        t_df['EMA_5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
+        t_df['EMA_8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
+        t_df['EMA_13'] = t_df['Close'].ewm(span=13, adjust=False).mean()
+        
+        # ML modelleri fiyatın kendisi yerine, fiyata olan oransal mesafeyi çok daha iyi öğrenir:
+        t_df['EMA_5_Dist'] = (t_df['Close'] - t_df['EMA_5']) / t_df['Close'].replace(0, 0.0001)
+        t_df['EMA_8_Dist'] = (t_df['Close'] - t_df['EMA_8']) / t_df['Close'].replace(0, 0.0001)
+        t_df['EMA_13_Dist'] = (t_df['Close'] - t_df['EMA_13']) / t_df['Close'].replace(0, 0.0001)
+        
+        # Yapay zekanın "Altın Kesişim (Golden Cross)" mantığını yakalaması için sinyal:
+        t_df['Trend_5_8'] = np.where(t_df['EMA_5'] > t_df['EMA_8'], 1, -1)
+        t_df['Trend_8_13'] = np.where(t_df['EMA_8'] > t_df['EMA_13'], 1, -1)
+
+        # 3. Güncellenmiş Öznitelik (Features) Listesi
         features = [
             'RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 
             'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
             'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 
-            'Vol_Lag1', 'Vol_Lag2'
+            'Vol_Lag1', 'Vol_Lag2',
+            'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13' # <--- YENİ EKLENENLER
         ]
         # ----------------------------------------------------------------------------
         
@@ -1514,6 +1530,10 @@ if df is None or df.empty:
 
 # "if not df.empty:" SİLİNDİ, ARTIK GİRİNTİYE (BOŞLUĞA) GEREK YOK
 # HİZALAMAYI EN SOLA ÇEKİYORUZ:
+# 5, 8 ve 13 Günlük Üstel Hareketli Ortalamalar (Kısa Vadeli Trend - Fibo)
+df['EMA_5'] = df['Close'].ewm(span=5, adjust=False).mean()
+df['EMA_8'] = df['Close'].ewm(span=8, adjust=False).mean()
+df['EMA_13'] = df['Close'].ewm(span=13, adjust=False).mean()
 df['SMA_20'] = df['Close'].rolling(window=20).mean()
 df['SMA_50'] = df['Close'].rolling(window=50).mean()
 df['SMA_200'] = df['Close'].rolling(window=200).mean()
@@ -1583,6 +1603,7 @@ with tabs[0]:
     with c_ayar3:
         goster_vwap = st.checkbox("⚖️ VWAP (Maliyet)", value=False, key="chk_vwap")
         goster_ai = st.checkbox("🤖 XGBoost AI Tahmini", value=True, key="chk_ai")
+        goster_kisa_ema = st.checkbox("🚀 5-8-13 Kısa Trend", value=True, key="chk_kisa_ema")
         # (Burada fazladan yazılmış kopya goster_ai satırını da temizledim)
         
     # ========================================================
@@ -1596,10 +1617,14 @@ with tabs[0]:
     
     if goster_vwap:
         fig.add_trace(go.Scatter(x=df.index, y=df['VWAP_20'], name="VWAP", line=dict(color='#ff00ff', width=2, dash='dashdot')), row=1, col=1)
-
+        
     # TİLSON ÇİZGİSİNİ GRAFİĞE EKLEME SATIRI:
     fig.add_trace(go.Scatter(x=df.index, y=df['Tilson_T3'], name="Tilson T3", line=dict(color='yellow', width=2)), row=1, col=1)
-    
+    # 5, 8, 13 EMA ÇİZGİLERİNİ GRAFİĞE EKLEME:
+    if goster_kisa_ema:
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA_5'], name="EMA 5", line=dict(color='#00d4ff', width=1.5)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA_8'], name="EMA 8", line=dict(color='#ff9900', width=1.5)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA_13'], name="EMA 13", line=dict(color='#ff00ff', width=1.5)), row=1, col=1)
     if goster_vpvr:
         hacim_bolumleri, fiyat_araliklari = np.histogram(df['Close'].dropna(), bins=40, weights=df['Volume'].dropna())
         bolum_merkezleri = (fiyat_araliklari[:-1] + fiyat_araliklari[1:]) / 2

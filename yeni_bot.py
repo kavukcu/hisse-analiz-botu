@@ -474,6 +474,24 @@ def ileri_teknik_gostergeler(df):
     df_ta['Ichimoku_Trend'] = np.where(df_ta['Close'] > df_ta['Senkou_Span_A'], 
                                        np.where(df_ta['Close'] > df_ta['Senkou_Span_B'], "GÜÇLÜ BOĞA", "NÖTR"), 
                                        np.where(df_ta['Close'] < df_ta['Senkou_Span_B'], "GÜÇLÜ AYI", "NÖTR"))
+    # ==========================================
+    # YENİ EKLENEN: 5, 8, 13 HAREKETLİ ORTALAMALAR
+    # ==========================================
+    # Basit Hareketli Ortalamalar (SMA)
+    df_ta['SMA_5'] = df_ta['Close'].rolling(window=5).mean()
+    df_ta['SMA_8'] = df_ta['Close'].rolling(window=8).mean()
+    df_ta['SMA_13'] = df_ta['Close'].rolling(window=13).mean()
+
+    # Üstel Hareketli Ortalamalar (EMA) - (Yapay zeka için daha etkilidir)
+    df_ta['EMA_5'] = df_ta['Close'].ewm(span=5, adjust=False).mean()
+    df_ta['EMA_8'] = df_ta['Close'].ewm(span=8, adjust=False).mean()
+    df_ta['EMA_13'] = df_ta['Close'].ewm(span=13, adjust=False).mean()
+
+    # Kısa Vadeli Fibonacci Kesişim Trend Sinyali (5 > 8 > 13)
+    df_ta['Fibo_MA_Trend'] = np.where(
+        (df_ta['EMA_5'] > df_ta['EMA_8']) & (df_ta['EMA_8'] > df_ta['EMA_13']), "🚀 GÜÇLÜ YÜKSELİŞ",
+        np.where((df_ta['EMA_5'] < df_ta['EMA_8']) & (df_ta['EMA_8'] < df_ta['EMA_13']), "🔻 GÜÇLÜ DÜŞÜŞ", "⚖️ YATAY NÖTR")
+    )
     return df_ta
 
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):
@@ -737,6 +755,23 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "🤖 AI Kararı": "Zaman Tasarrufu",
                 "🎯 AI Hedef": "-"
             }
+        # Veriye yeni indikatörlerimizi dahil et
+        df_g_kapanmis = ileri_teknik_gostergeler(df_g_kapanmis)
+        
+        # Günlük değişkenleri çek
+        g_fiyat = df_g_kapanmis['Close'].iloc[-1]
+        g_ema5 = df_g_kapanmis['EMA_5'].iloc[-1]
+        g_ema8 = df_g_kapanmis['EMA_8'].iloc[-1]
+        g_ema13 = df_g_kapanmis['EMA_13'].iloc[-1]
+        
+        # Sinyal Durumu (5, 8'i yukarı kestiyse veya sıralı yükseliş varsa)
+        g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
+
+        # ==========================================
+        # ⚡ AKILLI FİLTRE: ERKEN ÇIKIŞ (EARLY EXIT) 
+        # ==========================================
+        # MA kesişimini de umut şartlarına ekledik
+        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_spring or g_ma_kestimi
         # ==========================================
         df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
         
@@ -1118,24 +1153,68 @@ def rl_ajani_egit(df):
     
     aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
     return aksiyon_metni
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import LSTM, Dropout, Dense
+import numpy as np
+
 def lstm_tahmin_yap(df, lookback_days=60):
-    # Kapanış fiyatlarını hazırla
-    data = df['Close'].values.reshape(-1, 1)
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data)
+    # ---------------------------------------------------------
+    # 1. VERİ TEMİZLİĞİ VE HAZIRLIK
+    # ---------------------------------------------------------
+    df = df.copy()
     
-    # LSTM giriş formatına çevir (X: Son 60 gün, y: 61. gün)
+    # Model eğitimine girmeden önce NaN (boş) verileri temizliyoruz
+    df.dropna(inplace=True)
+    
+    # Veri setinde yeterli gün yoksa fonksiyonu durdur (Hata almamak için)
+    if len(df) <= lookback_days:
+        return None 
+
+    # ---------------------------------------------------------
+    # 2. ÖZELLİKLER (FEATURES) VE HEDEF BELİRLEME
+    # ---------------------------------------------------------
+    yapay_zeka_ozellikleri = [
+        'Open', 'High', 'Low', 'Volume', 
+        'Tilson_T3', 'Stoch_K', 'Stoch_D',
+        'SMA_5', 'SMA_8', 'SMA_13',   
+        'EMA_5', 'EMA_8', 'EMA_13'    
+    ]
+    
+    # Sadece DataFrame'de gerçekten hesaplanmış ve var olan özellikleri al
+    kullanilacak_ozellikler = [col for col in yapay_zeka_ozellikleri if col in df.columns]
+    
+    # X: Yapay zekanın bakarak öğreneceği veriler
+    # y: Yapay zekanın tahmin etmeye çalışacağı sonuç (Kapanış Fiyatı)
+    X = df[kullanilacak_ozellikler].values
+    y = df['Close'].values.reshape(-1, 1)
+
+    # ---------------------------------------------------------
+    # 3. ÖLÇEKLENDİRME (SCALING)
+    # ---------------------------------------------------------
+    # Çoklu özellik kullanırken X ve y için ayrı Scaler kullanmak işlemi kolaylaştırır
+    scaler_X = MinMaxScaler(feature_range=(0, 1))
+    scaler_y = MinMaxScaler(feature_range=(0, 1))
+    
+    scaled_X = scaler_X.fit_transform(X)
+    scaled_y = scaler_y.fit_transform(y)
+    
+    # ---------------------------------------------------------
+    # 4. LSTM GİRİŞ FORMATINA ÇEVİRME
+    # ---------------------------------------------------------
     X_train, y_train = [], []
-    for i in range(lookback_days, len(scaled_data)):
-        X_train.append(scaled_data[i-lookback_days:i, 0])
-        y_train.append(scaled_data[i, 0])
+    for i in range(lookback_days, len(scaled_X)):
+        X_train.append(scaled_X[i-lookback_days:i, :]) # Son 60 günün TÜM özellikleri
+        y_train.append(scaled_y[i, 0])                 # 61. günün kapanış fiyatı
         
     X_train, y_train = np.array(X_train), np.array(y_train)
-    X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
     
-    # Model Mimarisi
+    # ---------------------------------------------------------
+    # 5. MODEL MİMARİSİ VE EĞİTİM
+    # ---------------------------------------------------------
+    # X_train.shape[1] = 60 gün, X_train.shape[2] = Özellik (Feature) sayısı
     model = Sequential([
-        LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)),
+        LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
         Dropout(0.2),
         LSTM(50, return_sequences=False),
         Dropout(0.2),
@@ -1145,21 +1224,27 @@ def lstm_tahmin_yap(df, lookback_days=60):
     
     model.compile(optimizer='adam', loss='mean_squared_error')
     
-    # Pratiklik için düşük epoch kullanılıyor, performansa göre artırabilirsin
+    # Pratiklik için düşük epoch; performansa göre artırabilirsiniz
     model.fit(X_train, y_train, batch_size=32, epochs=10, verbose=0)
     
-    # Gelecek Tahmini (Son 60 güne bakarak bir sonraki günü tahmin et)
-    son_veri = scaled_data[-lookback_days:]
-    X_test = np.reshape(son_veri, (1, son_veri.shape[0], 1))
+    # ---------------------------------------------------------
+    # 6. GELECEK TAHMİNİ
+    # ---------------------------------------------------------
+    # Son 60 günün verilerini al
+    son_veri = scaled_X[-lookback_days:]
+    X_test = np.reshape(son_veri, (1, son_veri.shape[0], son_veri.shape[1]))
+    
+    # Tahmin yap (Çıktı 0-1 arasında ölçekli olacak)
     tahmin_olcekli = model.predict(X_test, verbose=0)
-    gercek_tahmin = scaler.inverse_transform(tahmin_olcekli)
+    
+    # Sadece y'yi (Kapanışı) ölçeklendirdiğimiz scaler ile normal fiyata dönüştür
+    gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
     
     return gercek_tahmin[0][0]
+
+
 # ==========================================
-# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
-# ==========================================
-# ==========================================
-# 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
+# 4. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
 async def tek_hisse_getir(session, sem, hisse_kodu):
     """
@@ -1167,6 +1252,8 @@ async def tek_hisse_getir(session, sem, hisse_kodu):
     Yahoo Finance (veya kullandığın API) için örnek bir endpoint.
     """
     # Aynı anda API'ye yüklenmemek için kilit mekanizması
+    async with sem:
+        pass # Buraya hisse verisi çekme (request) işlemleriniz gelecek...
     async with sem:
         # BIST hisseleri için Yahoo Finance formatı genelde 'ISCTR.IS' şeklindedir
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{hisse_kodu}.IS?interval=1d&range=1y"
@@ -1740,6 +1827,7 @@ with tabs[1]:
                 st.warning("⚠️ Tarama yapılamadı.")
                 
     # 5. EN SON TARAMAYI GETİR (YENİLENMİŞ VE GÜÇLENDİRİLMİŞ)
+    # 5. EN SON TARAMAYI GETİR (YENİLENMİŞ VE GÜÇLENDİRİLMİŞ)
     elif btn_son_tarama:
         # 1. Eğer Streamlit hafızası (RAM) boşsa ama fiziksel dosya varsa, veriyi dosyadan geri çek
         if st.session_state.son_tarama_df is None and os.path.exists("son_tarama.pkl"):
@@ -1756,11 +1844,12 @@ with tabs[1]:
             st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
             
             if st.session_state.son_tarama_tipi == "Nokta Atışı (Sniper)":
-                st.success(f"🎯 Dipten Dönüş Fırsatı! {len(st.session_state.son_tarama_df)} hisse listeleniyor.")
-                
+                st.success(f"🎯 Dipten Dönüş Fırsatı! {len(st.session_state.son_tarama_df)} hisse var.")
+            
+            # DataFrame'i Ekrana Yazdır
             st.dataframe(st.session_state.son_tarama_df, use_container_width=True, hide_index=True)
         else:
-            st.error("⚠️ Hafızada veya yerel dosyada kayıtlı bir tarama bulunamadı. Lütfen önce bir tarama yapın.")    
+            st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")
     tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)

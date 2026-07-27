@@ -708,49 +708,53 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
-def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
+def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
     try:
-        # 1. ÖNCE SADECE GÜNLÜK VERİYİ ÇEK (Çok Hızlı İşlem)
-        df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d")
-        
-        if df_gunluk.empty: 
+        # 1. Günlük Veriyi Çek
+        df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
+        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20: 
             return None
             
-        df_g_kapanmis = df_gunluk.copy()
+        df_g = df_gunluk.copy()
+        
+        # Güncel Anlık Fiyat
         try:
-            # 1 dakikalık en güncel veriyi çekerek anlık fiyatı yakalıyoruz
             guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
-            guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g_kapanmis['Close'].iloc[-1])
-        except:
-            guncel_fiyat = float(df_g_kapanmis['Close'].iloc[-1])
+            guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g['Close'].iloc[-1])
+        except Exception:
+            guncel_fiyat = float(df_g['Close'].iloc[-1])
 
-        # Günlük bazda temel göstergeleri hemen hesapla
-        df_g_kapanmis = stokastik_hesapla(df_g_kapanmis)
-        df_g_kapanmis['Tilson_T3'] = tilson_t3(df_g_kapanmis['Close'])
-        temp_g = dipten_donus_analizi(df_g_kapanmis)
+        # Temel İndikatörler & İleri Teknik Analiz
+        df_g = stokastik_hesapla(df_g)
+        df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
+        df_g = ileri_teknik_gostergeler(df_g)
+        temp_g = dipten_donus_analizi(df_g)
         
-        g_fiyat = df_g_kapanmis['Close'].iloc[-1]
-        temp_g = dipten_donus_analizi(df_g_kapanmis)
-        
-        g_fiyat = df_g_kapanmis['Close'].iloc[-1]
-        g_tilson = df_g_kapanmis['Tilson_T3'].iloc[-1]
-        g_stoch_k = df_g_kapanmis['Stoch_K'].iloc[-1]
-        g_stoch_d = df_g_kapanmis['Stoch_D'].iloc[-1]
+        g_fiyat = df_g['Close'].iloc[-1]
+        g_tilson = df_g['Tilson_T3'].iloc[-1]
+        g_stoch_k = df_g['Stoch_K'].iloc[-1]
+        g_stoch_d = df_g['Stoch_D'].iloc[-1]
+        g_ema5 = df_g['EMA_5'].iloc[-1]
+        g_ema8 = df_g['EMA_8'].iloc[-1]
+        g_ema13 = df_g['EMA_13'].iloc[-1]
         
         g_boga = g_fiyat > g_tilson
         g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
         g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
         g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
         g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
-
-        # ==========================================
-        # ⚡ AKILLI FİLTRE: ERKEN ÇIKIŞ (EARLY EXIT) 
-        # ==========================================
-        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_spring
+        g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
+        g_ema5 = df_g['EMA_5'].iloc[-1]
+        g_ema8 = df_g['EMA_8'].iloc[-1]
+        g_ema13 = df_g['EMA_13'].iloc[-1]
+        g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
+        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (Erken Çıkış)
+        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_spring or g_ma_kestimi
         
         if not umut_var_mi and analiz_tipi == "radar":
             return {
                 "Varlık": sembol,
+                "Güncel Fiyat": f"{guncel_fiyat:.2f}",
                 "Kapanış Fiyatı": f"{g_fiyat:.2f}",
                 "🎯 AL/SAT Kararı": "🐻 PAS GEÇİLDİ (Ölü Trend)",
                 "Günlük T3": "🐻 AYI",
@@ -762,36 +766,16 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "🤖 AI Kararı": "Zaman Tasarrufu",
                 "🎯 AI Hedef": "-"
             }
-        # Veriye yeni indikatörlerimizi dahil et
-        df_g_kapanmis = ileri_teknik_gostergeler(df_g_kapanmis)
-        
-        # Günlük değişkenleri çek
-        g_fiyat = df_g_kapanmis['Close'].iloc[-1]
-        g_ema5 = df_g_kapanmis['EMA_5'].iloc[-1]
-        g_ema8 = df_g_kapanmis['EMA_8'].iloc[-1]
-        g_ema13 = df_g_kapanmis['EMA_13'].iloc[-1]
-        
-        # Sinyal Durumu (5, 8'i yukarı kestiyse veya sıralı yükseliş varsa)
-        g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
 
-        # ==========================================
-        # ⚡ AKILLI FİLTRE: ERKEN ÇIKIŞ (EARLY EXIT) 
-        # ==========================================
-        # MA kesişimini de umut şartlarına ekledik
-        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_spring or g_ma_kestimi
-        # ==========================================
+        # 2. 4 Saatlik Veri Çekme
         df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
         
-        # 🛡️ 2. KALKAN: Değişkenleri önceden tanımlama (Hata almamak için)
-        # Eğer 4 saatlik veri gelmezse, kodun çökmemesi için günlük verileri (g_*) varsayılan (None veya yedek) olarak atıyoruz.
-        h4_fiyat = g_fiyat
-        h4_tilson = g_tilson
-        h4_stoch_k = g_stoch_k
-        h4_stoch_d = g_stoch_d
+        h4_fiyat, h4_tilson = g_fiyat, g_tilson
+        h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
+        h4_boga, h4_stoch_al = g_boga, g_stoch_al
 
-        # B) 4 SAATLİK KAPANIS ANALİZİ (Tilson + Stoch)
         if not df_4h.empty and len(df_4h) >= 20:
-            try: # Analiz hatası kalkanı
+            try:
                 df_4h = stokastik_hesapla(df_4h)
                 df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
                 
@@ -804,64 +788,35 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 h4_stoch_al = (h4_stoch_k < 35) and (h4_stoch_k > h4_stoch_d)
             except Exception as e:
                 logging.error(f"[{sembol}] 4S Analiz Hatası: {e}")
-                h4_boga, h4_stoch_al = g_boga, g_stoch_al
-        else:
-            h4_boga, h4_stoch_al = g_boga, g_stoch_al
 
-        # C) NİHAİ AL / SAT KARARI (Çift Onay Sistemi)
+        # Karar Mekanizması
         if g_boga and h4_boga:
-            if g_stoch_al and h4_stoch_al:
-                al_sat_karari = "🚀 GÜÇLÜ AL (4S + Günlük Onaylı)"
-            elif g_stoch_al or h4_stoch_al:
-                al_sat_karari = "🟢 AL (Tek Zaman Dilimi Erken Sinyal)"
-            else:
-                al_sat_karari = "📈 BOĞA TRENDİ (Düzeltmede)"
+            al_sat_karari = "🚀 GÜÇLÜ AL (4S + Günlük Onaylı)" if (g_stoch_al and h4_stoch_al) else "🟢 AL (Trend Onaylı)"
         elif g_boga and not h4_boga:
             al_sat_karari = "⚠️ DÜZELTME (Günlük Boğa / 4S Ayı)"
         elif not g_boga and h4_boga:
             al_sat_karari = "⚡ TEPKİ YÜKSELİŞİ (4S Boğa / Günlük Ayı)"
         else:
-            al_sat_karari = "🐻 GÜÇLÜ SAT / AYI (4S + Günlük Ayı)"
+            al_sat_karari = "🐻 GÜÇLÜ SAT / AYI"
 
         if analiz_tipi == "radar":
             temp_4h = dipten_donus_analizi(df_4h) if not df_4h.empty else temp_g
-            h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1]
+            h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1] if not temp_4h.empty else False
             
-            if g_hacim and h4_hacim:
-                hacim_durum = "🔥 GÜÇLÜ PATLAMA (4S+Günlük)"
-            elif h4_hacim:
-                hacim_durum = "⚡ 4S HACİM PATLAMASI (Erken)"
-            elif g_hacim:
-                hacim_durum = "💥 GÜNLÜK HACİM PATLAMASI"
-            else:
-                hacim_durum = "Normal"
-
-            h4_uyusmazlik = temp_4h['Pozitif_Uyusmazlik'].iloc[-1]
-            if g_uyusmazlik and h4_uyusmazlik:
-                uyusmazlik_durum = "✅✅ ÇİFT UYUŞMAZLIK (4S+Günlük)"
-            elif h4_uyusmazlik:
-                uyusmazlik_durum = "⚡ 4S UYUŞMAZLIK (Erken Sinyal)"
-            elif g_uyusmazlik:
-                uyusmazlik_durum = "📈 GÜNLÜK UYUŞMAZLIK"
-            else:
-                uyusmazlik_durum = "-"
-
-            spring_durum = "✅ VAR" if (g_spring or temp_4h['Wyckoff_Spring'].iloc[-1]) else "-"
+            hacim_durum = "🔥 GÜÇLÜ PATLAMA" if (g_hacim or h4_hacim) else "Normal"
+            uyusmazlik_durum = "✅ POZİTİF UYUŞMAZLIK" if (g_uyusmazlik or temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1]) else "-"
+            spring_durum = "✅ VAR" if (g_spring or temp_4h.get('Wyckoff_Spring', pd.Series([False])).iloc[-1]) else "-"
             
             try:
                 s_skor = sihirli_formul_skorla(sembol)['Puan']
-            except:
+            except Exception:
                 s_skor = 0
 
-            # AI Kararı 
-            if (g_boga or h4_boga) and (g_stoch_al or h4_stoch_al or h4_hacim or g_uyusmazlik or h4_uyusmazlik):
-                ai_veri = ensemble_prediction(df_g_kapanmis, sembol)
-            else:
-                ai_veri = {'signal': "ZAYIF (AI Pas Geçti)", 'rf_prediction': 0.0, 'confidence': 0.0}
+            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
 
             return {
                 "Varlık": sembol,
-                "Güncel Fiyat": f"{guncel_fiyat:.2f}",  # YENİ EKLENEN SÜTUN
+                "Güncel Fiyat": f"{guncel_fiyat:.2f}",
                 "Kapanış Fiyatı": f"{g_fiyat:.2f}",
                 "🎯 AL/SAT Kararı": al_sat_karari,
                 "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
@@ -870,8 +825,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "💥 Hacim Analizi": hacim_durum,
                 "📈 Pozitif Uyuşmazlık": uyusmazlik_durum,
                 "🪤 Spring (Tuzak)": spring_durum,
-                "🤖 AI Kararı": ai_veri['signal'],
-                "🎯 AI Hedef": f"{ai_veri['rf_prediction']} TL"
+                "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'),
+                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
             }
 
         elif analiz_tipi == "stoch":
@@ -881,15 +836,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
                 "Günlük Stoch %K": round(g_stoch_k, 2),
                 "4S Stoch %K": round(h4_stoch_k, 2),
                 "Durum": "🟢 Çift Dip/Al" if (g_stoch_al and h4_stoch_al) else ("↗️ Pozitif" if h4_stoch_al else "⚪ Nötr")
-            }
-
-        elif analiz_tipi == "tilson":
-            return {
-                "Varlık": sembol,
-                "Son Fiyat": f"{g_fiyat:.2f}",
-                "Günlük Tilson": f"{g_tilson:.2f} ({'🚀 BOĞA' if g_boga else '🐻 AYI'})",
-                "4S Tilson": f"{h4_tilson:.2f} ({'🚀 BOĞA' if h4_boga else '🐻 AYI'})",
-                "Trend Uyumu": "✅ ÇİFT BOĞA" if (g_boga and h4_boga) else ("⚠️ UYUMSUZ" if (g_boga != h4_boga) else "❌ ÇİFT AYI")
             }
 
     except Exception as e:
@@ -1681,14 +1627,11 @@ with tabs[0]:
     with grafik_alani:
         st.plotly_chart(fig, use_container_width=True)
 # --- SEKME 1: AKILLI RADAR ---
+# --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
 with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
-    import os # Sayfa yenilendiğinde dosyadan okumak için gerekli
-    
-    # ============================================================
-    # YENİ EKLENEN: SESSION STATE VE YEREL DOSYA HAFIZASI
-    # ============================================================
+    # Session State Tanımlamaları
     if 'son_tarama_df' not in st.session_state:
         st.session_state.son_tarama_df = None
     if 'son_tarama_tipi' not in st.session_state:
@@ -1708,11 +1651,20 @@ with tabs[1]:
         btn_nokta_atisi = st.button("🎯 Nokta Atışı", type="primary", key="btn_nokta")
     with col_btn5:
         btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary", key="btn_son")
+
+    # Yardımcı Fonksiyon: Taramayı hem RAM'e (Session State) hem Diske Standart Kaydeder
+    def taramayi_kaydet(df, tip_adi):
+        st.session_state.son_tarama_df = df
+        st.session_state.son_tarama_tipi = tip_adi
+        df.to_pickle("son_tarama.pkl")
+        with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
+            f.write(tip_adi)
+
     # 1. GENEL RADAR
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 gelecek_sonuclar = {
                     executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
                     for s in tarama_listesi
@@ -1724,26 +1676,21 @@ with tabs[1]:
                         
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
-                
-                # Çift Boğa Onaylı (Sniper) Hisseler
-                df_sniper = df_radar[
-                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
-                    (df_radar['4S T3'] == '🚀 BOĞA')
-                ]
-                
-                st.dataframe(df_sniper, use_container_width=True, hide_index=True)
-                
-                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET (Yarım kalan kısım tamamlandı)
-                st.session_state.son_tarama_df = df_radar
-                st.session_state.son_tarama_tipi = "Genel Radar Taraması"
-                df_radar.to_csv("son_tarama.csv", index=False)
-                st.success("✅ Tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
+                taramayi_kaydet(df_radar, "Genel Radar Taraması")
+                st.dataframe(df_radar, use_container_width=True, hide_index=True)
+                st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
+            else:
+                st.warning("⚠️ Tarama sonucu bulunamadı.")
+
     # 2. STOCH ANALİZİ
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
-                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s for s in tarama_listesi}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s 
+                    for s in tarama_listesi
+                }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     if sonuc:
@@ -1751,15 +1698,9 @@ with tabs[1]:
             
             if stoch_sonuclari:
                 df_stoch = pd.DataFrame(stoch_sonuclari)
-                
-                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
-                st.session_state.son_tarama_df = df_stoch
-                st.session_state.son_tarama_tipi = "Stoch Analizi"
-                df_stoch.to_pickle("son_tarama.pkl")
-                with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
-                    f.write("Stoch Analizi")
-                
+                taramayi_kaydet(df_stoch, "Stoch Analizi")
                 st.dataframe(df_stoch, use_container_width=True, hide_index=True)
+                st.success("✅ Stoch taraması kaydedildi!")
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
@@ -1767,8 +1708,11 @@ with tabs[1]:
     elif btn_tilson:
         with st.spinner('Tilson T3 trend analizi taranıyor...'):
             tilson_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
-                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s for s in tarama_listesi}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s 
+                    for s in tarama_listesi
+                }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     if sonuc:
@@ -1776,15 +1720,9 @@ with tabs[1]:
             
             if tilson_sonuclari:
                 df_tilson = pd.DataFrame(tilson_sonuclari)
-                
-                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
-                st.session_state.son_tarama_df = df_tilson
-                st.session_state.son_tarama_tipi = "Tilson (T3) Analizi"
-                df_tilson.to_pickle("son_tarama.pkl")
-                with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
-                    f.write("Tilson (T3) Analizi")
-                
+                taramayi_kaydet(df_tilson, "Tilson (T3) Analizi")
                 st.dataframe(df_tilson, use_container_width=True, hide_index=True)
+                st.success("✅ Tilson T3 taraması kaydedildi!")
             else:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
@@ -1792,8 +1730,11 @@ with tabs[1]:
     elif btn_nokta_atisi:
         with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
-                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
+                    for s in tarama_listesi
+                }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     if sonuc:
@@ -1801,12 +1742,8 @@ with tabs[1]:
             
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
-                df_sniper = df_radar[
-                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
-                    (df_radar['4S T3'] == '🚀 BOĞA')
-                ]
                 
-                st.dataframe(df_sniper, use_container_width=True, hide_index=True)
+                # Hassas Filtreleme
                 df_sniper = df_radar[
                     (df_radar['Günlük T3'] == '🚀 BOĞA') & 
                     (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
@@ -1818,13 +1755,7 @@ with tabs[1]:
                 ]
                 
                 if not df_sniper.empty:
-                    # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
-                    st.session_state.son_tarama_df = df_sniper
-                    st.session_state.son_tarama_tipi = "Nokta Atışı (Sniper)"
-                    df_sniper.to_pickle("son_tarama.pkl")
-                    with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
-                        f.write("Nokta Atışı (Sniper)")
-                    
+                    taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
                     st.balloons()
@@ -1832,11 +1763,10 @@ with tabs[1]:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
                 st.warning("⚠️ Tarama yapılamadı.")
-                
-    # 5. EN SON TARAMAYI GETİR (YENİLENMİŞ VE GÜÇLENDİRİLMİŞ)
-    # 5. EN SON TARAMAYI GETİR (YENİLENMİŞ VE GÜÇLENDİRİLMİŞ)
+
+    # 5. EN SON TARAMAYI GETİR
     elif btn_son_tarama:
-        # 1. Eğer Streamlit hafızası (RAM) boşsa ama fiziksel dosya varsa, veriyi dosyadan geri çek
+        # 1. RAM boşsa diskteki pickle dosyasından veri çek
         if st.session_state.son_tarama_df is None and os.path.exists("son_tarama.pkl"):
             try:
                 st.session_state.son_tarama_df = pd.read_pickle("son_tarama.pkl")
@@ -1844,16 +1774,11 @@ with tabs[1]:
                     with open("son_tarama_tipi.txt", "r", encoding="utf-8") as f:
                         st.session_state.son_tarama_tipi = f.read()
             except Exception as e:
-                pass # Dosya bozuksa yoksay
+                logging.error(f"Son tarama dosyadan okunamadı: {e}")
 
-        # 2. Veri varsa ekrana bas
+        # 2. Ekrana Bas
         if st.session_state.son_tarama_df is not None:
             st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
-            
-            if st.session_state.son_tarama_tipi == "Nokta Atışı (Sniper)":
-                st.success(f"🎯 Dipten Dönüş Fırsatı! {len(st.session_state.son_tarama_df)} hisse var.")
-            
-            # DataFrame'i Ekrana Yazdır
             st.dataframe(st.session_state.son_tarama_df, use_container_width=True, hide_index=True)
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")

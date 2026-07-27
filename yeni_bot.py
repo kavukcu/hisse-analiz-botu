@@ -186,16 +186,24 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         if aktif_kaynak == "Yahoo Finance (yfinance)":
             for _ in range(2):
                 try:
+                    # 👇 EKLENEN KISIM BAŞLANGICI 👇
+                    if end is not None:
+                        yf_end = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    else:
+                        yf_end = None
+                    # 👆 EKLENEN KISIM BİTİŞİ 👆
+
                     # Sadece yfinance formatına uygun orijinal ticker string'ini veriyoruz
                     df = yf.download(
                         ticker, 
                         start=start, 
-                        end=end,
+                        end=yf_end,  # <--- BURASI DEĞİŞTİ: end=end yerine end=yf_end oldu
                         interval=interval, 
                         progress=False, 
                         auto_adjust=True, 
                         threads=True
                     )
+                    
                     if df is not None and not df.empty:
                         if isinstance(df.columns, pd.MultiIndex):
                             df.columns = df.columns.droplevel(1)

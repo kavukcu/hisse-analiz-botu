@@ -126,9 +126,9 @@ def tahminleri_degerlendir():
             except Exception as e:
                 logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
                 
+    # Commit ve close işlemleri fonksiyonun içine (doğru hizaya) taşındı
     conn.commit()
     conn.close()
-
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
 def sembol_formatla(hisse_kodu):

@@ -125,7 +125,7 @@ def tahminleri_degerlendir():
                               (gercek_fiyat, durum, rowid))
             except Exception as e:
                 logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
-jkjkjh
+vghgfhfg
     conn.commit()
     conn.close()
 

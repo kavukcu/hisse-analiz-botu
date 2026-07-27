@@ -717,10 +717,19 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
             return None
             
         df_g_kapanmis = df_gunluk.copy()
+        try:
+            # 1 dakikalık en güncel veriyi çekerek anlık fiyatı yakalıyoruz
+            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
+            guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g_kapanmis['Close'].iloc[-1])
+        except:
+            guncel_fiyat = float(df_g_kapanmis['Close'].iloc[-1])
 
         # Günlük bazda temel göstergeleri hemen hesapla
         df_g_kapanmis = stokastik_hesapla(df_g_kapanmis)
         df_g_kapanmis['Tilson_T3'] = tilson_t3(df_g_kapanmis['Close'])
+        temp_g = dipten_donus_analizi(df_g_kapanmis)
+        
+        g_fiyat = df_g_kapanmis['Close'].iloc[-1]
         temp_g = dipten_donus_analizi(df_g_kapanmis)
         
         g_fiyat = df_g_kapanmis['Close'].iloc[-1]
@@ -852,6 +861,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar"):
 
             return {
                 "Varlık": sembol,
+                "Güncel Fiyat": f"{guncel_fiyat:.2f}",  # YENİ EKLENEN SÜTUN
                 "Kapanış Fiyatı": f"{g_fiyat:.2f}",
                 "🎯 AL/SAT Kararı": al_sat_karari,
                 "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
@@ -1341,23 +1351,7 @@ async def tek_hisse_getir(session, sem, hisse_kodu):
         except Exception as e:
             return hisse_kodu, None
 
-async def tum_piyasayi_tara_async(hisse_listesi):
-    """
-    Tüm hisse listesini asenkron motorla saniyeler içinde tarar.
-    """
-    # Aynı anda maksimum 50 istek atacak şekilde sınırlandırıyoruz (API ban yememek için)
-    sem = asyncio.Semaphore(50) 
-    
-    async with aiohttp.ClientSession() as session:
-        # Tüm görevleri (task) hazırlıyoruz
-        gorevler = [tek_hisse_getir(session, sem, hisse) for hisse in hisse_listesi]
-        
-        # Görevleri çalıştır ve sonuçları bekle
-        sonuclar = await asyncio.gather(*gorevler)
-        
-        # Başarılı çekilen verileri bir sözlükte topla
-        basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
-        return basarili_veriler
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def tum_bist_hisselerini_getir():
     """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
@@ -1719,41 +1713,31 @@ with tabs[1]:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                gelecek_sonuclar = {executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s for s in tarama_listesi}
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
+                    for s in tarama_listesi
+                }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     if sonuc:
                         radar_sonuclari.append(sonuc)
+                        
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
+                
+                # Çift Boğa Onaylı (Sniper) Hisseler
                 df_sniper = df_radar[
                     (df_radar['Günlük T3'] == '🚀 BOĞA') & 
                     (df_radar['4S T3'] == '🚀 BOĞA')
                 ]
                 
                 st.dataframe(df_sniper, use_container_width=True, hide_index=True)
-                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET
+                
+                # HAFIZAYA VE FİZİKSEL DOSYAYA KAYDET (Yarım kalan kısım tamamlandı)
                 st.session_state.son_tarama_df = df_radar
                 st.session_state.son_tarama_tipi = "Genel Radar Taraması"
-                df_radar.to_pickle("son_tarama.pkl")
-                with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
-                    f.write("Genel Radar Taraması")
-                
-                st.dataframe(df_radar, use_container_width=True, hide_index=True)
-                
-                # Veritabanı Kaydı
-                for _, row in df_radar.iterrows():
-                    sembol = row['Varlık']
-                    hedef_raw = str(row.get('🎯 AI Hedef', '0')).replace(' TL', '').strip()
-                    try:
-                        hedef_float = float(hedef_raw)
-                        if hedef_float > 0:
-                            tahmin_kaydet(sembol, hedef_float)
-                    except ValueError:
-                        continue
-            else:
-                st.warning("⚠️ Tarama sonucu bulunamadı veya veri çekilemedi.")
-                
+                df_radar.to_csv("son_tarama.csv", index=False)
+                st.success("✅ Tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
     # 2. STOCH ANALİZİ
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):

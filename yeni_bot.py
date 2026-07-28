@@ -15,6 +15,7 @@ session.headers.update({
 })
 import concurrent.futures
 import logging
+import os
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor

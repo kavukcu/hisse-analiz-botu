@@ -1038,7 +1038,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         df_g = stokastik_hesapla(df_g)
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)
-        
+        df['Super_Sinyal_ML'] = np.where(g_super_sinyal == True, 1, 0)
+        df['Wyckoff_Spring_ML'] = np.where(g_spring == True, 1, 0)
+        df['Super_Sinyal_ML'] = df['Super_Sinyal_ML'].fillna(0)
+        df['Wyckoff_Spring_ML'] = df['Wyckoff_Spring_ML'].fillna(0)
         # Yenilenen dipten dönüş analizi çağrılıyor
         temp_g = dipten_donus_analizi(df_g)
         
@@ -1234,6 +1237,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     return study.best_params
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
+    
     try:
         t_df = df.copy()
         
@@ -1333,8 +1337,9 @@ def ensemble_prediction(df, sembol="Genel"):
             'Alcalan_Ucgen', 'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 
             'Dip_Uzakligi_Z', 'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru',
             # 👇 YENİ: Harmonik ve Dev Trend Kesişimleri 👇
-            'Cross_Sinyali', 'SMA_50_200_Farki', 'ABCD_Formasyonu'
+            'Cross_Sinyali', 'SMA_50_200_Farki', 'ABCD_Formasyonu', 'Super_Sinyal_ML', 'Wyckoff_Spring_ML'
         ]
+        X = df[features_list]
         # ----------------------------------------------------------------------------
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)

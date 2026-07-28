@@ -1036,7 +1036,11 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             # Formasyon tespiti ve hedef hesaplama
             # Formasyon tespiti ve hedef hesaplamayı tetikleyen satır:
+            # Formasyon tespiti ve hedef hesaplamayı tetikleyen satır:
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
+            
+            # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
+            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
@@ -1050,8 +1054,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                         if "AL" in al_sat_karari:
                             al_sat_karari = f"⚠️ RİSKLİ: Trend Pozitif ama {formasyon_adi} Tehdidi!"
                         
-                        # AI'yı da frenle
-                        ai_sinyal = ai_veri.get('signal', 'NÖTR') if umut_var_mi else "ZAYIF"
+                        # AI'yı da frenle (Artık ai_veri tanımlı olduğu için başarıyla çalışacak)
+                        ai_sinyal = ai_veri.get('signal', 'NÖTR')
                         if "AL" in ai_sinyal:
                             ai_veri['signal'] = f"🛑 AI İPTAL ({formasyon_adi})"
             except Exception as e:
@@ -1064,9 +1068,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             except Exception:
                 s_skor = 0
             
-
-            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
-
+            # --- HATALI ÇİFT RETURN BLOĞUNUN TEMİZLENMİŞ HALİ ---
             return {
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
@@ -2046,4 +2048,3 @@ with tabs[10]:
             st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
     except Exception as e:
         st.error(f"Veritabanı erişim hatası: {e}")
-        

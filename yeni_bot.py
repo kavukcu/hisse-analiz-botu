@@ -944,7 +944,13 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             guncel_fiyat = float(df_g['Close'].iloc[-1])
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barmm kapanışını canlı fiyatla güncelle
-        df_g.iloc[-1, df_g.columns.get_loc('Close')] = guncel_fiyat
+        if not df_g.empty and guncel_fiyat is not None:
+            last_idx = df_g.index[-1]
+    
+            df_g.loc[last_idx, 'Close'] = guncel_fiyat
+            # Anlık fiyat o günün en yükseğini geçtiyse High'ı, en düşüğünün altına indiyse Low'u güncelle
+            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
+            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
 
         # --- C. TEMEL İNDİKATÖRLER & İLERİ TEKNİK ANALİZ ---
         df_g = stokastik_hesapla(df_g)
@@ -1029,12 +1035,35 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             spring_durum = "✅ VAR" if (g_spring or temp_4h.get('Wyckoff_Spring', pd.Series([False])).iloc[-1]) else "-"
             
             # Formasyon tespiti ve hedef hesaplama
+            # Formasyon tespiti ve hedef hesaplamayı tetikleyen satır:
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
+            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
-                s_skor = sihirli_formul_skorla(sembol)['Puan']
+                # Hedef yüzdesini sayısal bir değere çevir (örneğin "% -38.75" -> -38.75)
+                hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
+                if hedef_str != '-' and hedef_str != '0.00':
+                    hedef_oran = float(hedef_str)
+                    
+                    # Eğer formasyon %5'ten daha derin bir düşüş öngörüyorsa ve sistem AL diyorsa VETO ET!
+                    if hedef_oran < -5.0:
+                        if "AL" in al_sat_karari:
+                            al_sat_karari = f"⚠️ RİSKLİ: Trend Pozitif ama {formasyon_adi} Tehdidi!"
+                        
+                        # AI'yı da frenle
+                        ai_sinyal = ai_veri.get('signal', 'NÖTR') if umut_var_mi else "ZAYIF"
+                        if "AL" in ai_sinyal:
+                            ai_veri['signal'] = f"🛑 AI İPTAL ({formasyon_adi})"
+            except Exception as e:
+                logging.warning(f"[{sembol}] Veto mekanizmasında hata: {e}")
+            # ----------------------------------------------------
+
+            try:
+                sihirli_veri = sihirli_formul_skorla(sembol)
+                s_skor = sihirli_veri.get('Puan', 0) if isinstance(sihirli_veri, dict) else 0
             except Exception:
                 s_skor = 0
+            
 
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
 
@@ -1517,38 +1546,6 @@ async def tum_piyasayi_tara_async(hisse_listesi):
         # Başarılı çekilen verileri bir sözlükte topla
         basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
         return basarili_veriler
-async def tek_hisse_getir(session, sem, hisse_kodu):
-    """
-    Tek bir hissenin verisini asenkron olarak çeker.
-    Yahoo Finance (veya kullandığın API) için örnek bir endpoint.
-    """
-    # Aynı anda API'ye yüklenmemek için kilit mekanizması
-    async with sem:
-        # BIST hisseleri için Yahoo Finance formatı genelde 'ISCTR.IS' şeklindedir
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{hisse_kodu}.IS?interval=1d&range=1y"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        
-        try:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    # Gelen JSON'ı okuyup basit bir DataFrame'e çevirme işlemi
-                    timestamps = data['chart']['result'][0]['timestamp']
-                    quotes = data['chart']['result'][0]['indicators']['quote'][0]
-                    
-                    df = pd.DataFrame({
-                        'Date': pd.to_datetime(timestamps, unit='s'),
-                        'Close': quotes['close'],
-                        'Volume': quotes['volume']
-                    })
-                    df.set_index('Date', inplace=True)
-                    return hisse_kodu, df
-                else:
-                    return hisse_kodu, None
-        except Exception as e:
-            return hisse_kodu, None
-
-
 @st.cache_data(ttl=86400, show_spinner=False)
 def tum_bist_hisselerini_getir():
     """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
@@ -1763,7 +1760,8 @@ with tabs[0]:
             fig.add_shape(type="line", x0=dip[0], y0=dip[2], x1=dip[1], y1=dip[3], line=dict(color="green", width=3, dash="dot"), row=1, col=1)
 
     if goster_formasyon:
-        df_form = mum_formasyonlarini_bul(df)
+        df_form = yapay_zeka_icin_formasyon_bul(df)
+        st.dataframe(df_form)
         yutan_boga = df_form[df_form['Bullish_Engulfing']]
         fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 

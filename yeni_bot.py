@@ -1337,7 +1337,7 @@ def ensemble_prediction(df, sembol="Genel"):
             # 👇 YENİ: Harmonik ve Dev Trend Kesişimleri 👇
             'Cross_Sinyali', 'SMA_50_200_Farki', 'ABCD_Formasyonu'
         ]
-        X = df[features_list]
+       
         # ----------------------------------------------------------------------------
         
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)

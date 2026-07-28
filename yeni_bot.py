@@ -390,10 +390,10 @@ def anomali_tespit_et(df):
     if son_durum == -1:
         return "⚠️ RİSKLİ: Fiyat/Hacim hareketlerinde anomali tespit edildi!"
     return "✅ Piyasaya uygun, normal hareket."
-def sihirli_formul_skorla(sembol):
+def sihirli_formul_skorla(sembol, df=None):
     """
-    Şirketin temel çarpanlarını çeker ve hissenin 
-    'ucuz', 'kârlı' ve 'güvenli' olup olmadığını 0-100 arası puanlar.
+    Şirketin temel çarpanlarını ve teknik dip dönüş sinyallerini harmanlayarak
+    hisseye kapsamlı bir Hibrit Skor verir.
     """
     try:
         info = sirket_bilgisi_getir(sembol)
@@ -402,33 +402,58 @@ def sihirli_formul_skorla(sembol):
             
         skor = 0
         
-        # 1. F/K Oranı (Fiyat/Kazanç) - Hisse ucuz mu? (Maksimum 25 Puan)
+        # ==========================================
+        # A. TEMEL ANALİZ SKORLAMASI (Maksimum 100 Puan)
+        # ==========================================
+        
+        # 1. F/K Oranı (Maksimum 25 Puan)
         fk = info.get('trailingPE', 999)
         if fk is None: fk = 999
         if 0 < fk <= 10: skor += 25
         elif 10 < fk <= 15: skor += 15
         elif 15 < fk <= 20: skor += 5
         
-        # 2. PD/DD Oranı (Piyasa Değeri / Defter Değeri) - Özkaynaklarına göre ucuz mu? (Maks 25 Puan)
+        # 2. PD/DD Oranı (Maksimum 25 Puan)
         pddd = info.get('priceToBook', 999)
         if pddd is None: pddd = 999
         if 0 < pddd <= 1.5: skor += 25
         elif 1.5 < pddd <= 3.0: skor += 15
         elif 3.0 < pddd <= 5.0: skor += 5
         
-        # 3. ROE (Özsermaye Kârlılığı) - Parayı iyi yönetip kâr ediyor mu? (Maks 25 Puan)
+        # 3. ROE - Özsermaye Kârlılığı (Maksimum 25 Puan)
         roe = info.get('returnOnEquity', -1)
         if roe is None: roe = -1
-        if roe > 0.20: skor += 25  # %20 üzeri kârlılık
+        if roe > 0.20: skor += 25
         elif roe > 0.10: skor += 15
         elif roe > 0.05: skor += 5
         
-        # 4. Cari Oran (Dönen Varlıklar / Kısa Vadeli Yükümlülükler) - Batma/Borç riski var mı? (Maks 25 Puan)
+        # 4. Cari Oran - Borç Risk Durumu (Maksimum 25 Puan)
         cari_oran = info.get('currentRatio', 0)
         if cari_oran is None: cari_oran = 0
         if cari_oran >= 1.5: skor += 25
         elif cari_oran >= 1.0: skor += 15
         
+        # ==========================================
+        # B. TEKNİK DİP DÖNÜŞ BONUSLARI (Ekstra Puanlar)
+        # ==========================================
+        if df is not None and not df.empty:
+            son_mum = df.iloc[-1]
+            
+            # 🌟 Süper Sinyal (RSI + MACD + Stoch 3'lü Uyumsuzluk): +20 Puan
+            if son_mum.get('Super_Sinyal', False):
+                skor += 20
+            # Normal Pozitif Uyumsuzluk varsa: +10 Puan
+            elif son_mum.get('Pozitif_Uyusmazlik', False):
+                skor += 10
+                
+            # 🪤 Wyckoff Spring (Ayı Tuzağı): +15 Puan
+            if son_mum.get('Wyckoff_Spring', False):
+                skor += 15
+                
+            # 💥 Hacim Patlamasi: +10 Puan
+            if son_mum.get('Hacim_Patlamasi', False):
+                skor += 10
+
         return {'Puan': skor}
         
     except Exception as e:
@@ -747,50 +772,109 @@ def formasyon_tespit_et_ve_hedefle(df):
 
     hedef_str = f"% {hedef_yuzde:+.2f}" if hedef_yuzde != 0 else "% 0.00"
     return formasyon_adi, hedef_str
+import pandas as pd
+import numpy as np
+
 def dipten_donus_analizi(df):
-    """Fiyatın dipten sekme ihtimalini kurumsal tekniklerle (Hacim, RSI Uyuşmazlığı, Spring) hesaplar."""
+    """
+    Fiyatın dipten sekme ihtimalini kurumsal tekniklerle hesaplar:
+    1. Hacim Patlaması (20 Günlük Ortalamanın 2 Katı)
+    2. Wyckoff Spring (Bollinger Alt Bandı Ayı Tuzağı)
+    3. Gelişmiş Pozitif Uyumsuzluk (Yerel Dipler üzerinden RSI, MACD, Stokastik)
+    """
+    # Eksik veya yetersiz veri güvenliği
     if df is None or len(df) < 20:
         df_copy = df.copy() if df is not None else pd.DataFrame()
         df_copy['Hacim_Patlamasi'] = False
-        df_copy['Pozitif_Uyusmazlik'] = False
         df_copy['Wyckoff_Spring'] = False
+        df_copy['RSI_Uyumsuzluk'] = False
+        df_copy['MACD_Uyumsuzluk'] = False
+        df_copy['Stokastik_Uyumsuzluk'] = False
+        df_copy['Pozitif_Uyusmazlik'] = False
+        df_copy['Super_Sinyal'] = False
         return df_copy
 
     df_dip = df.copy()
-   
-    
-    # 1. Hacim Patlaması (Son 20 günün ortalamasının en az 2 katı)
+
+    # ---------------------------------------------------------
+    # 1. HACİM PATLAMASI
+    # ---------------------------------------------------------
     df_dip['Vol_SMA_20'] = df_dip['Volume'].rolling(20).mean()
     df_dip['Hacim_Patlamasi'] = df_dip['Volume'] > (df_dip['Vol_SMA_20'] * 2)
-    
-    # 2. Wyckoff Spring (Ayı Tuzağı - Bollinger Alt Bandı İhlali ve Hızlı Dönüş)
+
+    # ---------------------------------------------------------
+    # 2. WYCKOFF SPRING (AYI TUZAĞI)
+    # ---------------------------------------------------------
     df_dip['SMA_20_Dip'] = df_dip['Close'].rolling(20).mean()
     df_dip['STD_20_Dip'] = df_dip['Close'].rolling(20).std()
     df_dip['Lower_Band'] = df_dip['SMA_20_Dip'] - (df_dip['STD_20_Dip'] * 2)
-    
-    # Gün içinde alt bandı kırmış ama günü bandın ve açılışın üzerinde (yeşil) kapatmış mı?
-    df_dip['Wyckoff_Spring'] = (df_dip['Low'] < df_dip['Lower_Band']) & (df_dip['Close'] > df_dip['Lower_Band']) & (df_dip['Close'] > df_dip['Open'])
-    
-    # 3. RSI Pozitif Uyuşmazlık (Bullish Divergence)
-    delta = df_dip['Close'].diff()
-    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
-    rs = gain / loss.replace(0, 1e-9)
-    df_dip['RSI_DIP'] = 100 - (100 / (1 + rs))
-    
-    # Son 20 günlük periyotta fiyat daha düşük dip yaparken, RSI daha yüksek dip yapıyorsa
-    if len(df_dip) >= 20:
-        son_5_fiyat = df_dip['Close'].iloc[-5:].min()
-        eski_15_fiyat = df_dip['Close'].iloc[-20:-5].min()
-        son_5_rsi = df_dip['RSI_DIP'].iloc[-5:].min()
-        eski_15_rsi = df_dip['RSI_DIP'].iloc[-20:-5].min()
+
+    df_dip['Wyckoff_Spring'] = (df_dip['Low'] < df_dip['Lower_Band']) & \
+                               (df_dip['Close'] > df_dip['Lower_Band']) & \
+                               (df_dip['Close'] > df_dip['Open'])
+
+    # ---------------------------------------------------------
+    # 3. İNDİKATÖR HESAPLAMALARI (Eksikse Otomatik Eklenir)
+    # ---------------------------------------------------------
+    # A. RSI (14)
+    if 'RSI' not in df_dip.columns:
+        delta = df_dip['Close'].diff()
+        gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+        loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / (loss.replace(0, 1e-9))
+        df_dip['RSI'] = 100 - (100 / (1 + rs))
+
+    # B. MACD Histogram (12, 26, 9)
+    if 'MACD_Hist' not in df_dip.columns:
+        ema12 = df_dip['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df_dip['Close'].ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        macd_signal = macd.ewm(span=9, adjust=False).mean()
+        df_dip['MACD_Hist'] = macd - macd_signal
+
+    # C. Stokastik %K (14)
+    if 'Stoch_K' not in df_dip.columns:
+        low_min = df_dip['Low'].rolling(window=14).min()
+        high_max = df_dip['High'].rolling(window=14).max()
+        df_dip['Stoch_K'] = 100 * ((df_dip['Close'] - low_min) / (high_max - low_min + 1e-9))
+
+    # Başlangıç değerleri (Varsayılan: False)
+    df_dip['RSI_Uyumsuzluk'] = False
+    df_dip['MACD_Uyumsuzluk'] = False
+    df_dip['Stokastik_Uyumsuzluk'] = False
+    df_dip['Pozitif_Uyusmazlik'] = False
+    df_dip['Super_Sinyal'] = False
+
+    # ---------------------------------------------------------
+    # 4. GELİŞMİŞ UYUMSUZLUK (DIVERGENCE) ANALİZİ
+    # ---------------------------------------------------------
+    # Fiyatın gerçek yerel dip noktalarını (Local Minima) tespit et
+    dip_mask = (df_dip['Low'].shift(1) > df_dip['Low']) & (df_dip['Low'].shift(-1) > df_dip['Low'])
+    dipler = df_dip[dip_mask]['Low'].tail(2)
+
+    # Grafikte en az 2 adet yerel dip oluşmuşsa analiz yap
+    if len(dipler) == 2:
+        eski_idx, yeni_idx = dipler.index[0], dipler.index[1]
         
-        # Uyuşmazlık şartı ve RSI'ın aşırı satım bölgesine yakın (45 altı) olması
-        uyusmazlik = (son_5_fiyat < eski_15_fiyat) and (son_5_rsi > eski_15_rsi) and (son_5_rsi < 45)
-        df_dip['Pozitif_Uyusmazlik'] = uyusmazlik
-    else:
-        df_dip['Pozitif_Uyusmazlik'] = False
-        
+        eski_fiyat = df_dip['Low'].loc[eski_idx]
+        yeni_fiyat = df_dip['Low'].loc[yeni_idx]
+
+        # ŞART: Fiyat yeni bir daha düşük dip yapmış olmalı (Lower Low)
+        if yeni_fiyat < eski_fiyat:
+            rsi_uyum = df_dip['RSI'].loc[yeni_idx] > df_dip['RSI'].loc[eski_idx]
+            macd_uyum = df_dip['MACD_Hist'].loc[yeni_idx] > df_dip['MACD_Hist'].loc[eski_idx]
+            stoch_uyum = df_dip['Stoch_K'].loc[yeni_idx] > df_dip['Stoch_K'].loc[eski_idx]
+
+            super_sinyal = rsi_uyum and macd_uyum and stoch_uyum
+            herhangi_uyum = rsi_uyum or macd_uyum or stoch_uyum
+
+            # Oluşan sinyalleri son dip noktası ve sonrasındaki mumlara yansıt
+            df_dip.loc[yeni_idx:, 'RSI_Uyumsuzluk'] = rsi_uyum
+            df_dip.loc[yeni_idx:, 'MACD_Uyumsuzluk'] = macd_uyum
+            df_dip.loc[yeni_idx:, 'Stokastik_Uyumsuzluk'] = stoch_uyum
+            df_dip.loc[yeni_idx:, 'Pozitif_Uyusmazlik'] = herhangi_uyum
+            df_dip.loc[yeni_idx:, 'Super_Sinyal'] = super_sinyal
+
     return df_dip
 # --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
@@ -943,12 +1027,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         except Exception:
             guncel_fiyat = float(df_g['Close'].iloc[-1])
 
-        # İndikatörler anlık fiyata göre hesaplansın diye son barmm kapanışını canlı fiyatla güncelle
+        # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
         if not df_g.empty and guncel_fiyat is not None:
             last_idx = df_g.index[-1]
-    
             df_g.loc[last_idx, 'Close'] = guncel_fiyat
-            # Anlık fiyat o günün en yükseğini geçtiyse High'ı, en düşüğünün altına indiyse Low'u güncelle
             df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
             df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
 
@@ -956,6 +1038,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         df_g = stokastik_hesapla(df_g)
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)
+        
+        # Yenilenen dipten dönüş analizi çağrılıyor
         temp_g = dipten_donus_analizi(df_g)
         
         g_fiyat = guncel_fiyat
@@ -970,11 +1054,13 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
         g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
         g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
+        # 🌟 YENİ EKLENEN SATIR: Süper Sinyal Durumu
+        g_super_sinyal = temp_g.get('Super_Sinyal', pd.Series([False])).iloc[-1]
         g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
         g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
 
-        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (Erken Çıkış)
-        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_spring or g_ma_kestimi
+        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (g_super_sinyal eklendi)
+        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
         
         if not umut_var_mi and analiz_tipi == "radar":
             return {
@@ -1031,12 +1117,21 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1] if not temp_4h.empty else False
             
             hacim_durum = "🔥 GÜÇLÜ PATLAMA" if (g_hacim or h4_hacim) else "Normal"
-            uyusmazlik_durum = "✅ POZİTİF UYUŞMAZLIK" if (g_uyusmazlik or temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1]) else "-"
+            
+            # 🌟 YENİ UYUŞMAZLIK / SÜPER SİNYAL METNİ HESAPLAMA
+            h4_super = temp_4h.get('Super_Sinyal', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
+            h4_uyusmazlik = temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
+            
+            if g_super_sinyal or h4_super:
+                uyusmazlik_durum = "🌟 SÜPER SİNYAL (RSI+MACD+Stoch)"
+            elif g_uyusmazlik or h4_uyusmazlik:
+                uyusmazlik_durum = "✅ POZİTİF UYUŞMAZLIK"
+            else:
+                uyusmazlik_durum = "-"
+
             spring_durum = "✅ VAR" if (g_spring or temp_4h.get('Wyckoff_Spring', pd.Series([False])).iloc[-1]) else "-"
             
             # Formasyon tespiti ve hedef hesaplama
-            # Formasyon tespiti ve hedef hesaplamayı tetikleyen satır:
-            # Formasyon tespiti ve hedef hesaplamayı tetikleyen satır:
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
@@ -1044,31 +1139,26 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
-                # Hedef yüzdesini sayısal bir değere çevir (örneğin "% -38.75" -> -38.75)
                 hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
                 if hedef_str != '-' and hedef_str != '0.00':
                     hedef_oran = float(hedef_str)
                     
-                    # Eğer formasyon %5'ten daha derin bir düşüş öngörüyorsa ve sistem AL diyorsa VETO ET!
-                    if hedef_oran < -5.0:
+                    if hedef_oran < -4.0:
                         if "AL" in al_sat_karari:
                             al_sat_karari = f"⚠️ RİSKLİ: Trend Pozitif ama {formasyon_adi} Tehdidi!"
                         
-                        # AI'yı da frenle (Artık ai_veri tanımlı olduğu için başarıyla çalışacak)
                         ai_sinyal = ai_veri.get('signal', 'NÖTR')
                         if "AL" in ai_sinyal:
                             ai_veri['signal'] = f"🛑 AI İPTAL ({formasyon_adi})"
             except Exception as e:
                 logging.warning(f"[{sembol}] Veto mekanizmasında hata: {e}")
-            # ----------------------------------------------------
 
             try:
-                sihirli_veri = sihirli_formul_skorla(sembol)
+                sihirli_veri = sihirli_formul_skorla(sembol, df=df_g)
                 s_skor = sihirli_veri.get('Puan', 0) if isinstance(sihirli_veri, dict) else 0
             except Exception:
                 s_skor = 0
             
-            # --- HATALI ÇİFT RETURN BLOĞUNUN TEMİZLENMİŞ HALİ ---
             return {
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
@@ -1615,7 +1705,13 @@ else:
 hisse_kodu = st.sidebar.text_input("Varlık Kodu:", value=varsayilan_hisse).upper()
 baslangic = st.sidebar.date_input("Başlangıç Tarihi:", value=datetime.today() - pd.Timedelta(days=365)) 
 bitis = st.sidebar.date_input("Bitiş Tarihi:", value=datetime.today())
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔍 Radar Ek Filtreleri")
+sadece_super_sinyal = st.sidebar.checkbox("🌟 Sadece Süper Sinyal Verenler", value=False)
+sadece_spring = st.sidebar.checkbox("🎯 Sadece Wyckoff Spring", value=False)
+# --------------------------------------------------------
 
+st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
 # ---------------------------------------------------------
@@ -1813,7 +1909,7 @@ with tabs[1]:
     with col_btn5:
         btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary", key="btn_son")
 
-    # Yardımcı Fonksiyon: Taramayı hem RAM'e (Session State) hem Diske Standart Kaydeder
+    # Yardımcı Fonksiyon: Taramayı hem RAM'e (Session State) hem Diske Kaydeder
     def taramayi_kaydet(df, tip_adi):
         st.session_state.son_tarama_df = df
         st.session_state.son_tarama_tipi = tip_adi
@@ -1838,7 +1934,16 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 taramayi_kaydet(df_radar, "Genel Radar Taraması")
-                st.dataframe(df_radar, use_container_width=True, hide_index=True)
+                
+                # --- YENİ EKLENEN FİLTRELEME BLOĞU ---
+                df_goster = df_radar.copy()
+                if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
+                    df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+                if 'sadece_spring' in locals() and sadece_spring:
+                    df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+                # -------------------------------------
+                
+                st.dataframe(df_goster, use_container_width=True, hide_index=True)
                 st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
@@ -1904,17 +2009,23 @@ with tabs[1]:
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
-                # Hassas Filtreleme
+                # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
                 df_sniper = df_radar[
                     (df_radar['Günlük T3'] == '🚀 BOĞA') & 
                     (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
                     (
                         (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
-                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK', na=False)) | 
+                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
                         (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
                     )
                 ]
                 
+                # Ekstra Kenar Çubuğu Filtresi İşletilmesi
+                if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
+                    df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+                if 'sadece_spring' in locals() and sadece_spring:
+                    df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
+
                 if not df_sniper.empty:
                     taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
@@ -1940,7 +2051,18 @@ with tabs[1]:
         # 2. Ekrana Bas
         if st.session_state.son_tarama_df is not None:
             st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
-            st.dataframe(st.session_state.son_tarama_df, use_container_width=True, hide_index=True)
+            
+            # --- YENİ EKLENEN FİLTRELEME BLOĞU (Kurtarılan Tablo İçin) ---
+            df_goster = st.session_state.son_tarama_df.copy()
+            if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
+                if '📈 Pozitif Uyuşmazlık' in df_goster.columns:
+                    df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+            if 'sadece_spring' in locals() and sadece_spring:
+                if '🪤 Spring (Tuzak)' in df_goster.columns:
+                    df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+            # -----------------------------------------------------------
+            
+            st.dataframe(df_goster, use_container_width=True, hide_index=True)
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:

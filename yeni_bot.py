@@ -1015,16 +1015,6 @@ from datetime import datetime
 import yfinance as yf
 import logging
 
-import pandas as pd
-from datetime import datetime
-import yfinance as yf
-import logging
-
-import pandas as pd
-from datetime import datetime
-import yfinance as yf
-import logging
-
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
     try:
         # 1. Günlük Veriyi Çek
@@ -1034,34 +1024,38 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
         df_g = df_gunluk.copy()
         
-        # --- 🚨 YFİNANCE EKSİK MUM (GECİKME) HACK'İ ---
-        guncel_df = pd.DataFrame()
+        # --- 🚨 YFİNANCE EKSİK MUM & GECİKME ÇÖZÜMÜ (HATA KORUMALI) ---
+        # Varsayılan olarak günlük verideki son durumu baz alıyoruz
+        gercek_anlik_fiyat = float(df_g['Close'].iloc[-1])
+        gunluk_son_tarih = pd.to_datetime(df_g.index[-1]).date()
+        son_islem_tarihi = gunluk_son_tarih
+
+        # Canlı veri ile teyit et (Güvenli Try-Except Bloğu)
         try:
-            # En taze fiyatı ve gerçek işlem gününü 1 dakikalık veriden zorla çek
             guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
+            if not guncel_df.empty:
+                # Yfinance MultiIndex (yeni sürüm) veya SingleIndex olma durumunu güvenle çöz
+                if isinstance(guncel_df.columns, pd.MultiIndex):
+                    gercek_anlik_fiyat = float(guncel_df['Close'].iloc[:, 0].iloc[-1])
+                else:
+                    gercek_anlik_fiyat = float(guncel_df['Close'].iloc[-1])
+                
+                # Güvenli tarih formatı (Timezone hatası vermemesi için date() kullanıyoruz)
+                son_islem_tarihi = pd.to_datetime(guncel_df.index[-1]).date()
         except Exception:
-            pass
+            # 1 dakikalık veri çekerken API engeli veya yapısal hata olursa yoksay
+            pass 
 
-        if not guncel_df.empty:
-            gercek_anlik_fiyat = float(guncel_df['Close'].iloc[-1])
-            # Timezone uyumsuzluklarını önlemek için sadece tarihi alıyoruz
-            son_islem_tarihi = pd.to_datetime(guncel_df.index[-1]).tz_localize(None).date()
-        else:
-            gercek_anlik_fiyat = float(df_g['Close'].iloc[-1])
-            son_islem_tarihi = pd.to_datetime(df_g.index[-1]).tz_localize(None).date()
-
-        gunluk_son_tarih = pd.to_datetime(df_g.index[-1]).tz_localize(None).date()
-
-        # KRİTİK MÜDAHALE: Eğer günlük veri, 1 dakikalık verinin gerisinde kalmışsa
+        # KRİTİK MÜDAHALE: Eğer günlük veri, 1 dakikalık gerçek işlem gününün gerisinde kalmışsa
         if gunluk_son_tarih < son_islem_tarihi:
             # Yahoo bugünün günlük mumunu henüz eklememiş! Yeni satır olarak kendimiz enjekte ediyoruz.
             yeni_index = pd.to_datetime(son_islem_tarihi)
-            df_g.loc[yeni_index] = df_g.iloc[-1]  # Hata vermemesi için hacim vs. dünün şablonunu al
+            df_g.loc[yeni_index] = df_g.iloc[-1]  # Hata vermemesi için önceki barı şablon olarak al
             df_g.loc[yeni_index, 'Close'] = gercek_anlik_fiyat
             df_g.loc[yeni_index, 'High'] = gercek_anlik_fiyat
             df_g.loc[yeni_index, 'Low'] = gercek_anlik_fiyat
             df_g.loc[yeni_index, 'Open'] = gercek_anlik_fiyat
-        elif gunluk_son_tarih == son_islem_tarihi:
+        else:
             # Bugünün mumu varsa, sadece son barın kapanışını canlı fiyatla güncelle
             last_idx = df_g.index[-1]
             df_g.loc[last_idx, 'Close'] = gercek_anlik_fiyat
@@ -1072,8 +1066,11 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         simdiki_saat = datetime.now().hour
         if 10 <= simdiki_saat < 18:
             # ==================== SEANS İÇİ ====================
-            # Referansımız dünün kapanışıdır.
-            kapanis_fiyati = float(df_g['Close'].iloc[-2])
+            # Referansımız dünün kapanışıdır (len() kontrolü ile güvenli hale getirildi)
+            if len(df_g) >= 2:
+                kapanis_fiyati = float(df_g['Close'].iloc[-2])
+            else:
+                kapanis_fiyati = float(df_g['Close'].iloc[-1])
             guncel_fiyat = float(df_g['Close'].iloc[-1])
         else:
             # ==================== SEANS DIŞI ====================
@@ -1082,7 +1079,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             guncel_fiyat = float(df_g['Close'].iloc[-1])
 
         # --- C. TEMEL İNDİKATÖRLER & İLERİ TEKNİK ANALİZ ---
-        # (Bu indikatörler artık kusursuz olarak "Bugünün" barı dahil edilerek hesaplanacak)
         df_g = stokastik_hesapla(df_g)
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)

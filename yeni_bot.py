@@ -1019,15 +1019,38 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
         df_g = df_gunluk.copy()
         
-        # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
-        kapanis_fiyati = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
+        # --- A. TARİH VE KAPANIŞ FİYATI TESPİTİ (YENİ MANTIK) ---
+        bugun_tarihi = pd.Timestamp.now().date()
+        son_bar_tarihi = pd.to_datetime(df_g.index[-1]).date()
 
-        # --- B. GÜNCEL ANLIK FİYAT ÇEKME VE ENJEKSİYON ---
+        # Günlük veri setinde bugünün barı yer alıyor mu kontrol et
+        if son_bar_tarihi == bugun_tarihi:
+            dunun_kapanis = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
+            bugunun_fiyati = float(df_g['Close'].iloc[-1])
+        else:
+            dunun_kapanis = float(df_g['Close'].iloc[-1])
+            bugunun_fiyati = dunun_kapanis
+
+        # --- B. ANLIK FİYAT VE SAATE GÖRE DİNAMİK FİYAT ENJEKSİYONU (YENİ MANTIK) ---
+        anlik_fiyat = bugunun_fiyati
         try:
             guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
-            guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g['Close'].iloc[-1])
+            if not guncel_df.empty:
+                anlik_fiyat = float(guncel_df['Close'].iloc[-1])
         except Exception:
-            guncel_fiyat = float(df_g['Close'].iloc[-1])
+            pass
+
+        from datetime import datetime # Dosyanın en başında varsa bu satırı silebilirsiniz
+        simdiki_saat = datetime.now().hour
+
+        if 10 <= simdiki_saat < 18:
+            # Saat 10:00 - 18:00 Arası: Kapanış dünün resmi kapanışı, güncel o anki.
+            guncel_fiyat = anlik_fiyat
+            kapanis_fiyati = dunun_kapanis
+        else:
+            # Seans dışı: Kapanış ve güncel fiyat aynı (tarandığı günün son fiyatı)
+            guncel_fiyat = anlik_fiyat
+            kapanis_fiyati = anlik_fiyat
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
         if not df_g.empty and guncel_fiyat is not None:
@@ -1138,7 +1161,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
-            # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
             # 👇 YENİ EKLENECEK BLOK 👇
@@ -1147,8 +1169,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 tahmin_kaydet(sembol, ai_veri['rf_prediction'])
             # 👆 YENİ EKLENECEK BLOK BİTİŞ 👆
 
-            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
-            
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
                 hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
@@ -1963,7 +1983,7 @@ with tabs[1]:
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 gelecek_sonuclar = {
                     executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
                     for s in tarama_listesi

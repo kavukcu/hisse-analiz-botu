@@ -16,6 +16,8 @@ session.headers.update({
 import concurrent.futures
 import logging
 import os
+from datetime import datetime
+import pytz
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
@@ -1020,14 +1022,61 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         df_g = df_gunluk.copy()
         
         # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
-        kapanis_fiyati = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
-
-        # --- B. GÜNCEL ANLIK FİYAT ÇEKME VE ENJEKSİYON ---
         try:
-            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
-            guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g['Close'].iloc[-1])
-        except Exception:
-            guncel_fiyat = float(df_g['Close'].iloc[-1])
+            guncel_df = yf.download(
+                sembol,
+                period="1d",
+                interval="1m",
+                progress=False,
+                auto_adjust=True
+            )
+
+            if not guncel_df.empty:
+                guncel_fiyat = float(guncel_df["Close"].iloc[-1])
+            else:
+                guncel_fiyat = float(df_g["Close"].iloc[-1])
+
+        except:
+            guncel_fiyat = float(df_g["Close"].iloc[-1])
+
+
+# --------------------------------------------------
+# BIST seans kontrolü
+# --------------------------------------------------
+        tz = pytz.timezone("Europe/Istanbul")
+        simdi = datetime.now(tz)
+
+        saat = simdi.hour
+        dakika = simdi.minute
+        haftaici = simdi.weekday() < 5
+
+        seans_acik = False
+
+        if haftaici:
+
+            dakika_toplam = saat * 60 + dakika
+
+    # 09:40 - 18:10
+            if 9 * 60 + 40 <= dakika_toplam <= 18 * 60 + 10:
+                seans_acik = True
+
+
+# --------------------------------------------------
+# Kapanış fiyatı
+# --------------------------------------------------
+
+        if seans_acik:
+
+    # Dünkü resmi kapanış
+            if len(df_g) >= 2:
+                kapanis_fiyati = float(df_g["Close"].iloc[-2])
+            else:
+                kapanis_fiyati = float(df_g["Close"].iloc[-1])
+
+        else:
+
+    # Bugünkü resmi kapanış
+            kapanis_fiyati = float(df_g["Close"].iloc[-1])
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
         if not df_g.empty and guncel_fiyat is not None:

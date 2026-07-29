@@ -1755,7 +1755,6 @@ sadece_spring = st.sidebar.checkbox("🎯 Sadece Wyckoff Spring", value=False)
 # --------------------------------------------------------
 
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
-st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
 # ---------------------------------------------------------
 # BURASI SİZİN KODUNUZDA 536. SATIR CİVARINDAN BAŞLIYOR

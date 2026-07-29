@@ -1010,6 +1010,11 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
+import pandas as pd
+from datetime import datetime
+import yfinance as yf
+import logging
+
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
     try:
         # 1. Günlük Veriyi Çek
@@ -1019,38 +1024,35 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
         df_g = df_gunluk.copy()
         
-        # --- A. TARİH VE KAPANIŞ FİYATI TESPİTİ (YENİ MANTIK) ---
+        # --- A & B. DİNAMİK FİYAT VE SAAT KONTROLÜ ---
+        simdiki_saat = datetime.now().hour
         bugun_tarihi = pd.Timestamp.now().date()
         son_bar_tarihi = pd.to_datetime(df_g.index[-1]).date()
 
-        # Günlük veri setinde bugünün barı yer alıyor mu kontrol et
+        # 1. Yfinance güncel bar durumunu tespit et
         if son_bar_tarihi == bugun_tarihi:
-            dunun_kapanis = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
-            bugunun_fiyati = float(df_g['Close'].iloc[-1])
+            dunun_kapanisi = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
+            bugunun_kapanisi = float(df_g['Close'].iloc[-1])
         else:
-            dunun_kapanis = float(df_g['Close'].iloc[-1])
-            bugunun_fiyati = dunun_kapanis
+            dunun_kapanisi = float(df_g['Close'].iloc[-1])
+            bugunun_kapanisi = dunun_kapanisi
 
-        # --- B. ANLIK FİYAT VE SAATE GÖRE DİNAMİK FİYAT ENJEKSİYONU (YENİ MANTIK) ---
-        anlik_fiyat = bugunun_fiyati
+        # 2. 1 Dakikalık canlı veri ile son anlık fiyatı çek
         try:
             guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
-            if not guncel_df.empty:
-                anlik_fiyat = float(guncel_df['Close'].iloc[-1])
+            anlik_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else bugunun_kapanisi
         except Exception:
-            pass
+            anlik_fiyat = bugunun_kapanisi
 
-        from datetime import datetime # Dosyanın en başında varsa bu satırı silebilirsiniz
-        simdiki_saat = datetime.now().hour
-
+        # 🚨 KİLİT NOKTA: Saate Göre Kapanış Fiyatını Belirle
         if 10 <= simdiki_saat < 18:
-            # Saat 10:00 - 18:00 Arası: Kapanış dünün resmi kapanışı, güncel o anki.
+            # Seans İçi (10:00 - 18:00): Hedef dünün kapanışıdır.
+            kapanis_fiyati = dunun_kapanisi
             guncel_fiyat = anlik_fiyat
-            kapanis_fiyati = dunun_kapanis
         else:
-            # Seans dışı: Kapanış ve güncel fiyat aynı (tarandığı günün son fiyatı)
-            guncel_fiyat = anlik_fiyat
+            # Seans Dışı (18:00 sonrası): Piyasalar kapandı, kapanış BUGÜNÜN kapanışıdır.
             kapanis_fiyati = anlik_fiyat
+            guncel_fiyat = anlik_fiyat
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
         if not df_g.empty and guncel_fiyat is not None:
@@ -1080,12 +1082,11 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
         g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
         g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
-        # 🌟 YENİ EKLENEN SATIR: Süper Sinyal Durumu
         g_super_sinyal = temp_g.get('Super_Sinyal', pd.Series([False])).iloc[-1]
         g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
         g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
 
-        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (g_super_sinyal eklendi)
+        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE
         umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
         
         if not umut_var_mi and analiz_tipi == "radar":
@@ -1144,7 +1145,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             hacim_durum = "🔥 GÜÇLÜ PATLAMA" if (g_hacim or h4_hacim) else "Normal"
             
-            # 🌟 YENİ UYUŞMAZLIK / SÜPER SİNYAL METNİ HESAPLAMA
             h4_super = temp_4h.get('Super_Sinyal', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
             h4_uyusmazlik = temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
             
@@ -1160,14 +1160,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             # Formasyon tespiti ve hedef hesaplama
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
-            # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
-            # 👇 YENİ EKLENECEK BLOK 👇
-            # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
             if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
                 tahmin_kaydet(sembol, ai_veri['rf_prediction'])
-            # 👆 YENİ EKLENECEK BLOK BİTİŞ 👆
 
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
@@ -1220,6 +1216,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
     except Exception as e:
         logging.error(f"[{sembol}] Analiz Hatası: {str(e)}")
         return None
+# ==========================================
+# 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
+# ==========================================
 # ==========================================
 # 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
 # ==========================================

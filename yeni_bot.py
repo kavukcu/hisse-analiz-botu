@@ -1015,6 +1015,11 @@ from datetime import datetime
 import yfinance as yf
 import logging
 
+import pandas as pd
+from datetime import datetime
+import yfinance as yf
+import logging
+
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
     try:
         # 1. Günlük Veriyi Çek
@@ -1024,37 +1029,38 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
         df_g = df_gunluk.copy()
         
-        # --- A & B. DİNAMİK FİYAT VE SAAT KONTROLÜ ---
+        # --- A & B. SEANS İÇİ / SEANS DIŞI FİYAT YÖNETİMİ ---
         simdiki_saat = datetime.now().hour
-        bugun_tarihi = pd.Timestamp.now().date()
-        son_bar_tarihi = pd.to_datetime(df_g.index[-1]).date()
 
-        # 1. Yfinance güncel bar durumunu tespit et
-        if son_bar_tarihi == bugun_tarihi:
-            dunun_kapanisi = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
-            bugunun_kapanisi = float(df_g['Close'].iloc[-1])
-        else:
-            dunun_kapanisi = float(df_g['Close'].iloc[-1])
-            bugunun_kapanisi = dunun_kapanisi
-
-        # 2. 1 Dakikalık canlı veri ile son anlık fiyatı çek
-        try:
-            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
-            anlik_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else bugunun_kapanisi
-        except Exception:
-            anlik_fiyat = bugunun_kapanisi
-
-        # 🚨 KİLİT NOKTA: Saate Göre Kapanış Fiyatını Belirle
         if 10 <= simdiki_saat < 18:
-            # Seans İçi (10:00 - 18:00): Hedef dünün kapanışıdır.
-            kapanis_fiyati = dunun_kapanisi
-            guncel_fiyat = anlik_fiyat
-        else:
-            # Seans Dışı (18:00 sonrası): Piyasalar kapandı, kapanış BUGÜNÜN kapanışıdır.
-            kapanis_fiyati = anlik_fiyat
-            guncel_fiyat = anlik_fiyat
+            # ==================== SEANS İÇİ (10:00 - 18:00) ====================
+            # Canlı Fiyat: 1m veriden çekilir
+            try:
+                guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
+                guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g['Close'].iloc[-1])
+            except Exception:
+                guncel_fiyat = float(df_g['Close'].iloc[-1])
 
-        # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
+            # Kapanış Fiyatı: Seans içi olduğu için "Dünün Kapanış Fiyatı" alınır
+            # Timezone farklarını önlemek için tz_localize(None) kullanıyoruz
+            son_bar_tarihi = pd.to_datetime(df_g.index[-1]).tz_localize(None).date()
+            bugun_tarihi = pd.Timestamp.now().tz_localize(None).date()
+
+            if son_bar_tarihi == bugun_tarihi and len(df_g) >= 2:
+                kapanis_fiyati = float(df_g['Close'].iloc[-2]) # Dünün kapanışı
+            else:
+                kapanis_fiyati = float(df_g['Close'].iloc[-1])
+
+        else:
+            # ==================== SEANS DIŞI (18:00 - 10:00) ====================
+            # Seans bitti! Günlük veri setindeki en son bar (iloc[-1]) BUGÜNÜN KAPANIŞIDIR.
+            # Ekstra canlı veri çekmeye gerek kalmadan doğrudan bugünün kapanışı alınır.
+            bugunun_kapanisi = float(df_g['Close'].iloc[-1])
+            
+            guncel_fiyat = bugunun_kapanisi
+            kapanis_fiyati = bugunun_kapanisi
+
+        # İndikatörler anlık/son fiyata göre hesaplansın diye son barın kapanışını güncelle
         if not df_g.empty and guncel_fiyat is not None:
             last_idx = df_g.index[-1]
             df_g.loc[last_idx, 'Close'] = guncel_fiyat
@@ -1066,7 +1072,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)
         
-    
         # Yenilenen dipten dönüş analizi çağrılıyor
         temp_g = dipten_donus_analizi(df_g)
         
@@ -1160,8 +1165,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             # Formasyon tespiti ve hedef hesaplama
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
+            # AI Verisini Veto'dan ÖNCE Hesapla
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
+            # Tahmin kaydet
             if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
                 tahmin_kaydet(sembol, ai_veri['rf_prediction'])
 

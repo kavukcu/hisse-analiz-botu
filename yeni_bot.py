@@ -9,6 +9,8 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, timezone
 import requests
+from datetime import datetime
+import pytz
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -1010,11 +1012,6 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
-import pandas as pd
-from datetime import datetime
-import yfinance as yf
-import logging
-
 def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
     try:
         # 1. Günlük Veriyi Çek
@@ -1023,66 +1020,54 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             return None
             
         df_g = df_gunluk.copy()
+        tr_tz = pytz.timezone("Europe/Istanbul")
+        simdi = datetime.now(tr_tz)
+
+        hafta_ici = simdi.weekday() < 5
+
+# BIST yaklaşık seans saatleri
+        seans_acik = (
+            hafta_ici and
+            (
+                (simdi.hour > 9 or (simdi.hour == 9 and simdi.minute >= 40))
+                and
+                (simdi.hour < 18 or (simdi.hour == 18 and simdi.minute <= 10))
+            )
+        )
+
+        if seans_acik:
+    # Seans açık → dünkü resmi kapanış
+            kapanis_fiyati = (
+                float(df_g["Close"].iloc[-2])
+                if len(df_g) >= 2
+                else float(df_g["Close"].iloc[-1])
+            )
+        else:
+    # Seans kapalı → son resmi kapanış
+            kapanis_fiyati = float(df_g["Close"].iloc[-1])
+        # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
         
-        # --- 🚨 YFİNANCE EKSİK MUM & GECİKME ÇÖZÜMÜ (HATA KORUMALI) ---
-        # Varsayılan olarak günlük verideki son durumu baz alıyoruz
-        gercek_anlik_fiyat = float(df_g['Close'].iloc[-1])
-        gunluk_son_tarih = pd.to_datetime(df_g.index[-1]).date()
-        son_islem_tarihi = gunluk_son_tarih
 
-        # Canlı veri ile teyit et (Güvenli Try-Except Bloğu)
+        # --- B. GÜNCEL ANLIK FİYAT ÇEKME VE ENJEKSİYON ---
         try:
-            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
-            if not guncel_df.empty:
-                # Yfinance MultiIndex (yeni sürüm) veya SingleIndex olma durumunu güvenle çöz
-                if isinstance(guncel_df.columns, pd.MultiIndex):
-                    gercek_anlik_fiyat = float(guncel_df['Close'].iloc[:, 0].iloc[-1])
-                else:
-                    gercek_anlik_fiyat = float(guncel_df['Close'].iloc[-1])
-                
-                # Güvenli tarih formatı (Timezone hatası vermemesi için date() kullanıyoruz)
-                son_islem_tarihi = pd.to_datetime(guncel_df.index[-1]).date()
+            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False, auto_adjust=False)
+            guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g['Close'].iloc[-1])
         except Exception:
-            # 1 dakikalık veri çekerken API engeli veya yapısal hata olursa yoksay
-            pass 
+            guncel_fiyat = float(df_g['Close'].iloc[-1])
 
-        # KRİTİK MÜDAHALE: Eğer günlük veri, 1 dakikalık gerçek işlem gününün gerisinde kalmışsa
-        if gunluk_son_tarih < son_islem_tarihi:
-            # Yahoo bugünün günlük mumunu henüz eklememiş! Yeni satır olarak kendimiz enjekte ediyoruz.
-            yeni_index = pd.to_datetime(son_islem_tarihi)
-            df_g.loc[yeni_index] = df_g.iloc[-1]  # Hata vermemesi için önceki barı şablon olarak al
-            df_g.loc[yeni_index, 'Close'] = gercek_anlik_fiyat
-            df_g.loc[yeni_index, 'High'] = gercek_anlik_fiyat
-            df_g.loc[yeni_index, 'Low'] = gercek_anlik_fiyat
-            df_g.loc[yeni_index, 'Open'] = gercek_anlik_fiyat
-        else:
-            # Bugünün mumu varsa, sadece son barın kapanışını canlı fiyatla güncelle
+        # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
+        if not df_g.empty and guncel_fiyat is not None:
             last_idx = df_g.index[-1]
-            df_g.loc[last_idx, 'Close'] = gercek_anlik_fiyat
-            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], gercek_anlik_fiyat)
-            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], gercek_anlik_fiyat)
-
-        # 🕒 SAAT KONTROLÜ VE EKRANA BASILACAK KAPANIŞ FİYATI ATAMASI
-        simdiki_saat = datetime.now().hour
-        if 10 <= simdiki_saat < 18:
-            # ==================== SEANS İÇİ ====================
-            # Referansımız dünün kapanışıdır (len() kontrolü ile güvenli hale getirildi)
-            if len(df_g) >= 2:
-                kapanis_fiyati = float(df_g['Close'].iloc[-2])
-            else:
-                kapanis_fiyati = float(df_g['Close'].iloc[-1])
-            guncel_fiyat = float(df_g['Close'].iloc[-1])
-        else:
-            # ==================== SEANS DIŞI ====================
-            # Piyasa kapandı, yarın için çalışıyoruz. Referans artık BUGÜNÜN kapanışıdır.
-            kapanis_fiyati = float(df_g['Close'].iloc[-1])
-            guncel_fiyat = float(df_g['Close'].iloc[-1])
+            df_g.loc[last_idx, 'Close'] = guncel_fiyat
+            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
+            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
 
         # --- C. TEMEL İNDİKATÖRLER & İLERİ TEKNİK ANALİZ ---
         df_g = stokastik_hesapla(df_g)
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)
         
+    
         # Yenilenen dipten dönüş analizi çağrılıyor
         temp_g = dipten_donus_analizi(df_g)
         
@@ -1098,11 +1083,12 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
         g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
         g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
+        # 🌟 YENİ EKLENEN SATIR: Süper Sinyal Durumu
         g_super_sinyal = temp_g.get('Super_Sinyal', pd.Series([False])).iloc[-1]
         g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
         g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
 
-        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE
+        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (g_super_sinyal eklendi)
         umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
         
         if not umut_var_mi and analiz_tipi == "radar":
@@ -1161,6 +1147,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             hacim_durum = "🔥 GÜÇLÜ PATLAMA" if (g_hacim or h4_hacim) else "Normal"
             
+            # 🌟 YENİ UYUŞMAZLIK / SÜPER SİNYAL METNİ HESAPLAMA
             h4_super = temp_4h.get('Super_Sinyal', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
             h4_uyusmazlik = temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
             
@@ -1176,13 +1163,18 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             # Formasyon tespiti ve hedef hesaplama
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
-            # AI Verisini Veto'dan ÖNCE Hesapla
+            # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
+            # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
-            # Tahmin kaydet
+            # 👇 YENİ EKLENECEK BLOK 👇
+            # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
             if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
                 tahmin_kaydet(sembol, ai_veri['rf_prediction'])
+            # 👆 YENİ EKLENECEK BLOK BİTİŞ 👆
 
+            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
+            
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
                 hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
@@ -1237,9 +1229,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
 # ==========================================
 # 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
 # ==========================================
-# ==========================================
-# 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
-# ==========================================
+
 def institutional_decision(df):
     try:
         return {
@@ -1767,7 +1757,7 @@ def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 veri_kaynagi = st.sidebar.selectbox(
     "Veri Çekilecek Kaynak:", 
-    ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)", "İş Yatırım (Sadece BIST)"]
+    ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)", "İş Yatırım (Sadece BIST)"]
 )
 # Küresel Piyasa Ayarları (Mevcut kodun buradan devam edecek...)
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])

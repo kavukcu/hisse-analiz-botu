@@ -1020,6 +1020,11 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             return None
             
         df_g = df_gunluk.copy()
+        df_close = df_gunluk.copy()
+        df_live = df_gunluk.copy()
+
+# Eski kod bozulmasın diye şimdilik
+        df_g = df_live
         tr_tz = pytz.timezone("Europe/Istanbul")
         simdi = datetime.now(tr_tz)
 
@@ -1056,16 +1061,29 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             guncel_fiyat = float(df_g['Close'].iloc[-1])
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
-        if not df_g.empty and guncel_fiyat is not None:
-            last_idx = df_g.index[-1]
-            df_g.loc[last_idx, 'Close'] = guncel_fiyat
-            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
-            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
+        # Sadece canlı veri güncellenecek
+        if not df_live.empty and guncel_fiyat is not None:
+            last_idx = df_live.index[-1]
+
+            df_live.loc[last_idx, "Close"] = guncel_fiyat
+            df_live.loc[last_idx, "High"] = max(df_live.loc[last_idx, "High"], guncel_fiyat)
+            df_live.loc[last_idx, "Low"] = min(df_live.loc[last_idx, "Low"], guncel_fiyat)
+
+# Eski kod bozulmasın
+        df_g = df_live
 
         # --- C. TEMEL İNDİKATÖRLER & İLERİ TEKNİK ANALİZ ---
-        df_g = stokastik_hesapla(df_g)
-        df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
-        df_g = ileri_teknik_gostergeler(df_g)
+        df_close = stokastik_hesapla(df_close)
+        df_close["Tilson_T3"] = tilson_t3(df_close["Close"])
+        df_close = ileri_teknik_gostergeler(df_close)
+
+# Canlı analiz
+        df_live = stokastik_hesapla(df_live)
+        df_live["Tilson_T3"] = tilson_t3(df_live["Close"])
+        df_live = ileri_teknik_gostergeler(df_live)
+
+# Eski kod bozulmasın
+        df_g = df_live
         
     
         # Yenilenen dipten dönüş analizi çağrılıyor
@@ -1165,7 +1183,91 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
-            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
+            # =====================================================
+# V102 - Çift AI Motoru
+# =====================================================
+
+            if umut_var_mi:
+
+    # Günlük resmi kapanış AI
+                ai_close = ensemble_prediction(df_close, sembol)
+
+    # Canlı fiyat AI
+                ai_live = ensemble_prediction(df_live, sembol)
+
+    # 4 Saat AI
+                if not df_4h.empty:
+                    ai_h4 = ensemble_prediction(df_4h, sembol)
+                else:
+                    ai_h4 = ai_live
+
+            else:
+                ai_close = {
+                    "signal":"ZAYIF",
+                    "rf_prediction":0.0,
+                    "confidence":0.0,
+                    "expected_return_pct":0.0
+                }
+
+                ai_live = ai_close.copy()
+                ai_h4 = ai_close.copy()
+                # ==================================================
+# FINAL AI
+# ==================================================
+
+                close_ret = ai_close["expected_return_pct"]
+                live_ret  = ai_live["expected_return_pct"]
+                h4_ret    = ai_h4["expected_return_pct"]
+
+                final_return = (
+                    close_ret * 0.50 +
+                    h4_ret    * 0.30 +
+                    live_ret  * 0.20
+                )
+
+                final_confidence = (
+                    ai_close["confidence"] * 0.50 +
+                    ai_h4["confidence"]    * 0.30 +
+                    ai_live["confidence"]  * 0.20
+                )
+                final_confidence = (
+                    ai_close["confidence"] * 0.50 +
+                    ai_live["confidence"]  * 0.30 +
+                    ai_h4["confidence"]    * 0.20
+                )
+
+                if final_return >= 5:
+                    final_signal = "⭐⭐⭐ GÜÇLÜ AL"
+                
+                elif final_return >= 2:
+                    final_signal = "🚀 AL"
+
+                elif final_return >= 0.75:
+                    final_signal = "🟢 POZİTİF"
+
+                elif final_return <= -5:
+                    final_signal = "🔴 GÜÇLÜ SAT"
+
+                elif final_return <= -2:
+                    final_signal = "🟠 SAT"
+
+                else:
+                    final_signal = "⚪ NÖTR"
+                    final_target = kapanis_fiyati * (1 + final_return / 100)
+                    ai_close = {
+                        "signal": "ZAYIF",
+                        "rf_prediction": 0.0,
+                        "score": 0
+                    }
+
+                    ai_live = {
+                        "signal": "ZAYIF",
+                        "rf_prediction": 0.0,
+                        "score": 0
+                    }
+                    
+# Eski sistem bozulmasın
+                    ai_veri = ai_live
             
             # 👇 YENİ EKLENECEK BLOK 👇
             # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
@@ -1175,7 +1277,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
 
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             
-            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
                 hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
                 if hedef_str != '-' and hedef_str != '0.00':
@@ -1210,8 +1311,18 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "🪤 Spring (Tuzak)": spring_durum,
                 "🔍 Tespit Edilen Formasyon": formasyon_adi,
                 "🎯 Formasyon Hedefi (%)": formasyon_hedef,
-                "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'),
-                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
+                "🤖 Günlük AI": ai_close.get("signal", "-"),
+                "⚡ Canlı AI": ai_live.get("signal", "-"),
+                "🤖 Günlük AI": ai_close["signal"],
+                "🎯 Günlük Hedef": f"{ai_close['rf_prediction']:.2f} TL",
+                "⚡ Canlı AI": ai_live["signal"],
+                "🎯 Canlı Hedef": f"{ai_live['rf_prediction']:.2f} TL",
+                "🕓 4S AI": ai_h4["signal"],
+                "🎯 4S Hedef": f"{ai_h4['rf_prediction']:.2f} TL",
+                "🤖 AI Kararı": final_signal,
+                "🎯 Final Hedef": f"{final_target:.2f} TL",
+                "📈 Beklenen Getiri": f"%{final_return:.2f}",
+                "📊 AI Güveni": f"%{final_confidence:.1f}",
             }
 
         elif analiz_tipi == "stoch":

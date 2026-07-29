@@ -25,6 +25,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 import sqlite3
+import joblib
+import os
 import optuna
 from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
@@ -1136,7 +1138,16 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
+            # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
+            
+            # 👇 YENİ EKLENECEK BLOK 👇
+            # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
+            if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
+                tahmin_kaydet(sembol, ai_veri['rf_prediction'])
+            # 👆 YENİ EKLENECEK BLOK BİTİŞ 👆
+
+            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
@@ -1382,7 +1393,35 @@ def ensemble_prediction(df, sembol="Genel"):
         ])
 
 
-        ensemble.fit(X, y)
+        # YENİ: gb ve ridge'i de oylamaya (VotingRegressor) ekliyoruz
+        ensemble = VotingRegressor(estimators=[
+            ('xgb', model_xgb),
+            ('rf', model_rf),
+            ('svr', model_svr),
+            ('gb', model_gb),
+            ('ridge', model_ridge)
+        ])
+
+        # AŞAĞIDAKİ TEK SATIRLIK fit İŞLEMİNİ SİLİYORUZ
+        # ensemble.fit(X, y) 
+
+        # YERİNE BU YAPIYI EKLİYORUZ (Öğrenmeyi Diske Kaydetme Mantığı):
+        model_klasoru = "ai_modeller"
+        os.makedirs(model_klasoru, exist_ok=True)
+        model_dosyasi = os.path.join(model_klasoru, f"{sembol}_ai_model.pkl")
+
+        # Eğer model daha önce eğitilip kaydedilmişse, hafızadan yükle
+        if os.path.exists(model_dosyasi):
+            try:
+                ensemble = joblib.load(model_dosyasi)
+            except Exception:
+                # Dosya bozuksa yeniden eğit ve kaydet
+                ensemble.fit(X, y)
+                joblib.dump(ensemble, model_dosyasi)
+        else:
+            # İlk kez tarama yapıyorsa sıfırdan öğren ve kaydet
+            ensemble.fit(X, y)
+            joblib.dump(ensemble, model_dosyasi)
 
         # --- 3. ÇIKARIM VE KARAR ---
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])

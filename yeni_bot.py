@@ -1730,7 +1730,7 @@ def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 veri_kaynagi = st.sidebar.selectbox(
     "Veri Çekilecek Kaynak:", 
-    ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)", "İş Yatırım (Sadece BIST)"]
+    ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)", "İş Yatırım (Sadece BIST)"]
 )
 # Küresel Piyasa Ayarları (Mevcut kodun buradan devam edecek...)
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])

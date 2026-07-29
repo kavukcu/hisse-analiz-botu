@@ -284,7 +284,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     from tvDatafeed import TvDatafeed, Interval
     
 
-    kaynaklar = ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)"]
+    kaynaklar = ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)"]
     if kaynak in kaynaklar:
         kaynaklar.remove(kaynak)
         kaynaklar.insert(0, kaynak)

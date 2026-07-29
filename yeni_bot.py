@@ -9,8 +9,6 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, timezone
 import requests
-from datetime import datetime
-import pytz
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -286,7 +284,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     from tvDatafeed import TvDatafeed, Interval
     
 
-    kaynaklar = ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)"]
+    kaynaklar = ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)"]
     if kaynak in kaynaklar:
         kaynaklar.remove(kaynak)
         kaynaklar.insert(0, kaynak)
@@ -1020,70 +1018,28 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             return None
             
         df_g = df_gunluk.copy()
-        df_close = df_gunluk.copy()
-        df_live = df_gunluk.copy()
-
-# Eski kod bozulmasın diye şimdilik
-        df_g = df_live
-        tr_tz = pytz.timezone("Europe/Istanbul")
-        simdi = datetime.now(tr_tz)
-
-        hafta_ici = simdi.weekday() < 5
-
-# BIST yaklaşık seans saatleri
-        seans_acik = (
-            hafta_ici and
-            (
-                (simdi.hour > 9 or (simdi.hour == 9 and simdi.minute >= 40))
-                and
-                (simdi.hour < 18 or (simdi.hour == 18 and simdi.minute <= 10))
-            )
-        )
-
-        if seans_acik:
-    # Seans açık → dünkü resmi kapanış
-            kapanis_fiyati = (
-                float(df_g["Close"].iloc[-2])
-                if len(df_g) >= 2
-                else float(df_g["Close"].iloc[-1])
-            )
-        else:
-    # Seans kapalı → son resmi kapanış
-            kapanis_fiyati = float(df_g["Close"].iloc[-1])
-        # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
         
+        # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
+        kapanis_fiyati = float(df_g['Close'].iloc[-2]) if len(df_g) >= 2 else float(df_g['Close'].iloc[-1])
 
         # --- B. GÜNCEL ANLIK FİYAT ÇEKME VE ENJEKSİYON ---
         try:
-            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False, auto_adjust=False)
+            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False)
             guncel_fiyat = float(guncel_df['Close'].iloc[-1]) if not guncel_df.empty else float(df_g['Close'].iloc[-1])
         except Exception:
             guncel_fiyat = float(df_g['Close'].iloc[-1])
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
-        # Sadece canlı veri güncellenecek
-        if not df_live.empty and guncel_fiyat is not None:
-            last_idx = df_live.index[-1]
-
-            df_live.loc[last_idx, "Close"] = guncel_fiyat
-            df_live.loc[last_idx, "High"] = max(df_live.loc[last_idx, "High"], guncel_fiyat)
-            df_live.loc[last_idx, "Low"] = min(df_live.loc[last_idx, "Low"], guncel_fiyat)
-
-# Eski kod bozulmasın
-        df_g = df_live
+        if not df_g.empty and guncel_fiyat is not None:
+            last_idx = df_g.index[-1]
+            df_g.loc[last_idx, 'Close'] = guncel_fiyat
+            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
+            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
 
         # --- C. TEMEL İNDİKATÖRLER & İLERİ TEKNİK ANALİZ ---
-        df_close = stokastik_hesapla(df_close)
-        df_close["Tilson_T3"] = tilson_t3(df_close["Close"])
-        df_close = ileri_teknik_gostergeler(df_close)
-
-# Canlı analiz
-        df_live = stokastik_hesapla(df_live)
-        df_live["Tilson_T3"] = tilson_t3(df_live["Close"])
-        df_live = ileri_teknik_gostergeler(df_live)
-
-# Eski kod bozulmasın
-        df_g = df_live
+        df_g = stokastik_hesapla(df_g)
+        df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
+        df_g = ileri_teknik_gostergeler(df_g)
         
     
         # Yenilenen dipten dönüş analizi çağrılıyor
@@ -1183,100 +1139,17 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
-            # =====================================================
-# V102 - Çift AI Motoru
-# =====================================================
-
-            if umut_var_mi:
-
-    # Günlük resmi kapanış AI
-                ai_close = ensemble_prediction(df_close, sembol)
-
-    # Canlı fiyat AI
-                ai_live = ensemble_prediction(df_live, sembol)
-
-    # 4 Saat AI
-                if not df_4h.empty:
-                    ai_h4 = ensemble_prediction(df_4h, sembol)
-                else:
-                    ai_h4 = ai_live
-
-            else:
-                ai_close = {
-                    "signal":"ZAYIF",
-                    "rf_prediction":0.0,
-                    "confidence":0.0,
-                    "expected_return_pct":0.0
-                }
-
-                ai_live = ai_close.copy()
-                ai_h4 = ai_close.copy()
-                # ==================================================
-# FINAL AI
-# ==================================================
-
-                close_ret = ai_close["expected_return_pct"]
-                live_ret  = ai_live["expected_return_pct"]
-                h4_ret    = ai_h4["expected_return_pct"]
-
-                final_return = (
-                    close_ret * 0.50 +
-                    h4_ret    * 0.30 +
-                    live_ret  * 0.20
-                )
-
-                final_confidence = (
-                    ai_close["confidence"] * 0.50 +
-                    ai_h4["confidence"]    * 0.30 +
-                    ai_live["confidence"]  * 0.20
-                )
-                final_confidence = (
-                    ai_close["confidence"] * 0.50 +
-                    ai_live["confidence"]  * 0.30 +
-                    ai_h4["confidence"]    * 0.20
-                )
-
-                if final_return >= 5:
-                    final_signal = "⭐⭐⭐ GÜÇLÜ AL"
-                
-                elif final_return >= 2:
-                    final_signal = "🚀 AL"
-
-                elif final_return >= 0.75:
-                    final_signal = "🟢 POZİTİF"
-
-                elif final_return <= -5:
-                    final_signal = "🔴 GÜÇLÜ SAT"
-
-                elif final_return <= -2:
-                    final_signal = "🟠 SAT"
-
-                else:
-                    final_signal = "⚪ NÖTR"
-                    final_target = kapanis_fiyati * (1 + final_return / 100)
-                    ai_close = {
-                        "signal": "ZAYIF",
-                        "rf_prediction": 0.0,
-                        "score": 0
-                    }
-
-                    ai_live = {
-                        "signal": "ZAYIF",
-                        "rf_prediction": 0.0,
-                        "score": 0
-                    }
-                    
-# Eski sistem bozulmasın
-                    ai_close = ai_live
+            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
             # 👇 YENİ EKLENECEK BLOK 👇
             # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
-            if umut_var_mi and ai_close.get('rf_prediction', 0.0) > 0:
-                tahmin_kaydet(sembol, ai_close['rf_prediction'])
+            if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
+                tahmin_kaydet(sembol, ai_veri['rf_prediction'])
             # 👆 YENİ EKLENECEK BLOK BİTİŞ 👆
 
             # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             
+            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
             try:
                 hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
                 if hedef_str != '-' and hedef_str != '0.00':
@@ -1286,9 +1159,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                         if "AL" in al_sat_karari:
                             al_sat_karari = f"⚠️ RİSKLİ: Trend Pozitif ama {formasyon_adi} Tehdidi!"
                         
-                        ai_sinyal = ai_close.get('signal', 'NÖTR')
+                        ai_sinyal = ai_veri.get('signal', 'NÖTR')
                         if "AL" in ai_sinyal:
-                            ai_close['signal'] = f"🛑 AI İPTAL ({formasyon_adi})"
+                            ai_veri['signal'] = f"🛑 AI İPTAL ({formasyon_adi})"
             except Exception as e:
                 logging.warning(f"[{sembol}] Veto mekanizmasında hata: {e}")
 
@@ -1311,18 +1184,8 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "🪤 Spring (Tuzak)": spring_durum,
                 "🔍 Tespit Edilen Formasyon": formasyon_adi,
                 "🎯 Formasyon Hedefi (%)": formasyon_hedef,
-                "🤖 Günlük AI": ai_close.get("signal", "-"),
-                "⚡ Canlı AI": ai_live.get("signal", "-"),
-                "🤖 Günlük AI": ai_close["signal"],
-                "🎯 Günlük Hedef": f"{ai_close['rf_prediction']:.2f} TL",
-                "⚡ Canlı AI": ai_live["signal"],
-                "🎯 Canlı Hedef": f"{ai_live['rf_prediction']:.2f} TL",
-                "🕓 4S AI": ai_h4["signal"],
-                "🎯 4S Hedef": f"{ai_h4['rf_prediction']:.2f} TL",
-                "🤖 AI Kararı": final_signal,
-                "🎯 Final Hedef": f"{final_target:.2f} TL",
-                "📈 Beklenen Getiri": f"%{final_return:.2f}",
-                "📊 AI Güveni": f"%{final_confidence:.1f}",
+                "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'),
+                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
             }
 
         elif analiz_tipi == "stoch":
@@ -1340,7 +1203,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
 # ==========================================
 # 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
 # ==========================================
-
+# ==========================================
+# 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
+# ==========================================
 def institutional_decision(df):
     try:
         return {
@@ -1831,8 +1696,7 @@ def tum_bist_hisselerini_getir():
         import logging
         logging.error(f"BIST Hisseleri çekilemedi: {e}")
         # Bağlantı hatası olursa acil durum listesi (Fallback)
-        return ["XU100.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AHGAZ.IS", 
-"AKBNK.IS", "AKCNS.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "THYAO.IS", "TUPRS.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS"
+        return ["XU100.IS", "AHSGY.IS", "BEGYO.IS", "BORLS.IS", "HOROZ.IS", "KBORU.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "THYAO.IS", "TUPRS.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS"
 
 ]
 def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
@@ -1869,7 +1733,7 @@ def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 veri_kaynagi = st.sidebar.selectbox(
     "Veri Çekilecek Kaynak:", 
-    ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)", "İş Yatırım (Sadece BIST)"]
+    ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)", "İş Yatırım (Sadece BIST)"]
 )
 # Küresel Piyasa Ayarları (Mevcut kodun buradan devam edecek...)
 piyasa_tipi = st.sidebar.selectbox("Piyasa Türü:", ["Borsa İstanbul (BIST)", "Amerikan Borsası (ABD)", "Kripto Para"])
@@ -2102,7 +1966,7 @@ with tabs[1]:
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 gelecek_sonuclar = {
                     executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
                     for s in tarama_listesi

@@ -937,18 +937,6 @@ def dipten_donus_analizi(df):
 
     return df_dip
 # --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
-def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
-    bt_df = df[['Close']].copy()
-    bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
-    bt_df['Uzun_SMA'] = bt_df['Close'].rolling(window=uzun_periyot).mean()
-    bt_df.dropna(inplace=True)
-    bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
-    bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
-    bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
-    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
-    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
-    return bt_df
-
 
 def stacking_model_olustur(xgb_model, rf_model, svr_model):
     estimators = [
@@ -981,19 +969,6 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
         st.pyplot(fig)
     except Exception as e:
         st.warning(f"SHAP grafiği oluşturulurken hata: {e}")
-def python_istatistik_analizi(df):
-    try:
-        getiriler = df['Close'].pct_change().dropna()
-        yillik_volatilite = getiriler.std() * np.sqrt(252)
-        sharpe_orani = (getiriler.mean() * 252) / yillik_volatilite
-        var_95 = getiriler.quantile(0.05)
-        return {
-            'Yıllık Volatilite': f"% {yillik_volatilite * 100:.2f}",
-            'Sharpe Oranı': f"{sharpe_orani:.2f}",
-            'Günlük VaR (%95)': f"% {var_95 * 100:.2f}"
-        }
-    except:
-        return {'Yıllık Volatilite': "% 0.00", 'Sharpe Oranı': "0.00", 'Günlük VaR (%95)': "% 0.00"}
 
 def haber_duygu_analizi(ticker):
     try:
@@ -2107,10 +2082,6 @@ tabs = st.tabs([
     "💼 Cüzdan & Stop", 
     "🏢 Temel Analiz", 
     "📰 Haber", 
-    "📊 Isı Haritası", 
-    "⚙️ Backtest", 
-    "🎲 Risk Simülasyonu", 
-    "🧬 İstatistik",
     "🤖 AI Ensemble Karar",
     "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
     
@@ -2345,15 +2316,35 @@ with tabs[1]:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
                 # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
-                df_sniper = df_radar[
-                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
-                    (
-                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
-                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
-                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
-                    )
-                ]
+                 # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
+
+# Filtrede kullandığımız kritik sütunların listesi
+                sniper_sutunlari = [
+                    'Günlük T3', 
+                    '📊 Temel Skor', 
+                    '💥 Hacim Analizi', 
+                    '📈 Pozitif Uyuşmazlık', 
+                    '🪤 Spring (Tuzak)'
+            ]
+
+# 1. df_radar boş değilse VE 2. İhtiyacımız olan tüm sütunlar df_radar içinde mevcutsa:
+                if not df_radar.empty and all(sutun in df_radar.columns for sutun in sniper_sutunlari):
+    
+                    df_sniper = df_radar[
+                        (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                        (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
+                        (
+                            (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
+                            (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
+                            (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+                        )
+                    ]
+
+                else:
+    # Veri eksikse hata verip çökmek yerine boş bir DataFrame döndürür
+                    df_sniper = pd.DataFrame()
+    # Kullanıcıya (sana) arayüzde zarif bir uyarı gösterir
+                    st.warning("⚠️ Sniper filtresi şu an çalıştırılamadı: Veri kaynağında kesinti olabilir veya gerekli sütunlar eksik.")
                 
                 # Ekstra Kenar Çubuğu Filtresi İşletilmesi
                 if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:

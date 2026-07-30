@@ -395,90 +395,6 @@ def tahminleri_degerlendir():
                 logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
     conn.commit()
     conn.close()
-def dipten_donus_analizi(df):
-    """
-    Kurumsal Dip Toplama ve Dönüş Sinyallerini Hesaplar:
-    1. Z-Score / Dip Bölgesi Onayı (Aşırı Satım)
-    2. Hacimli Akümülasyon (Hacim Patlaması)
-    3. Wyckoff Spring (Ayı Tuzağı)
-    4. RSI, MACD ve Stokastik Pozitif Uyumsuzluklar
-    """
-    if df is None or len(df) < 30:
-        return df
-
-    df_dip = df.copy()
-
-    # --- A. DİP BÖLGESİ VE Z-SCORE HESABI ---
-    sma_20 = df_dip['Close'].rolling(20).mean()
-    std_20 = df_dip['Close'].rolling(20).std().replace(0, 1e-9)
-    df_dip['Z_Score'] = (df_dip['Close'] - sma_20) / std_20
-    df_dip['Dip_Bolgesinde'] = df_dip['Z_Score'] < -1.2  # Fiyat istatistiksel dipte mi?
-
-    # --- B. HACİMLİ AKÜMÜLASYON (KURUMSAL TOPLAMA) ---
-    vol_sma20 = df_dip['Volume'].rolling(20).mean()
-    # Yeşil mumda (Close > Open) 1.8 kat hacim artışı kurumsal toplamayı gösterir
-    df_dip['Hacim_Patlamasi'] = (df_dip['Volume'] > vol_sma20 * 1.8) & (df_dip['Close'] >= df_dip['Open'])
-
-    # --- C. WYCKOFF SPRING (AYI TUZAĞI) ---
-    lower_band = sma_20 - (std_20 * 2)
-    df_dip['Wyckoff_Spring'] = (df_dip['Low'] < lower_band) & \
-                               (df_dip['Close'] > lower_band) & \
-                               (df_dip['Close'] > df_dip['Open'])
-
-    # --- D. İNDİKATÖRLER VE UYUMSUZLUK (DIVERGENCE) ---
-    if 'RSI' not in df_dip.columns:
-        delta = df_dip['Close'].diff()
-        gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
-        loss = -delta.where(delta < 0, 0).ewm(alpha=1/14, adjust=False).mean()
-        df_dip['RSI'] = 100 - (100 / (1 + (gain / loss.replace(0, 1e-9))))
-
-    if 'MACD_Hist' not in df_dip.columns:
-        ema12 = df_dip['Close'].ewm(span=12, adjust=False).mean()
-        ema26 = df_dip['Close'].ewm(span=26, adjust=False).mean()
-        macd = ema12 - ema26
-        df_dip['MACD_Hist'] = macd - macd.ewm(span=9, adjust=False).mean()
-
-    if 'Stoch_K' not in df_dip.columns:
-        low_min = df_dip['Low'].rolling(14).min()
-        high_max = df_dip['High'].rolling(14).max()
-        df_dip['Stoch_K'] = 100 * ((df_dip['Close'] - low_min) / (high_max - low_min + 1e-9))
-
-    df_dip['Pozitif_Uyusmazlik'] = False
-    df_dip['Super_Sinyal'] = False
-
-    # Yerel Dipler Üzerinden Uyumsuzluk Tespiti
-    dip_mask = (df_dip['Low'].shift(1) > df_dip['Low']) & (df_dip['Low'].shift(-1) > df_dip['Low'])
-    dipler = df_dip[dip_mask]['Low'].tail(2)
-    
-    if len(dipler) == 2:
-        eski_idx, yeni_idx = dipler.index[0], dipler.index[1]
-        eski_fiyat, yeni_fiyat = df_dip['Low'].loc[eski_idx], df_dip['Low'].loc[yeni_idx]
-
-        # Fiyat daha düşük dip yaparken indikatörlerin daha yüksek dip yapması
-        if yeni_fiyat < eski_fiyat:
-            rsi_uyum = df_dip['RSI'].loc[yeni_idx] > df_dip['RSI'].loc[eski_idx]
-            macd_uyum = df_dip['MACD_Hist'].loc[yeni_idx] > df_dip['MACD_Hist'].loc[eski_idx]
-            stoch_uyum = df_dip['Stoch_K'].loc[yeni_idx] > df_dip['Stoch_K'].loc[eski_idx]
-
-            super_sinyal = rsi_uyum and macd_uyum and stoch_uyum
-            herhangi_uyum = rsi_uyum or macd_uyum or stoch_uyum
-
-            df_dip.loc[yeni_idx:, 'Pozitif_Uyusmazlik'] = herhangi_uyum
-            df_dip.loc[yeni_idx:, 'Super_Sinyal'] = super_sinyal
-
-        df = divergence_ekle(df, rsi_col='RSI', macd_col='MACD_Hist')
-
-# Yapay zeka modelinin girdi listesi (X_train)
-        feature_cols = [
-            'RSI', 'MACD_Hist', 'Tilson_T3', 
-            'RSI_Bullish_Div',    # 0 veya 1 (Özellikle dip dönüş göstergesi)
-            'MACD_Bullish_Div',   # 0 veya 1
-            'Divergence_Skor',    # 0, 50 veya 100
-            'Hacim_Artis_Orani'
-        ]
-
-        X = df[feature_cols]
-    return df_dip
 def sihirli_formul_skorla(sembol, df=None):
     """
     Şirketin temel çarpanlarını ve teknik dip dönüş sinyallerini harmanlayarak
@@ -1075,7 +991,8 @@ async def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", ver
         g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
 
         # ⚡ DOĞRULANMIŞ AKILLI FİLTRE
-        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
+        # Mevcut katı filtre yerine alternatif yumuşatılmış koşul:
+        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi or (g_fiyat > df_g['EMA_8'].iloc[-1])
         
         if not umut_var_mi and analiz_tipi == "radar":
             return {

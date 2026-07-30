@@ -2216,12 +2216,16 @@ with tabs[1]:
         btn_son_tarama = st.button("🔄 Son Taramayı Getir", type="secondary", key="btn_son")
 
     # Yardımcı Fonksiyon: Taramayı hem RAM'e (Session State) hem Diske Kaydeder
-    def taramayi_kaydet(df, tip_adi):
-        st.session_state.son_tarama_df = df
-        st.session_state.son_tarama_tipi = tip_adi
-        df.to_pickle("son_tarama.pkl")
-        with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
-            f.write(tip_adi)
+    def taramayi_kaydet(df, tarama_adi):
+    # Eğer DataFrame boşsa kaydetmeye çalışma
+        if df is None or df.empty:
+            return
+        
+        try:
+        # to_pickle yerine to_csv kullanalım
+            df.to_csv("son_tarama.csv", index=False)
+        except Exception as e:
+            st.error(f"Veri kaydedilirken bir hata oluştu: {e}")
 
     # 1. GENEL RADAR
     if btn_radar:
@@ -2367,7 +2371,7 @@ with tabs[1]:
         # 1. RAM boşsa diskteki pickle dosyasından veri çek
         if st.session_state.son_tarama_df is None and os.path.exists("son_tarama.pkl"):
             try:
-                st.session_state.son_tarama_df = pd.read_pickle("son_tarama.pkl")
+                st.session_state.son_tarama_df = pd.read_pickle("son_tarama.cvs")
                 if os.path.exists("son_tarama_tipi.txt"):
                     with open("son_tarama_tipi.txt", "r", encoding="utf-8") as f:
                         st.session_state.son_tarama_tipi = f.read()

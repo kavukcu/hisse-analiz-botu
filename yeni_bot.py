@@ -1196,7 +1196,17 @@ async def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", ver
         ]
                 
                 # 4. YAPAY ZEKAYI ÇALIŞTIR VE SKORLARI AL
-                xgb_skor, lstm_skor = ensemble_prediction(df_g, features)
+                # 4. YAPAY ZEKAYI ÇALIŞTIR VE SKORLARI AL
+    # Ensemble modeli çalıştırıp sözlüğü alıyoruz
+                ai_sonuc = ensemble_prediction(df_g, sembol=sembol)
+    
+    # XGB güven skorunu 0-1 arasına çekiyoruz
+                xgb_skor = ai_sonuc.get("confidence", 0) / 100.0  
+    
+    # LSTM fonksiyonunu ayrıca çağırıyoruz
+                lstm_skor = lstm_tahmin_yap_10g_ensemble(df_g)
+                if lstm_skor is None:
+                    lstm_skor = 0.0
                 
                 # 5. AKILLI RİSK YÖNETİMİ VE AKŞAM/GÜNDÜZ HEDEF BELİRLEME
                 uyumsuzluk_onayli = (g_uyusmazlik or h4_uyusmazlik or g_super_sinyal or h4_super)

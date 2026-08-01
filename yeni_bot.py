@@ -57,30 +57,10 @@ from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import ElasticNet
+import sqlite3
+from datetime import datetime
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
-st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
-@st.cache_resource(show_spinner=False)
-def get_tv_datafeed():
-    """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
-    try:
-        # Eğer premium hesabın varsa username ve password parametrelerini girebilirsin.
-        # Yoksa anonim olarak bağlanır.
-        tv = TvDatafeed() 
-        return tv
-    except Exception as e:
-        logging.error(f"TradingView Bağlantı Hatası: {e}")
-        return None
-# ==========================================
-# SAYFA AYARLARI VE OTURUM
-# ==========================================
-
-oturum = requests.Session()
-oturum.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-})
-# ==========================================
-# VERİTABANI VE HAFIZA YÖNETİMİ
 # ==========================================
 def veritabani_baslat():
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
@@ -1422,6 +1402,70 @@ def ai_guven_skoru_hesapla(
     except Exception:
 
         return 50.0
+def ai_veritabani_olustur():
+
+    conn = sqlite3.connect("ai_memory.db")
+
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_predictions(
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            tarih TEXT,
+
+            sembol TEXT,
+
+            fiyat REAL,
+
+            hedef REAL,
+
+            sinyal TEXT,
+
+            guven REAL,
+
+            beklenen_getiri REAL,
+
+            model TEXT,
+
+            sonuc5 REAL,
+
+            sonuc10 REAL,
+
+            sonuc20 REAL
+
+        )
+    """)
+
+    conn.commit()
+
+    conn.close()
+st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
+ai_veritabani_olustur()
+st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
+@st.cache_resource(show_spinner=False)
+def get_tv_datafeed():
+    """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
+    try:
+        # Eğer premium hesabın varsa username ve password parametrelerini girebilirsin.
+        # Yoksa anonim olarak bağlanır.
+        tv = TvDatafeed() 
+        return tv
+    except Exception as e:
+        logging.error(f"TradingView Bağlantı Hatası: {e}")
+        return None
+# ==========================================
+# SAYFA AYARLARI VE OTURUM
+# ==========================================
+
+oturum = requests.Session()
+oturum.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+})
+# ==========================================
+# VERİTABANI VE HAFIZA YÖNETİMİ
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
     try:
@@ -1635,6 +1679,42 @@ def ensemble_prediction(df, sembol="Genel"):
             risk_odul=risk_odul_orani,
             atr_orani=atr_orani
         )
+        # --------------------------------------------------------
+# AI TAHMİNİNİ VERİTABANINA KAYDET
+# --------------------------------------------------------
+
+        try:
+            conn = sqlite3.connect("ai_memory.db")
+            cur = conn.cursor()
+
+            cur.execute("""
+                INSERT INTO ai_predictions (
+                    tarih,
+                    sembol,
+                    fiyat,
+                    hedef,
+                    sinyal,
+                    guven,
+                    beklenen_getiri,
+                    model
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                sembol,
+                guncel_fiyat,
+                hedef_fiyat,
+                sinyal,
+                guven_skoru,
+                beklenen_getiri_pct,
+                "Stacking"
+            ))
+
+            conn.commit()
+            conn.close()
+
+        except Exception as db_hata:
+            print("AI kayıt hatası:", db_hata)
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,

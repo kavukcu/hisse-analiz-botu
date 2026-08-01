@@ -1593,33 +1593,23 @@ def ensemble_prediction(df, sembol="Genel"):
             sinyal = "🛑 SAT / UZAK DUR (Negatif Beklenti)"
         else:
             sinyal = "⚖️ NÖTR / BEKLE"
+        teknik_skor = min(abs(beklenen_getiri_pct) * 10, 100)
+
+        if "AI_Formasyon_Skoru" in t_df.columns:
+            formasyon_skoru = float(t_df["AI_Formasyon_Skoru"].iloc[-1]) * 10
+        else:
+            formasyon_skoru = 50.0
+
+        atr_orani = atr_degeri / guncel_fiyat if guncel_fiyat > 0 else 0
+
         guven_skoru = ai_guven_skoru_hesapla(
             ensemble=ensemble,
             son_veri=son_veri,
-            beklenen_getiri=beklenen_getiri_pct,
+            teknik_skor=teknik_skor,
+            formasyon_skoru=formasyon_skoru,
             risk_odul=risk_odul_orani,
-            dip_var=dipten_donus_var,
-            atr=atr_degeri,
-            fiyat=guncel_fiyat
+            atr_orani=atr_orani
         )
-
-        teknik_skor = teknik_skor_hesapla(t_df)
-
-        formasyon_skoru = float(
-            t_df["AI_Formasyon_Skoru"].iloc[-1]
-        ) * 10
-
-        atr_orani = atr_degeri / guncel_fiyat
-
-        guven_skoru = ai_guven_skoru_hesapla(
-            ensemble,
-            son_veri,
-            teknik_skor,
-            formasyon_skoru,
-            risk_odul_orani,
-            atr_orani
-        )
-        
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,

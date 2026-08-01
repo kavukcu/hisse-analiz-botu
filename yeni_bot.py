@@ -1542,7 +1542,8 @@ def ensemble_prediction(df, sembol="Genel"):
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
-            "feature_importances": feature_importances
+            "feature_importances": feature_importances,
+            "feature_names": features
         }
     except Exception as e:
         import logging
@@ -2448,22 +2449,48 @@ with tabs[9]:
 
         if isinstance(feature_importances, np.ndarray) and feature_importances.size > 0:
             # Verileri DataFrame'e çevirip küçükten büyüğe sıralıyoruz
-            imp_df = pd.DataFrame(list(ai_sonuc["feature_importances"].items()), columns=["İndikatör", "Etki Oranı"])
-            imp_df = imp_df.sort_values(by="Etki Oranı", ascending=True)
-            
-            # Plotly ile yatay bar grafiği
-            fig_imp = px.bar(imp_df, x="Etki Oranı", y="İndikatör", orientation='h', 
-                             title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
-                             text_auto='.2%', # Çubukların üzerine yüzde yazdırır
-                             color="Etki Oranı", color_continuous_scale="Viridis")
-            
-            fig_imp.update_layout(template="plotly_dark", height=350, margin=dict(l=0, r=0, t=40, b=0),
-                                  xaxis_tickformat='.0%', showlegend=False)
-            
-            st.plotly_chart(fig_imp, use_container_width=True)
-        else:
-            st.warning("Öznitelik ağırlıkları hesaplanamadı (Yetersiz veri veya model hatası).")
+            feature_importances = ai_sonuc.get("feature_importances")
+            feature_names = ai_sonuc.get("feature_names")
 
+            if (
+                feature_importances is not None
+                and feature_names is not None
+                and len(feature_importances) > 0
+            ):
+
+                feature_importances = np.asarray(feature_importances)
+
+                imp_df = pd.DataFrame({
+                    "İndikatör": feature_names[:len(feature_importances)],
+                    "Etki Oranı": feature_importances
+                })
+
+                imp_df = imp_df.sort_values("Etki Oranı", ascending=False)
+
+                fig_imp = px.bar(
+                    imp_df,
+                    x="Etki Oranı",
+                    y="İndikatör",
+                    orientation="h",
+                    title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
+                    text_auto=".1%",
+                    color="Etki Oranı",
+                    color_continuous_scale="Viridis"
+                )
+
+                fig_imp.update_layout(
+                    template="plotly_dark",
+                    height=350,
+                    margin=dict(l=0, r=0, t=40, b=0),
+                    xaxis_tickformat=".0%",
+                    showlegend=False,
+                    yaxis=dict(autorange="reversed")
+                )
+
+                st.plotly_chart(fig_imp, use_container_width=True)
+
+            else:
+                st.warning("Öznitelik ağırlıkları hesaplanamadı.")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
 with tabs[10]:

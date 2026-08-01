@@ -1429,9 +1429,17 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
+    
         if len(ml_df) < 50:
-    # SHAP hata vermesin diye erken dönüş yapın
-            return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
+            return {
+                "rf_prediction": float(t_df['Close'].iloc[-1]), 
+                "signal": "VERİ YETERSİZ", 
+                "confidence": 50.0, 
+                "expected_return_pct": 0.0
+            }
+        
+    # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
+        X = ml_df[features].values
             
         # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
         X = ml_df[features].values

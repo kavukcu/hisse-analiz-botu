@@ -2505,26 +2505,32 @@ df = stokastik_hesapla(df)
 # ==========================================
 # 4. ARAYÜZ (TABS) SEKMELERİ
 # ==========================================
-tabs = st.tabs([
-    "📈 SMC & Quant Grafiği", 
-    "🔍 Akıllı Radar", 
-    "💼 Cüzdan & Stop", 
-    "🏢 Temel Analiz", 
-    "📰 Haber", 
-    "📊 Isı Haritası", 
-    "⚙️ Backtest", 
-    "🎲 Risk Simülasyonu", 
+SEKME_ADLARI = [
+    "📈 SMC & Quant Grafiği",
+    "🔍 Akıllı Radar",
+    "💼 Cüzdan & Stop",
+    "🏢 Temel Analiz",
+    "📰 Haber",
+    "📊 Isı Haritası",
+    "⚙️ Backtest",
+    "🎲 Risk Simülasyonu",
     "🧬 İstatistik",
     "🤖 AI Ensemble Karar",
-    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
-    
-    
-    
-])
+    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi",
+]
+
+# st.tabs bütün sekmeleri aynı anda ön yüzde oluşturur. Büyük grafik ve tabloların
+# birlikte yeniden çizilmesi bazı Streamlit sürümlerinde React removeChild
+# uyuşmazlığına neden olabilir. Yalnızca seçilen modülü oluşturuyoruz.
+aktif_sekme = st.sidebar.radio(
+    "📌 Aktif Modül",
+    SEKME_ADLARI,
+    key="aktif_modul_secimi",
+)
 
 # --- SEKME 0: QUANT GRAFİK ---
 # --- SEKME 0: QUANT GRAFİK ---
-with tabs[0]:
+if aktif_sekme == SEKME_ADLARI[0]:
     st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
     
     c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
@@ -2624,7 +2630,7 @@ with tabs[0]:
     st.plotly_chart(fig, use_container_width=True, key="ana_teknik_grafik")
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
-with tabs[1]:
+if aktif_sekme == SEKME_ADLARI[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
     # Session State Tanımlamaları
@@ -2769,7 +2775,7 @@ with tabs[1]:
                     taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
-                    st.balloons()
+                    st.success("✅ Tarama tamamlandı.")
                 else:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
@@ -2804,46 +2810,46 @@ with tabs[1]:
             st.dataframe(df_goster, use_container_width=True, hide_index=True)
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
-with tabs[2]:
+if aktif_sekme == SEKME_ADLARI[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")
     tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)
     st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
 
 # --- SEKME 3, 4, 5, 6, 7, 8: DİĞER MODÜLLER ---
-with tabs[3]:
+if aktif_sekme == SEKME_ADLARI[3]:
     st.subheader("🏢 Temel Analiz")
     c1, c2, c3 = st.columns(3)
     c1.metric("F/K Oranı", info.get('trailingPE', '-'))
     c2.metric("PD/DD", info.get('priceToBook', '-'))
     c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
 
-with tabs[4]:
+if aktif_sekme == SEKME_ADLARI[4]:
     st.subheader("📰 Haber Duygu Analizi")
     for h in haber_duygu_analizi(hisse_kodu):
         st.write(f"**{h['duygu']}** - [{h['baslik']}]({h['link']})")
 
-with tabs[5]:
+if aktif_sekme == SEKME_ADLARI[5]:
     st.subheader("📊 Korelasyon Haritası")
     st.write("Isı haritası oluşturmak için yeterli veri işleniyor...")
 
-with tabs[6]:
+if aktif_sekme == SEKME_ADLARI[6]:
     st.subheader("⚙️ Strateji Testi (Backtest)")
     bt = backtest_motoru(df)
-    st.line_chart(bt[['Piyasa_Kumulatif', 'Strateji_Kumulatif']])
+    st.line_chart(bt[['Piyasa_Kumulatif', 'Strateji_Kumulatif']], key='backtest_cizgisi')
 
-with tabs[7]:
+if aktif_sekme == SEKME_ADLARI[7]:
     st.subheader("🎲 Monte Carlo Risk Simülasyonu")
-    if st.button("Simülasyon Çiz"):
-        st.line_chart(monte_carlo_simulasyonu(df))
+    if st.button("Simülasyon Çiz", key="btn_monte_carlo"):
+        st.line_chart(monte_carlo_simulasyonu(df), key='monte_carlo_cizgisi')
 
-with tabs[8]:
+if aktif_sekme == SEKME_ADLARI[8]:
     st.subheader("🧬 İstatistik")
     stats = python_istatistik_analizi(df)
     st.write(stats)
 
 # --- SEKME 9: YAPAY ZEKA ---
 # --- SEKME 9: YAPAY ZEKA ---
-with tabs[9]:
+if aktif_sekme == SEKME_ADLARI[9]:
     st.subheader("🧠 v100 AI Ensemble & Kurumsal Karar Motoru")
     
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
@@ -2957,7 +2963,7 @@ with tabs[9]:
                 st.warning("Öznitelik ağırlıkları hesaplanamadı.")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
-with tabs[10]:
+if aktif_sekme == SEKME_ADLARI[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
     tahminleri_degerlendir()
     st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")

@@ -1013,7 +1013,20 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
         import shap # Eğer yukarıda import edilmediyse diye fonksiyon içine alıyoruz
         import matplotlib.pyplot as plt
 
-        explainer = shap.TreeExplainer(agac_modeli)
+        if isinstance(agac_modeli, XGBRegressor):
+            explainer = shap.TreeExplainer(agac_modeli)
+
+        elif isinstance(agac_modeli, RandomForestRegressor):
+            explainer = shap.TreeExplainer(agac_modeli)
+
+        elif isinstance(agac_modeli, GradientBoostingRegressor):
+            explainer = shap.TreeExplainer(agac_modeli)
+
+        else:
+            explainer = shap.Explainer(
+                agac_modeli.predict,
+                X_train_clean
+            )
         shap_values = explainer.shap_values(X_train_clean, check_additivity=False)
         
         # 5. Grafik Çizimi

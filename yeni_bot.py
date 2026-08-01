@@ -2444,7 +2444,9 @@ with tabs[9]:
         
     with c2:
         # Öznitelik (Feature) grafiğinin çizilmesi
-        if ai_sonuc.get("feature_importances"):
+        feature_importances = ai_sonuc.get("feature_importances")
+
+        if feature_importances is not None and len(feature_importances) > 0:
             # Verileri DataFrame'e çevirip küçükten büyüğe sıralıyoruz
             imp_df = pd.DataFrame(list(ai_sonuc["feature_importances"].items()), columns=["İndikatör", "Etki Oranı"])
             imp_df = imp_df.sort_values(by="Etki Oranı", ascending=True)

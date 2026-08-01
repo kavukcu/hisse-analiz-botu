@@ -1359,6 +1359,65 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     study.optimize(objective, n_trials=5) # 10 farklı kombinasyon dener
     
     return study.best_params
+def ai_guven_skoru_hesapla(
+    ensemble,
+    son_veri,
+    teknik_skor,
+    formasyon_skoru,
+    risk_odul,
+    atr_orani
+):
+    """
+    Kurumsal AI Güven Skoru (0-100)
+    """
+
+    try:
+
+        tahminler = []
+
+        if hasattr(ensemble, "estimators_"):
+
+            for est in ensemble.estimators_:
+
+                try:
+                    tahmin = float(est.predict(son_veri)[0])
+                    tahminler.append(tahmin)
+                except Exception:
+                    pass
+
+        if len(tahminler) >= 2:
+
+            std = np.std(tahminler)
+
+            ort = max(abs(np.mean(tahminler)), 0.001)
+
+            oy_birligi = max(0, 100 - (std / ort) * 100)
+
+        else:
+
+            oy_birligi = 50
+
+        teknik = np.clip(teknik_skor, 0, 100)
+
+        formasyon = np.clip(formasyon_skoru, 0, 100)
+
+        rr = np.clip(risk_odul * 25, 0, 100)
+
+        volatilite = np.clip(100 - atr_orani * 100, 0, 100)
+
+        guven = (
+            oy_birligi * 0.35 +
+            teknik * 0.25 +
+            formasyon * 0.20 +
+            rr * 0.10 +
+            volatilite * 0.10
+        )
+
+        return round(np.clip(guven, 0, 99), 1)
+
+    except Exception:
+
+        return 50.0
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
     try:
@@ -1534,9 +1593,32 @@ def ensemble_prediction(df, sembol="Genel"):
             sinyal = "🛑 SAT / UZAK DUR (Negatif Beklenti)"
         else:
             sinyal = "⚖️ NÖTR / BEKLE"
+        guven_skoru = ai_guven_skoru_hesapla(
+            ensemble=ensemble,
+            son_veri=son_veri,
+            beklenen_getiri=beklenen_getiri_pct,
+            risk_odul=risk_odul_orani,
+            dip_var=dipten_donus_var,
+            atr=atr_degeri,
+            fiyat=guncel_fiyat
+        )
 
-        guven_skoru = min(abs(beklenen_getiri_pct) * 5 + (risk_odul_orani * 10), 99.0)
+        teknik_skor = teknik_skor_hesapla(t_df)
 
+        formasyon_skoru = float(
+            t_df["AI_Formasyon_Skoru"].iloc[-1]
+        ) * 10
+
+        atr_orani = atr_degeri / guncel_fiyat
+
+        guven_skoru = ai_guven_skoru_hesapla(
+            ensemble,
+            son_veri,
+            teknik_skor,
+            formasyon_skoru,
+            risk_odul_orani,
+            atr_orani
+        )
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,

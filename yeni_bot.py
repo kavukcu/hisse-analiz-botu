@@ -969,7 +969,6 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
         rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
         simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
     return simulasyonlar
-def shap_aciklamasi_goster(model, X_train, hisse_adi):
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
@@ -1021,7 +1020,51 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
     except Exception as e:
         # Hata yakalandığında tam olarak ne olduğunu ekrana yazdırıyoruz
         st.error(f"💡 Grafik oluşturulamadı. Detay: {str(e)}")
+def shap_aciklamasi_goster(model, X_train, hisse_adi):
+    st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
+    
+    try:
+        # 1. Veri Kontrolü
+        if X_train is None or len(X_train) == 0:
+            st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi.")
+            return
 
+        agac_modeli = None
+        
+        # 2. VotingRegressor veya Pipeline içinden XGBoost/RandomForest bulma
+        if hasattr(model, 'estimators_'):
+            for est in model.estimators_:
+                # Eğer estimator bir Pipeline ise son adımına (modele) bak
+                if hasattr(est, 'steps'):
+                    est = est.steps[-1][1]
+                
+                est_name = type(est).__name__
+                if est_name in ['XGBRegressor', 'RandomForestRegressor']:
+                    agac_modeli = est
+                    break
+        elif hasattr(model, 'steps'):
+            agac_modeli = model.steps[-1][1]
+        else:
+            agac_modeli = model
+
+        # 3. Model Bulunamama Durumu
+        if agac_modeli is None:
+            st.error("💡 Öznitelik ağırlıkları hesaplanamadı (SHAP için uygun ağaç tabanlı model bulunamadı).")
+            return
+
+        # 4. SHAP Hesaplaması
+        # check_additivity=False: XGBoost'un float (küsurat) yuvarlama hatalarını yoksayar
+        explainer = shap.TreeExplainer(agac_modeli)
+        shap_values = explainer.shap_values(X_train, check_additivity=False)
+        
+        # 5. Grafik Çizimi
+        fig, ax = plt.subplots(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        st.pyplot(fig)
+        
+    except Exception as e:
+        # Hatalı olan mükerrer 'except' bloğu kaldırıldı ve hata mesajı netleştirildi
+        st.error(f"💡 Öznitelik ağırlıkları hesaplanamadı (Yetersiz veri veya model hatası). Detay: {str(e)}")
 def python_istatistik_analizi(df):
     try:
         getiriler = df['Close'].pct_change().dropna()

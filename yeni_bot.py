@@ -1022,6 +1022,7 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
         st.pyplot(fig)
         
     except Exception as e:
+        st.error(f"💡 Öznitelik ağırlıkları hesaplanamadı. Hata detayı: {str(e)}")
         import traceback
         st.error(f"💡 SHAP Hatası: {str(e)}")
         with st.expander("🛠️ Geliştirici Hata Günlüğü (Tıkla Aç)"):

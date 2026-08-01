@@ -522,13 +522,16 @@ def ileri_teknik_gostergeler(df):
     df_ta['EMA_5'] = df_ta['Close'].ewm(span=5, adjust=False).mean()
     df_ta['EMA_8'] = df_ta['Close'].ewm(span=8, adjust=False).mean()
     df_ta['EMA_13'] = df_ta['Close'].ewm(span=13, adjust=False).mean()
-
+    df_ta['EMA_52'] = df_ta['Close'].ewm(span=52, adjust=False).mean()
+    df_ta['EMA_89'] = df_ta['Close'].ewm(span=89, adjust=False).mean()
+    df_ta['EMA_144'] = df_ta['Close'].ewm(span=144, adjust=False).mean()
     # Kısa Vadeli Fibonacci Kesişim Trend Sinyali (5 > 8 > 13)
     df_ta['Fibo_MA_Trend'] = np.where(
         (df_ta['EMA_5'] > df_ta['EMA_8']) & (df_ta['EMA_8'] > df_ta['EMA_13']), "🚀 GÜÇLÜ YÜKSELİŞ",
         np.where((df_ta['EMA_5'] < df_ta['EMA_8']) & (df_ta['EMA_8'] < df_ta['EMA_13']), "🔻 GÜÇLÜ DÜŞÜŞ", "⚖️ YATAY NÖTR")
     )
     return df_ta
+    
 
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):
     try:
@@ -1303,11 +1306,9 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df = df.copy()
         
         # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        
-        # 🌟 YENİ: YAPAY ZEKA FORMASYON TANIMA SİSTEMİ 🌟
         t_df = yapay_zeka_icin_formasyon_bul(t_df)
+        t_df = makro_formasyonlari_bul(t_df, window=20)
+        t_df = trend_ve_harmonik_bul(t_df)
         
         if 'Stoch_K' not in t_df.columns:
             low_min = t_df['Low'].rolling(window=14).min()
@@ -1382,34 +1383,31 @@ def ensemble_prediction(df, sembol="Genel"):
         # Yapay zekanın "Altın Kesişim (Golden Cross)" mantığını yakalaması için sinyal:
         t_df['Trend_5_8'] = np.where(t_df['EMA_5'] > t_df['EMA_8'], 1, -1)
         t_df['Trend_8_13'] = np.where(t_df['EMA_8'] > t_df['EMA_13'], 1, -1)
+        t_df['Target_Return'] = ((t_df['Close'].shift(-10) - t_df['Close']) / t_df['Close']) * 100
+        
+        # YENİ EMA MESAFELERİ (Yapay zekanın 52, 89, 144 günlüğe olan uzaklığı görmesi için)
+        t_df['EMA_52_Dist'] = (t_df['Close'] - t_df['EMA_52']) / t_df['Close'].replace(0, 0.0001)
+        t_df['EMA_89_Dist'] = (t_df['Close'] - t_df['EMA_89']) / t_df['Close'].replace(0, 0.0001)
+        t_df['EMA_144_Dist'] = (t_df['Close'] - t_df['EMA_144']) / t_df['Close'].replace(0, 0.0001)
 
-        # 3. Güncellenmiş Öznitelik (Features) Listesi
         features = [
             'RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 
-            'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
-            'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 
-            'Vol_Lag1', 'Vol_Lag2',
+            'Vol_Change', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
+            'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 'Vol_Lag1', 'Vol_Lag2',
             'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13',
-            # 👇 YENİ EKLENEN FORMASYON ÖZNİTELİKLERİ 👇
+            'EMA_52_Dist', 'EMA_89_Dist', 'EMA_144_Dist', # Yeni eklendi
             'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', 
-           # Mikro Mum Formasyonları
-            # Makro Grafik Formasyonları (YENİ)
             'Ikili_Tepe', 'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen',
-            'Alcalan_Ucgen', 'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 
-            'Dip_Uzakligi_Z', 'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru',
-            # 👇 YENİ: Harmonik ve Dev Trend Kesişimleri 👇
+            'Alcalan_Ucgen', 'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 'Dip_Uzakligi_Z', 
             'Cross_Sinyali', 'SMA_50_200_Farki', 'ABCD_Formasyonu'
         ]
        
-        # ----------------------------------------------------------------------------
-        
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
 
         if len(ml_df) < 50:
-            return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0, "feature_importances": {}}
-
+            return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0}
         # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
         X = ml_df[features].values
         y = ml_df['Target_Return'].values
@@ -1453,7 +1451,9 @@ def ensemble_prediction(df, sembol="Genel"):
             ('gb', model_gb),
             ('ridge', model_ridge)
         ])
-
+        X = ml_df[features].values
+        y = ml_df['Target_Return'].values
+        son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
         # AŞAĞIDAKİ TEK SATIRLIK fit İŞLEMİNİ SİLİYORUZ
         # ensemble.fit(X, y) 
 
@@ -1476,32 +1476,37 @@ def ensemble_prediction(df, sembol="Genel"):
             joblib.dump(ensemble, model_dosyasi)
 
         # --- 3. ÇIKARIM VE KARAR ---
-        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
-        anlik_fiyat = float(t_df['Close'].iloc[-1])
-        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
-        
-        sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
-        guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
+        temp_dip_analiz = dipten_donus_analizi(t_df)
+        dipten_donus_var = temp_dip_analiz['Wyckoff_Spring'].iloc[-1] or \
+                           temp_dip_analiz['Super_Sinyal'].iloc[-1] or \
+                           (t_df['Ikili_Dip'].iloc[-1] == 1) or \
+                           (t_df['P_Engulfing'].iloc[-1] == 1)
 
-        try:
-            f_importances = ensemble.named_estimators_['xgb'].feature_importances_
-            oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, f_importances)}
-        except Exception:
-            oznitelik_agirliklari = {}
+        # Karar Ağacı: 10 Gün Ufuklu, >%10 Getirili ve Kesin Dönüşlü Cımbızlama
+        if beklenen_getiri_pct >= 10.0 and dipten_donus_var and risk_odul_orani >= 1.5:
+            sinyal = "🎯 KESİN AL (Ödül >%10, Dip Onaylı)"
+        elif beklenen_getiri_pct >= 5.0 and dipten_donus_var:
+            sinyal = "🚀 POTANSİYEL AL (Dipten Dönüş)"
+        elif beklenen_getiri_pct >= 10.0 and not dipten_donus_var:
+            sinyal = "⚠️ RİSKLİ AL (Hedef Yüksek ama Dip Onayı Yok)"
+        elif beklenen_getiri_pct < 0:
+            sinyal = "🛑 SAT / UZAK DUR (Negatif Beklenti)"
+        else:
+            sinyal = "⚖️ NÖTR / BEKLE"
+
+        guven_skoru = min(abs(beklenen_getiri_pct) * 5 + (risk_odul_orani * 10), 99.0)
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
-            "expected_return_pct": round(beklenen_getiri_pct, 2),
-            "feature_importances": oznitelik_agirliklari
+            "expected_return_pct": round(beklenen_getiri_pct, 2)
         }
         
     except Exception as e:
         import logging
         logging.error(f"AI Ensemble Hatası: {e}")
-        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
-
+        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0}
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10):
     try:

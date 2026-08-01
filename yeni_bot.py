@@ -970,37 +970,44 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
         simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
     return simulasyonlar
 def shap_aciklamasi_goster(model, X_train, hisse_adi):
-    """
-    Pipeline, VotingRegressor ve Boş Veri hatalarına karşı korumalı SHAP Fonksiyonu
-    """
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
-        # 1. KONTROL: Veri seti boş mu?
-        if X_train is None or X_train.empty or len(X_train) == 0:
-            st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi çünkü indikatör hesaplamalarından sonra eğitim verisi kalmadı.")
+        if X_train is None or len(X_train) == 0:
+            st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi.")
             return
 
-        agac_modeli = model
-
-        # 2. KONTROL: Model bir Pipeline ise, en son adımdaki asıl modeli al
-        if hasattr(model, 'steps'):
-            agac_modeli = model.steps[-1][1]
-
-        # 3. KONTROL: Model Voting/Stacking Regressor ise içinden ağaç modelini (XGBoost veya Random Forest) bul
-        if hasattr(agac_modeli, 'estimators_'):
-            bulundu = False
-            for est in agac_modeli.estimators_:
+        agac_modeli = None
+        
+        # VotingRegressor veya StackingRegressor içinden XGBoost/RF bulma
+        if hasattr(model, 'estimators_'):
+            for est in model.estimators_:
+                # Eğer estimator bir Pipeline ise son adımına bak
+                if hasattr(est, 'steps'):
+                    est = est.steps[-1][1]
+                
                 est_name = type(est).__name__
-                # Hem XGBoost hem de Random Forest'ı kabul ediyoruz
-                if est_name in ['XGBRegressor', 'RandomForestRegressor', 'LGBMRegressor']:
+                if est_name in ['XGBRegressor', 'RandomForestRegressor']:
                     agac_modeli = est
-                    bulundu = True
                     break
-            
-            if not bulundu:
-                st.warning("💡 SHAP için uygun ağaç tabanlı model (XGBoost/RF) bulunamadı!")
-                return
+        elif hasattr(model, 'steps'):
+            agac_modeli = model.steps[-1][1]
+        else:
+            agac_modeli = model
+
+        if agac_modeli is None:
+            st.error("Öznitelik ağırlıkları hesaplanamadı (Uygun model bulunamadı).")
+            return
+
+        explainer = shap.TreeExplainer(agac_modeli)
+        shap_values = explainer.shap_values(X_train, check_additivity=False)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        st.pyplot(fig)
+        
+    except Exception as e:
+        st.error(f"Öznitelik ağırlıkları hesaplanamadı (Model hatası): {str(e)}")
 
         # 4. KONTROL: SHAP İşlemleri (check_additivity=False ile XGBoost float hatalarını engelliyoruz)
         explainer = shap.TreeExplainer(agac_modeli)
@@ -1422,7 +1429,9 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
-
+        if len(ml_df) < 50:
+    # SHAP hata vermesin diye erken dönüş yapın
+            return {"rf_prediction": ..., "signal": "VERİ YETERSİZ", ...}
         if len(ml_df) < 50:
             return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
             

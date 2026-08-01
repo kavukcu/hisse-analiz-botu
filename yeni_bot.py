@@ -73,7 +73,7 @@ def veritabani_baslat():
 
 def tahmin_kaydet(sembol, hedef_fiyat):
     """Bugünün tahminlerini hafızaya yazar."""
-    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    conn = sqlite3.connect('godmode_ai.db', timeout=10)
     c = conn.cursor()
     bugun = datetime.now().strftime("%Y-%m-%d")
     

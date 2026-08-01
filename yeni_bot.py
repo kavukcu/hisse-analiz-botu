@@ -2942,3 +2942,23 @@ with tabs[10]:
             st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
     except Exception as e:
         st.error(f"Veritabanı erişim hatası: {e}")
+    istat = ai_performans_istatistikleri()
+
+    st.subheader("📈 AI Performans Özeti")
+
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric("Toplam Tahmin",istat["toplam"])
+
+    c2.metric("Ortalama Güven",f"%{istat['ortalama_guven']}")
+
+    c3.metric("Ortalama Beklenen Getiri",f"%{istat['ortalama_getiri']}")
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric("AL",istat["al"])
+
+    c2.metric("SAT",istat["sat"])
+
+    c3.metric("BEKLE",istat["bekle"])
+
+

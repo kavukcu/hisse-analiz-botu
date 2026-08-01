@@ -1627,6 +1627,46 @@ def ensemble_prediction(df, sembol="Genel"):
         print("=" * 80)
 
         raise
+TIMEFRAMES = {
+    "15 Dakika": ("15m", "30d"),
+    "1 Saat": ("60m", "90d"),
+    "4 Saat": ("4h", "730d"),
+    "Günlük": ("1d", "5y"),
+    "Haftalık": ("1wk", "10y"),
+}
+
+
+@st.cache_data(ttl=600)
+def multi_timeframe_ai(sembol):
+
+    sonuc = {}
+
+    for isim, (interval, period) in TIMEFRAMES.items():
+
+        try:
+
+            df_tf = veri_yukle(
+                sembol,
+                period=period,
+                interval=interval
+            )
+
+            if df_tf is None or len(df_tf) < 120:
+                continue
+
+            sonuc[isim] = ensemble_prediction(df_tf, sembol)
+
+        except Exception as e:
+
+            sonuc[isim] = {
+                "signal": "HATA",
+                "confidence": 0,
+                "rf_prediction": 0,
+                "expected_return_pct": 0,
+                "error": str(e)
+            }
+
+    return sonuc
 
 import pandas as pd
 import numpy as np
@@ -2504,7 +2544,25 @@ with tabs[9]:
     
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
         ai_sonuc = ensemble_prediction(df)
-        
+        mtf = multi_timeframe_ai(hisse_kodu)
+
+        st.markdown("### ⏰ Çoklu Zaman Dilimi AI")
+
+        rows = []
+
+        for tf, s in mtf.items():
+
+            rows.append({
+                "Zaman": tf,
+                "Karar": s["signal"],
+                "Güven": s["confidence"],
+                "Hedef": s["rf_prediction"]
+            })
+
+        st.dataframe(
+            pd.DataFrame(rows),
+            use_container_width=True
+        )
     c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
     
     with c1:

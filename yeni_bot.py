@@ -1619,28 +1619,25 @@ def ensemble_prediction(df, sembol="Genel"):
             risk_odul_orani,
             atr_orani
         )
+        
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
             "feature_importances": feature_importances,
-            "feature_names": features,
-            "rf_prediction": round(hedef_fiyat, 2),
-            "signal": sinyal,
-            "confidence": max(round(guven_skoru, 1), 0.0)
+            "feature_names": features
         }
     except Exception as e:
-        import logging
-        logging.exception(f"AI Ensemble Hatası ({sembol})")
+        import traceback
 
-        return {
-            "rf_prediction": 0.0,
-            "signal": "Hata",
-            "confidence": 0.0,
-            "expected_return_pct": 0.0,
-            "feature_importances": None
-        }
+        print("=" * 80)
+        print("AI ENSEMBLE HATASI")
+        print(traceback.format_exc())
+        print("=" * 80)
+
+        raise
+
 import pandas as pd
 import numpy as np
 

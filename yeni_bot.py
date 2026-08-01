@@ -52,7 +52,8 @@ import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import ElasticNet
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
@@ -1538,13 +1539,34 @@ def ensemble_prediction(df, sembol="Genel"):
             ('ridge', Ridge(alpha=1.0))
         ])
 
-        ensemble = VotingRegressor(estimators=[
-            ('xgb', model_xgb),
-            ('rf', model_rf),
-            ('svr', model_svr),
-            ('gb', model_gb),
-            ('ridge', model_ridge)
-        ])
+        # =====================================================
+# META AI STACKING MODEL (v101)
+# =====================================================
+
+        base_models = [
+            ("xgb", model_xgb),
+            ("rf", model_rf),
+            ("svr", model_svr),
+            ("gb", model_gb),
+            ("ridge", model_ridge),
+        ]
+
+        ensemble = StackingRegressor(
+
+            estimators=base_models,
+
+            final_estimator=ElasticNet(
+                alpha=0.05,
+                l1_ratio=0.5,
+                random_state=42
+            ),
+
+            passthrough=True,
+
+            cv=5,
+
+            n_jobs=-1
+        )
 
         model_klasoru = "ai_modeller"
         os.makedirs(model_klasoru, exist_ok=True)
@@ -1752,6 +1774,34 @@ def ai_feature_importance(model):
         tum_onemler = []
 
         # VotingRegressor
+        # --------------------------------------------------
+# STACKING REGRESSOR
+# --------------------------------------------------
+
+        if hasattr(model, "named_estimators_"):
+
+            tum_onemler = []
+
+            for isim, est in model.named_estimators_.items():
+
+                if hasattr(est, "steps"):
+                    est = est.steps[-1][1]
+
+                if hasattr(est, "feature_importances_"):
+
+                    tum_onemler.append(est.feature_importances_)
+
+                elif hasattr(est, "coef_"):
+
+                    tum_onemler.append(np.abs(est.coef_))
+
+            if len(tum_onemler):
+
+                importance = np.mean(tum_onemler, axis=0)
+
+            else:
+
+                return None
         if hasattr(model, "estimators_"):
 
             for est in model.estimators_:

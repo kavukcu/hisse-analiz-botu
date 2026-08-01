@@ -959,6 +959,7 @@ def stacking_model_olustur(xgb_model, rf_model, svr_model):
     )
     
     return stack_model
+
 def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     getiriler = df['Close'].pct_change().dropna()
     ortalama_getiri = getiriler.mean()
@@ -969,77 +970,34 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
         rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
         simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
     return simulasyonlar
-    st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
-    
-    try:
-        if X_train is None or len(X_train) == 0:
-            st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi.")
-            return
-
-        agac_modeli = None
-        
-        # VotingRegressor veya StackingRegressor içinden XGBoost/RF bulma
-        if hasattr(model, 'estimators_'):
-            for est in model.estimators_:
-                # Eğer estimator bir Pipeline ise son adımına bak
-                if hasattr(est, 'steps'):
-                    est = est.steps[-1][1]
-                
-                est_name = type(est).__name__
-                if est_name in ['XGBRegressor', 'RandomForestRegressor']:
-                    agac_modeli = est
-                    break
-        elif hasattr(model, 'steps'):
-            agac_modeli = model.steps[-1][1]
-        else:
-            agac_modeli = model
-
-        if agac_modeli is None:
-            st.error("Öznitelik ağırlıkları hesaplanamadı (Uygun model bulunamadı).")
-            return
-
-        explainer = shap.TreeExplainer(agac_modeli)
-        shap_values = explainer.shap_values(X_train, check_additivity=False)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
-        st.pyplot(fig)
-        
-    except Exception as e:
-        st.error(f"Öznitelik ağırlıkları hesaplanamadı (Model hatası): {str(e)}")
-
-        # 4. KONTROL: SHAP İşlemleri (check_additivity=False ile XGBoost float hatalarını engelliyoruz)
-        explainer = shap.TreeExplainer(agac_modeli)
-        shap_values = explainer.shap_values(X_train, check_additivity=False)
-        
-        # Grafik Çizimi
-        fig, ax = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
-        st.pyplot(fig)
-        
-    except Exception as e:
-        # Hata yakalandığında tam olarak ne olduğunu ekrana yazdırıyoruz
-        st.error(f"💡 Grafik oluşturulamadı. Detay: {str(e)}")
 def shap_aciklamasi_goster(model, X_train, hisse_adi):
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
-        # 1. Veri Kontrolü
+        # 1. Temel Veri Kontrolü
         if X_train is None or len(X_train) == 0:
             st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi.")
             return
 
+        # 2. X_train Verisini SHAP İçin Zorla Temizleme
+        if isinstance(X_train, pd.DataFrame):
+            X_train_clean = X_train.select_dtypes(include=[np.number]).copy()
+            X_train_clean = X_train_clean.replace([np.inf, -np.inf], np.nan).fillna(0)
+        else:
+            X_train_clean = np.nan_to_num(np.array(X_train, dtype=float))
+            
+        if X_train_clean.shape[1] == 0:
+            st.warning("💡 Sayısal öznitelik (feature) bulunamadı.")
+            return
+
+        # 3. Model Ayıklama İşlemi
         agac_modeli = None
-        
-        # 2. VotingRegressor veya Pipeline içinden XGBoost/RandomForest bulma
         if hasattr(model, 'estimators_'):
             for est in model.estimators_:
-                # Eğer estimator bir Pipeline ise son adımına (modele) bak
                 if hasattr(est, 'steps'):
                     est = est.steps[-1][1]
                 
-                est_name = type(est).__name__
-                if est_name in ['XGBRegressor', 'RandomForestRegressor']:
+                if type(est).__name__ in ['XGBRegressor', 'RandomForestRegressor']:
                     agac_modeli = est
                     break
         elif hasattr(model, 'steps'):
@@ -1047,24 +1005,27 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
         else:
             agac_modeli = model
 
-        # 3. Model Bulunamama Durumu
         if agac_modeli is None:
-            st.error("💡 Öznitelik ağırlıkları hesaplanamadı (SHAP için uygun ağaç tabanlı model bulunamadı).")
+            st.error("💡 SHAP grafiği için uygun ağaç tabanlı model (XGBoost/RandomForest) bulunamadı.")
             return
 
         # 4. SHAP Hesaplaması
-        # check_additivity=False: XGBoost'un float (küsurat) yuvarlama hatalarını yoksayar
+        import shap # Eğer yukarıda import edilmediyse diye fonksiyon içine alıyoruz
+        import matplotlib.pyplot as plt
+
         explainer = shap.TreeExplainer(agac_modeli)
-        shap_values = explainer.shap_values(X_train, check_additivity=False)
+        shap_values = explainer.shap_values(X_train_clean, check_additivity=False)
         
         # 5. Grafik Çizimi
         fig, ax = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        shap.summary_plot(shap_values, X_train_clean, plot_type="bar", show=False)
         st.pyplot(fig)
         
     except Exception as e:
-        # Hatalı olan mükerrer 'except' bloğu kaldırıldı ve hata mesajı netleştirildi
-        st.error(f"💡 Öznitelik ağırlıkları hesaplanamadı (Yetersiz veri veya model hatası). Detay: {str(e)}")
+        import traceback
+        st.error(f"💡 SHAP Hatası: {str(e)}")
+        with st.expander("🛠️ Geliştirici Hata Günlüğü (Tıkla Aç)"):
+            st.code(traceback.format_exc())
 def python_istatistik_analizi(df):
     try:
         getiriler = df['Close'].pct_change().dropna()

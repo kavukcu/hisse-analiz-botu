@@ -1443,6 +1443,59 @@ def ai_veritabani_olustur():
     conn.close()
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 ai_veritabani_olustur()
+# =====================================================
+# AI PERFORMANS İSTATİSTİKLERİ
+# =====================================================
+
+def ai_performans_istatistikleri():
+
+    try:
+
+        conn = sqlite3.connect("ai_memory.db")
+
+        df = pd.read_sql("SELECT * FROM ai_predictions", conn)
+
+        conn.close()
+
+        if df.empty:
+
+            return {
+                "toplam": 0,
+                "ortalama_guven": 0,
+                "ortalama_getiri": 0,
+                "al": 0,
+                "sat": 0,
+                "bekle": 0
+            }
+
+        return {
+
+            "toplam": len(df),
+
+            "ortalama_guven": round(df["guven"].mean(),2),
+
+            "ortalama_getiri": round(df["beklenen_getiri"].mean(),2),
+
+            "al": int(df["sinyal"].str.contains("AL",case=False).sum()),
+
+            "sat": int(df["sinyal"].str.contains("SAT",case=False).sum()),
+
+            "bekle": int(df["sinyal"].str.contains("BEKLE",case=False).sum())
+
+        }
+
+    except Exception as e:
+
+        print(e)
+
+        return {
+            "toplam":0,
+            "ortalama_guven":0,
+            "ortalama_getiri":0,
+            "al":0,
+            "sat":0,
+            "bekle":0
+        }
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
 def get_tv_datafeed():

@@ -1667,10 +1667,78 @@ def multi_timeframe_ai(sembol):
             }
 
     return sonuc
+def meta_ai_karari(mtf_sonuclari):
+
+    puan = 0
+    agirlik = {
+        "15 Dakika": 1,
+        "1 Saat": 2,
+        "4 Saat": 3,
+        "Günlük": 4,
+        "Haftalık": 5
+    }
+
+    toplam_agirlik = sum(agirlik.values())
+    toplam_guven = 0
+    hedefler = []
+
+    for tf, sonuc in mtf_sonuclari.items():
+
+        if "signal" not in sonuc:
+            continue
+
+        sinyal = str(sonuc["signal"]).upper()
+
+        w = agirlik.get(tf, 1)
+
+        if "KESİN AL" in sinyal:
+            puan += 2 * w
+
+        elif "GÜÇLÜ AL" in sinyal:
+            puan += 1.8 * w
+
+        elif "POTANSİYEL AL" in sinyal:
+            puan += 1.5 * w
+
+        elif "AL" in sinyal:
+            puan += 1 * w
+
+        elif "BEKLE" in sinyal:
+            puan += 0
+
+        elif "SAT" in sinyal:
+            puan -= 1.5 * w
+
+        toplam_guven += sonuc.get("confidence", 0) * w
+
+        if sonuc.get("rf_prediction", 0) > 0:
+            hedefler.append(sonuc["rf_prediction"])
+
+    guven = toplam_guven / toplam_agirlik
+
+    hedef = np.mean(hedefler) if hedefler else 0
+
+    if puan >= 18:
+        karar = "🚀 GÜÇLÜ AL"
+
+    elif puan >= 10:
+        karar = "✅ AL"
+
+    elif puan >= 3:
+        karar = "⚖️ BEKLE"
+
+    else:
+        karar = "🛑 SAT"
+
+    return {
+        "karar": karar,
+        "guven": round(guven, 1),
+        "hedef": round(float(hedef), 2),
+        "puan": round(puan, 1)
+    }
 
 import pandas as pd
 import numpy as np
-
 def ai_feature_importance(model):
     """
     VotingRegressor / XGBoost / RandomForest / GradientBoosting /
@@ -2545,7 +2613,17 @@ with tabs[9]:
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
         ai_sonuc = ensemble_prediction(df)
         mtf = multi_timeframe_ai(hisse_kodu)
+        meta = meta_ai_karari(mtf)
 
+        st.markdown("## 🤖 Meta AI")
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric("Karar", meta["karar"])
+
+        c2.metric("Güven", f"%{meta['guven']}")
+
+        c3.metric("Ortalama Hedef", f"{meta['hedef']:.2f}")
         st.markdown("### ⏰ Çoklu Zaman Dilimi AI")
 
         rows = []
@@ -2563,6 +2641,26 @@ with tabs[9]:
             pd.DataFrame(rows),
             use_container_width=True
         )
+        fig = px.bar(
+            pd.DataFrame([
+                {
+                    "Zaman": k,
+                    "Güven": v["confidence"]
+                }
+                for k, v in mtf.items()
+            ]),
+            x="Zaman",
+            y="Güven",
+            color="Güven",
+            text="Güven"
+        )
+
+        fig.update_layout(
+            template="plotly_dark",
+            height=320
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
     c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
     
     with c1:

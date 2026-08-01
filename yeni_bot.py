@@ -1431,8 +1431,6 @@ def ensemble_prediction(df, sembol="Genel"):
         ml_df = t_df.dropna(subset=['Target_Return'])
         if len(ml_df) < 50:
     # SHAP hata vermesin diye erken dönüş yapın
-            return {"rf_prediction": ..., "signal": "VERİ YETERSİZ", ...}
-        if len(ml_df) < 50:
             return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0}
             
         # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---

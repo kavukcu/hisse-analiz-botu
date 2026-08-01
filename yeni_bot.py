@@ -1450,10 +1450,11 @@ def ensemble_prediction(df, sembol="Genel"):
     
         if len(ml_df) < 50:
             return {
-                "rf_prediction": float(t_df['Close'].iloc[-1]), 
-                "signal": "VERİ YETERSİZ", 
-                "confidence": 50.0, 
-                "expected_return_pct": 0.0
+                "rf_prediction": float(t_df['Close'].iloc[-1]),
+                "signal": "VERİ YETERSİZ",
+                "confidence": 50.0,
+                "expected_return_pct": 0.0,
+                "feature_importances": None
             }
         
     # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
@@ -1500,6 +1501,11 @@ def ensemble_prediction(df, sembol="Genel"):
             ensemble.fit(X, y)
             joblib.dump(ensemble, model_dosyasi)
 
+# Model hazırlandıktan sonra HER ZAMAN hesapla
+        feature_importances = ai_feature_importance(ensemble)
+        if feature_importances is None:
+                feature_importances = np.ones(len(features), dtype=float)
+                feature_importances /= feature_importances.sum()
         # --- 3. ÇIKARIM VE HESAPLAMALAR (Eksik Değişkenler Tanımlandı) ---
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         guncel_fiyat = float(t_df['Close'].iloc[-1])
@@ -1535,14 +1541,106 @@ def ensemble_prediction(df, sembol="Genel"):
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
-            "expected_return_pct": round(beklenen_getiri_pct, 2)
+            "expected_return_pct": round(beklenen_getiri_pct, 2),
+            "feature_importances": feature_importances
         }
-        
     except Exception as e:
         import logging
-        logging.error(f"AI Ensemble Hatası: {e}")
-        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0}
+        logging.exception(f"AI Ensemble Hatası ({sembol})")
 
+        return {
+            "rf_prediction": 0.0,
+            "signal": "Hata",
+            "confidence": 0.0,
+            "expected_return_pct": 0.0,
+            "feature_importances": None
+        }
+import pandas as pd
+import numpy as np
+
+def ai_feature_importance(model):
+    """
+    VotingRegressor / XGBoost / RandomForest / GradientBoosting /
+    Ridge / SVR için ortak Feature Importance hesaplar.
+    """
+
+    try:
+
+        import numpy as np
+
+        tum_onemler = []
+
+        # VotingRegressor
+        if hasattr(model, "estimators_"):
+
+            for est in model.estimators_:
+
+                # Pipeline ise gerçek modeli al
+                if hasattr(est, "steps"):
+                    est = est.steps[-1][1]
+
+                imp = None
+
+                if hasattr(est, "feature_importances_"):
+                    imp = np.asarray(est.feature_importances_, dtype=float)
+
+                elif hasattr(est, "coef_"):
+                    imp = np.abs(np.asarray(est.coef_, dtype=float)).flatten()
+
+                if imp is not None:
+
+                    # NaN temizle
+                    imp = np.nan_to_num(imp)
+
+                    # Normalize et
+                    toplam = imp.sum()
+
+                    if toplam > 0:
+                        imp = imp / toplam
+                        tum_onemler.append(imp)
+
+        else:
+
+            if hasattr(model, "feature_importances_"):
+
+                imp = np.asarray(model.feature_importances_, dtype=float)
+
+            elif hasattr(model, "coef_"):
+
+                imp = np.abs(np.asarray(model.coef_, dtype=float)).flatten()
+
+            else:
+                return None
+
+            imp = np.nan_to_num(imp)
+
+            if imp.sum() > 0:
+                return imp / imp.sum()
+            else:
+                return None
+
+        if len(tum_onemler) == 0:
+            return None
+
+        # En kısa uzunluğu baz al
+        min_len = min(len(x) for x in tum_onemler)
+
+        tum_onemler = [x[:min_len] for x in tum_onemler]
+
+        importance = np.mean(tum_onemler, axis=0)
+
+        if importance.sum() == 0:
+            return None
+
+        importance = importance / importance.sum()
+
+        return importance
+
+    except Exception as e:
+
+        print(f"Feature Importance Hatası: {e}")
+
+        return None
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10):
     try:

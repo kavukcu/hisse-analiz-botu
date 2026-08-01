@@ -2619,9 +2619,9 @@ with tabs[0]:
 
     fig.update_layout(template="plotly_dark", height=900, xaxis_rangeslider_visible=False)
     
-    grafik_alani = st.empty()
-    with grafik_alani:
-        st.plotly_chart(fig, use_container_width=True)
+    # Sabit Streamlit elemanı: st.empty() ile grafiği söküp yeniden takmak
+    # bazı tarayıcılarda React removeChild/NotFoundError hatasına yol açabilir.
+    st.plotly_chart(fig, use_container_width=True, key="ana_teknik_grafik")
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
 with tabs[1]:
@@ -2896,7 +2896,7 @@ with tabs[9]:
             height=320
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="coklu_zaman_guven_grafigi")
     c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
     
     with c1:
@@ -2951,7 +2951,7 @@ with tabs[9]:
                     yaxis=dict(autorange="reversed")
                 )
 
-                st.plotly_chart(fig_imp, use_container_width=True)
+                st.plotly_chart(fig_imp, use_container_width=True, key="feature_importance_grafigi")
 
             else:
                 st.warning("Öznitelik ağırlıkları hesaplanamadı.")

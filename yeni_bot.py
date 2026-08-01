@@ -1625,7 +1625,10 @@ def ensemble_prediction(df, sembol="Genel"):
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
             "feature_importances": feature_importances,
-            "feature_names": features
+            "feature_names": features,
+            "rf_prediction": round(hedef_fiyat, 2),
+            "signal": sinyal,
+            "confidence": max(round(guven_skoru, 1), 0.0)
         }
     except Exception as e:
         import logging

@@ -20,7 +20,10 @@ from datetime import datetime
 import pytz
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import VotingRegressor
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import ElasticNet
 from sklearn.svm import SVR
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -1648,7 +1651,14 @@ def ensemble_prediction(df, sembol="Genel"):
         print(traceback.format_exc())
         print("=" * 80)
 
-        raise
+        return {
+            "rf_prediction": float(t_df["Close"].iloc[-1]) if "t_df" in locals() and not t_df.empty else 0.0,
+            "signal": "AI HATASI",
+            "confidence": 0.0,
+            "expected_return_pct": 0.0,
+            "feature_importances": None,
+            "feature_names": []
+        }
 TIMEFRAMES = {
     "15 Dakika": ("15m", "30d"),
     "1 Saat": ("60m", "90d"),

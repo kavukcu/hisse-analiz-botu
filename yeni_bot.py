@@ -971,34 +971,50 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
     return simulasyonlar
 def shap_aciklamasi_goster(model, X_train, hisse_adi):
     """
-    Ağaç bazlı modeller için feature önem grafiğini çizer.
-    VotingRegressor içinden XGBoost'u otomatik olarak ayıklar.
+    Pipeline, VotingRegressor ve Boş Veri hatalarına karşı korumalı SHAP Fonksiyonu
     """
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
+        # 1. KONTROL: Veri seti boş mu?
+        if X_train is None or X_train.empty or len(X_train) == 0:
+            st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi çünkü indikatör hesaplamalarından sonra eğitim verisi kalmadı.")
+            return
+
         agac_modeli = model
-        
-        # Eğer model bir VotingRegressor veya Pipeline ise içinden XGBoost'u çıkar
-        if hasattr(model, 'estimators_'):
-            # model.estimators_ eğitilmiş modellerin listesidir
-            for est in model.estimators_:
-                # İsminde veya sınıfında XGBRegressor geçen modeli bul
-                if type(est).__name__ == 'XGBRegressor':
+
+        # 2. KONTROL: Model bir Pipeline ise, en son adımdaki asıl modeli al
+        if hasattr(model, 'steps'):
+            agac_modeli = model.steps[-1][1]
+
+        # 3. KONTROL: Model Voting/Stacking Regressor ise içinden ağaç modelini (XGBoost veya Random Forest) bul
+        if hasattr(agac_modeli, 'estimators_'):
+            bulundu = False
+            for est in agac_modeli.estimators_:
+                est_name = type(est).__name__
+                # Hem XGBoost hem de Random Forest'ı kabul ediyoruz
+                if est_name in ['XGBRegressor', 'RandomForestRegressor', 'LGBMRegressor']:
                     agac_modeli = est
+                    bulundu = True
                     break
-        
-        # XGBoost (veya RF) modelini SHAP Explainer'a veriyoruz
+            
+            if not bulundu:
+                st.warning("💡 SHAP için uygun ağaç tabanlı model (XGBoost/RF) bulunamadı!")
+                return
+
+        # 4. KONTROL: SHAP İşlemleri (check_additivity=False ile XGBoost float hatalarını engelliyoruz)
         explainer = shap.TreeExplainer(agac_modeli)
-        shap_values = explainer.shap_values(X_train)
+        shap_values = explainer.shap_values(X_train, check_additivity=False)
         
-        # Streamlit üzerinde görselleştirme
+        # Grafik Çizimi
         fig, ax = plt.subplots(figsize=(10, 6))
         shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
         st.pyplot(fig)
         
     except Exception as e:
-        st.warning(f"💡 Grafik oluşturulamadı (Yetersiz veri veya model hatası). Detay: {str(e)}")
+        # Hata yakalandığında tam olarak ne olduğunu ekrana yazdırıyoruz
+        st.error(f"💡 Grafik oluşturulamadı. Detay: {str(e)}")
+
 def python_istatistik_analizi(df):
     try:
         getiriler = df['Close'].pct_change().dropna()

@@ -3,7 +3,6 @@
 # ==========================================
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -34,6 +33,7 @@ import isyatirimhisse
 from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import IsolationForest
+from sklearn.feature_selection import SelectFromModel
 import shap
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -50,7 +50,10 @@ import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.preprocessing import MinMaxScaler
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
@@ -349,6 +352,30 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                 logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
 
     return pd.DataFrame()
+import yfinance as yf
+
+def borsa_endeks_verisini_ekle(t_df):
+    try:
+        # BIST100 verisini çek (Son 1 yıllık günlük veri yeterli olacaktır)
+        xu100 = yf.download("XU100.IS", period="1y", interval="1d", progress=False)
+        
+        # BIST100'ün günlük getirisini hesapla
+        xu100['XU100_Return'] = xu100['Close'].pct_change()
+        xu100['XU100_Trend'] = np.where(xu100['Close'] > xu100['Close'].rolling(20).mean(), 1, -1)
+        
+        # Sadece ihtiyacımız olan sütunları al ve tarih indeksini hisse tablosuyla eşleştir
+        xu100 = xu100[['XU100_Return', 'XU100_Trend']]
+        t_df = t_df.merge(xu100, left_index=True, right_index=True, how='left')
+        
+        # Boşlukları doldur (Eğer endeks kapalıysa, bir önceki günün verisini kullan)
+        t_df[['XU100_Return', 'XU100_Trend']] = t_df[['XU100_Return', 'XU100_Trend']].ffill().fillna(0)
+        
+        return t_df
+    except Exception as e:
+        print(f"Endeks verisi çekilemedi: {e}")
+        t_df['XU100_Return'] = 0
+        t_df['XU100_Trend'] = 0
+        return t_df
 def tilson_t3(close, period=5, vfactor=0.7):
     ema1 = close.ewm(span=period, adjust=False).mean()
     ema2 = ema1.ewm(span=period, adjust=False).mean()
@@ -600,7 +627,27 @@ def yapay_zeka_icin_formasyon_bul(df):
     return df_f
 import numpy as np
 import pandas as pd
+import sqlite3
+from datetime import datetime
 
+def tahmini_logla(sembol, anlik_fiyat, tahmin_edilen_fiyat, sinyal, guven_skoru):
+    try:
+        conn = sqlite3.connect('ai_performans.db')
+        c = conn.cursor()
+        
+        # Tablo yoksa otomatik oluşturur
+        c.execute('''CREATE TABLE IF NOT EXISTS tahmin_loglari
+                     (tarih TEXT, sembol TEXT, anlik_fiyat REAL, tahmin_fiyat REAL, sinyal TEXT, guven REAL, gerceklesen_fiyat REAL)''')
+        
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        
+        c.execute("INSERT INTO tahmin_loglari (tarih, sembol, anlik_fiyat, tahmin_fiyat, sinyal, guven, gerceklesen_fiyat) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (bugun, sembol, anlik_fiyat, tahmin_edilen_fiyat, sinyal, guven_skoru, 0.0))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Loglama hatası: {e}")
 def makro_formasyonlari_bul(df, window=20):
     """
     OBO, TOBO, İkili Tepe/Dip, Üçgenler ve Bayrak formasyonlarının 
@@ -1314,7 +1361,7 @@ def ensemble_prediction(df, sembol="Genel"):
     try:
         # 🟢 DÜZELTME: Orijinal dataframe'i bozmamak için doğrudan kopyalıyoruz
         t_df = df.copy()
-        
+        t_df = borsa_endeks_verisini_ekle(t_df)
         # --- 1. Veri Hazırlığı ve Feature Engineering ---
         t_df = yapay_zeka_icin_formasyon_bul(t_df)
         t_df = makro_formasyonlari_bul(t_df, window=20)
@@ -1386,7 +1433,8 @@ def ensemble_prediction(df, sembol="Genel"):
             'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen', 'Alcalan_Ucgen', 
             'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 'Dip_Uzakligi_Z', 
             'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru', 'Cross_Sinyali', 
-            'SMA_50_200_Farki', 'ABCD_Formasyonu'
+            'SMA_50_200_Farki', 'ABCD_Formasyonu',
+            'XU100_Return', 'XU100_Trend'
         ]
         
         # Sadece tabloda var olan özellikleri güvenli şekilde filtreliyoruz
@@ -1409,19 +1457,46 @@ def ensemble_prediction(df, sembol="Genel"):
         model_dosyasi = os.path.join(model_klasoru, f"{sembol}_ai_model.pkl")
 
         def model_egit_ve_kaydet():
-            # Optuna aramasını sadece model eğitilirken yapıyoruz (Yüksek Hız Kazancı)
+            # 1. Optuna ile en iyi XGBoost parametrelerini bul
             best_xgb_params = en_iyi_xgb_parametrelerini_bul(sembol, X, y)
             
-            m_xgb = XGBRegressor(**best_xgb_params, random_state=42, n_jobs=-1)
-            m_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
-            m_svr = Pipeline([('scaler', StandardScaler()), ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))])
-            m_gb = GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)
-            m_ridge = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))])
+            # 2. Gürültü temizleme için Özellik Seçici (Feature Selector) tanımla
+            feature_selector = SelectFromModel(RandomForestRegressor(n_estimators=50, random_state=42), threshold="median")
+            
+            # 3. Tüm modelleri Pipeline içine alarak gereksiz özellikleri (noise) eliyoruz
+            m_xgb = Pipeline([
+                ('fs', feature_selector), 
+                ('xgb', XGBRegressor(**best_xgb_params, random_state=42, n_jobs=-1))
+            ])
+            
+            m_rf = Pipeline([
+                ('fs', feature_selector), 
+                ('rf', RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1))
+            ])
+            
+            m_svr = Pipeline([
+                ('scaler', StandardScaler()), 
+                ('fs', feature_selector), 
+                ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))
+            ])
+            
+            m_gb = Pipeline([
+                ('fs', feature_selector), 
+                ('gb', GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42))
+            ])
+            
+            m_ridge = Pipeline([
+                ('scaler', StandardScaler()), 
+                ('fs', feature_selector), 
+                ('ridge', Ridge(alpha=1.0))
+            ])
 
+            # 4. Topluluk modelini (Voting Regressor) oluştur ve eğit
             ens = VotingRegressor(estimators=[
                 ('xgb', m_xgb), ('rf', m_rf), ('svr', m_svr), 
                 ('gb', m_gb), ('ridge', m_ridge)
             ])
+            
             ens.fit(X, y)
             joblib.dump(ens, model_dosyasi)
             return ens
@@ -1438,7 +1513,22 @@ def ensemble_prediction(df, sembol="Genel"):
             ensemble = model_egit_ve_kaydet()
 
         # --- 3. TAHMİN VE KARAR ---
+        # --- 3. TAHMİN VE KARAR ---
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
+        
+        # LSTM Entegrasyon Kontrolü
+        try:
+            lstm_fiyat_tahmini = lstm_tahmin_yap(t_df, lookback_days=60)
+            if lstm_fiyat_tahmini is not None:
+                anlik_fiyat_degeri = float(t_df['Close'].iloc[-1])
+                lstm_getiri_pct = ((lstm_fiyat_tahmini - anlik_fiyat_degeri) / anlik_fiyat_degeri) * 100
+                # Hibrit Harmanlama
+                beklenen_getiri_pct = (beklenen_getiri_pct * 0.7) + (lstm_getiri_pct * 0.3)
+        except Exception:
+            pass
+
+        anlik_fiyat = float(t_df['Close'].iloc[-1])
+        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
@@ -1494,7 +1584,13 @@ def ensemble_prediction(df, sembol="Genel"):
                 oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, avg_importances) if imp > 0}
         except Exception:
             pass
+        
+        try:
+            tahmini_logla(sembol, anlik_fiyat, hedef_fiyat, ai_karar_metni, guven_skoru)
+        except Exception:
+            pass
 
+        # Sonuçları arayüze döndür
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": ai_karar_metni,
@@ -1604,89 +1700,70 @@ from keras.layers import LSTM, Dropout, Dense
 import numpy as np
 
 def lstm_tahmin_yap(df, lookback_days=60):
-    # ---------------------------------------------------------
-    # 1. VERİ TEMİZLİĞİ VE HAZIRLIK
-    # ---------------------------------------------------------
-    df = df.copy()
-    
-    # Model eğitimine girmeden önce NaN (boş) verileri temizliyoruz
-    df.dropna(inplace=True)
-    
-    # Veri setinde yeterli gün yoksa fonksiyonu durdur (Hata almamak için)
-    if len(df) <= lookback_days:
-        return None 
-
-    # ---------------------------------------------------------
-    # 2. ÖZELLİKLER (FEATURES) VE HEDEF BELİRLEME
-    # ---------------------------------------------------------
-    yapay_zeka_ozellikleri = [
-        'Open', 'High', 'Low', 'Volume', 
-        'Tilson_T3', 'Stoch_K', 'Stoch_D',
-        'SMA_5', 'SMA_8', 'SMA_13',   
-        'EMA_5', 'EMA_8', 'EMA_13'    
-    ]
-    
-    # Sadece DataFrame'de gerçekten hesaplanmış ve var olan özellikleri al
-    kullanilacak_ozellikler = [col for col in yapay_zeka_ozellikleri if col in df.columns]
-    
-    # X: Yapay zekanın bakarak öğreneceği veriler
-    # y: Yapay zekanın tahmin etmeye çalışacağı sonuç (Kapanış Fiyatı)
-    X = df[kullanilacak_ozellikler].values
-    y = df['Close'].values.reshape(-1, 1)
-
-    # ---------------------------------------------------------
-    # 3. ÖLÇEKLENDİRME (SCALING)
-    # ---------------------------------------------------------
-    # Çoklu özellik kullanırken X ve y için ayrı Scaler kullanmak işlemi kolaylaştırır
-    scaler_X = MinMaxScaler(feature_range=(0, 1))
-    scaler_y = MinMaxScaler(feature_range=(0, 1))
-    
-    scaled_X = scaler_X.fit_transform(X)
-    scaled_y = scaler_y.fit_transform(y)
-    
-    # ---------------------------------------------------------
-    # 4. LSTM GİRİŞ FORMATINA ÇEVİRME
-    # ---------------------------------------------------------
-    X_train, y_train = [], []
-    for i in range(lookback_days, len(scaled_X)):
-        X_train.append(scaled_X[i-lookback_days:i, :]) # Son 60 günün TÜM özellikleri
-        y_train.append(scaled_y[i, 0])                 # 61. günün kapanış fiyatı
+    try:
+        t_df = df.copy()
+        t_df.dropna(inplace=True)
         
-    X_train, y_train = np.array(X_train), np.array(y_train)
-    
-    # ---------------------------------------------------------
-    # 5. MODEL MİMARİSİ VE EĞİTİM
-    # ---------------------------------------------------------
-    # X_train.shape[1] = 60 gün, X_train.shape[2] = Özellik (Feature) sayısı
-    model = Sequential([
-        LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-        Dropout(0.2),
-        LSTM(50, return_sequences=False),
-        Dropout(0.2),
-        Dense(25),
-        Dense(1)
-    ])
-    
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    
-    # Pratiklik için düşük epoch; performansa göre artırabilirsiniz
-    model.fit(X_train, y_train, batch_size=32, epochs=10, verbose=0)
-    
-    # ---------------------------------------------------------
-    # 6. GELECEK TAHMİNİ
-    # ---------------------------------------------------------
-    # Son 60 günün verilerini al
-    son_veri = scaled_X[-lookback_days:]
-    X_test = np.reshape(son_veri, (1, son_veri.shape[0], son_veri.shape[1]))
-    
-    # Tahmin yap (Çıktı 0-1 arasında ölçekli olacak)
-    tahmin_olcekli = model.predict(X_test, verbose=0)
-    
-    # Sadece y'yi (Kapanışı) ölçeklendirdiğimiz scaler ile normal fiyata dönüştür
-    gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
-    
-    return gercek_tahmin[0][0]
+        # Veri seti lookback süresinden kısaysa hata vermeden çık
+        if len(t_df) <= lookback_days:
+            return None 
 
+        yapay_zeka_ozellikleri = [
+            'Open', 'High', 'Low', 'Volume', 
+            'Tilson_T3', 'Stoch_K', 'Stoch_D',
+            'SMA_5', 'SMA_8', 'SMA_13',   
+            'EMA_5', 'EMA_8', 'EMA_13'    
+        ]
+        
+        # Tabloda var olan özellikleri filtrele
+        kullanilacak_ozellikler = [col for col in yapay_zeka_ozellikleri if col in t_df.columns]
+        if not kullanilacak_ozellikler:
+            return None
+            
+        X = t_df[kullanilacak_ozellikler].values
+        y = t_df['Close'].values.reshape(-1, 1)
+
+        scaler_X = MinMaxScaler(feature_range=(0, 1))
+        scaler_y = MinMaxScaler(feature_range=(0, 1))
+        
+        scaled_X = scaler_X.fit_transform(X)
+        scaled_y = scaler_y.fit_transform(y)
+        
+        X_train, y_train = [], []
+        for i in range(lookback_days, len(scaled_X)):
+            X_train.append(scaled_X[i-lookback_days:i, :]) 
+            y_train.append(scaled_y[i, 0]) 
+            
+        X_train, y_train = np.array(X_train), np.array(y_train)
+        
+        if len(X_train) == 0:
+            return None
+
+        # Model Mimarisi
+        model = Sequential([
+            LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+            Dropout(0.2),
+            LSTM(50, return_sequences=False),
+            Dropout(0.2),
+            Dense(25),
+            Dense(1)
+        ])
+        
+        model.compile(optimizer='adam', loss='mean_squared_error')
+        model.fit(X_train, y_train, batch_size=32, epochs=10, verbose=0)
+        
+        # Gelecek Tahmini
+        son_veri = scaled_X[-lookback_days:]
+        X_test = np.reshape(son_veri, (1, son_veri.shape[0], son_veri.shape[1]))
+        
+        tahmin_olcekli = model.predict(X_test, verbose=0)
+        gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
+        
+        return float(gercek_tahmin[0][0])
+        
+    except Exception as e:
+        print(f"LSTM Çalıştırılamadı: {e}")
+        return None
 
 # ==========================================
 # 4. YAN MENÜ (SIDEBAR) & VERİ ÇEKME

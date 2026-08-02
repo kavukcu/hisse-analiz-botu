@@ -2525,7 +2525,7 @@ with tabs[0]:
     
     grafik_alani = st.empty()
     with grafik_alani:
-        # st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
 with tabs[1]:
@@ -2586,8 +2586,8 @@ with tabs[1]:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
                 # -------------------------------------
                 
-                st.dataframe(df_goster, use_container_width=True, hide_index=True)
-                st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
+                # st.dataframe(df_goster, use_container_width=True, hide_index=True)
+                # st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
 

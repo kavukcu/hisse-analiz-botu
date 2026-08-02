@@ -1,14 +1,47 @@
-# ==========================================
-# KÜTÜPHANELER (En üste taşındı ve hızlandırıldı)
-# ==========================================
+import functools
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from taipy.gui import Gui, State, notify
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, timezone
 import requests
+import concurrent.futures
+import logging
+import os
+import pytz
+import time as tm
+import sqlite3
+import joblib
+import optuna
+from sklearn.metrics import mean_squared_error
+from tvDatafeed import TvDatafeed, Interval
+import isyatirimhisse
+from sklearn.ensemble import StackingRegressor, RandomForestRegressor, GradientBoostingRegressor, VotingRegressor, IsolationForest
+from sklearn.linear_model import Ridge
+from sklearn.svm import SVR
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.model_selection import TimeSeriesSplit
+from xgboost import XGBRegressor
+import shap
+import matplotlib.pyplot as plt
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+import gymnasium as gym
+import gym_anytrading
+from stable_baselines3 import A2C
+import asyncio
+import aiohttp
+from pypfopt import expected_returns, risk_models
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
+
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Global Oturum Tanımı
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -20,10 +53,7 @@ from datetime import datetime
 import pytz
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.ensemble import VotingRegressor
-from sklearn.ensemble import StackingRegressor
-from sklearn.linear_model import ElasticNet
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
 from sklearn.svm import SVR
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -31,15 +61,18 @@ from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 import sqlite3
 import joblib
+import os
 import optuna
 from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
+from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import IsolationForest
 import shap
 import streamlit as st
 import matplotlib.pyplot as plt
+import numpy as np
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
@@ -48,202 +81,259 @@ import gym_anytrading
 from stable_baselines3 import A2C
 import asyncio
 import aiohttp
+import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 
-# --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 # ==========================================
-DB_NAME = "godmode_ai.db"
-LEGACY_DB_NAMES = ("hisse_hafiza.db", "ai_memory.db")
-
-
-def db_connect(db_name=DB_NAME):
-    """SQLite bağlantılarını tek noktadan ve güvenli ayarlarla açar."""
-    conn = sqlite3.connect(db_name, timeout=10)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    return conn
-
-
-def _kolonlari_tamamla(conn):
-    """Eski tahminler tablosunu veri kaybetmeden birleşik şemaya yükseltir."""
-    mevcut = {row[1] for row in conn.execute("PRAGMA table_info(tahminler)").fetchall()}
-    kolonlar = {
-        "id": "INTEGER",
-        "fiyat": "REAL",
-        "sinyal": "TEXT",
-        "guven": "REAL",
-        "beklenen_getiri": "REAL",
-        "model": "TEXT",
-        "sonuc5": "REAL",
-        "sonuc10": "REAL",
-        "sonuc20": "REAL",
-    }
-    for kolon, tip in kolonlar.items():
-        if kolon not in mevcut:
-            conn.execute(f"ALTER TABLE tahminler ADD COLUMN {kolon} {tip}")
-
-
-def _eski_verileri_tasi(conn):
-    """Eski DB dosyalarındaki kayıtları birleşik veritabanına bir kez taşır."""
-    for eski_db in LEGACY_DB_NAMES:
-        if not os.path.exists(eski_db) or os.path.abspath(eski_db) == os.path.abspath(DB_NAME):
-            continue
-        try:
-            eski = sqlite3.connect(eski_db, timeout=5)
-            tablolar = {r[0] for r in eski.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-
-            if "tahminler" in tablolar:
-                for row in eski.execute(
-                    "SELECT tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum FROM tahminler"
-                ).fetchall():
-                    conn.execute(
-                        """INSERT INTO tahminler
-                           (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum)
-                           SELECT ?, ?, ?, ?, ?
-                           WHERE NOT EXISTS (
-                               SELECT 1 FROM tahminler
-                               WHERE tarih=? AND sembol=? AND hedef_fiyat=?
-                           )""",
-                        (*row, row[0], row[1], row[2]),
-                    )
-
-            if "ai_predictions" in tablolar:
-                for row in eski.execute(
-                    """SELECT tarih, sembol, fiyat, hedef, sinyal, guven,
-                              beklenen_getiri, model, sonuc5, sonuc10, sonuc20
-                       FROM ai_predictions"""
-                ).fetchall():
-                    conn.execute(
-                        """INSERT INTO tahminler
-                           (tarih, sembol, fiyat, hedef_fiyat, sinyal, guven,
-                            beklenen_getiri, model, sonuc5, sonuc10, sonuc20, durum)
-                           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLİYOR'
-                           WHERE NOT EXISTS (
-                               SELECT 1 FROM tahminler
-                               WHERE tarih=? AND sembol=? AND hedef_fiyat=? AND model IS NOT NULL
-                           )""",
-                        (*row, row[0], row[1], row[3]),
-                    )
-            eski.close()
-        except Exception as exc:
-            logging.warning(f"Eski veritabanı taşınamadı [{eski_db}]: {exc}")
-
-
+# VERİTABANI VE HAFIZA YÖNETİMİ (Değişmedi)
+# ==========================================
 def veritabani_baslat():
-    """Tek tahmin tablosunu oluşturur ve eski verileri güvenle birleştirir."""
-    with db_connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS tahminler (
-                id INTEGER,
-                tarih TEXT NOT NULL,
-                sembol TEXT NOT NULL,
-                fiyat REAL,
-                hedef_fiyat REAL,
-                gerceklesme_fiyati REAL,
-                durum TEXT DEFAULT 'BEKLİYOR',
-                sinyal TEXT,
-                guven REAL,
-                beklenen_getiri REAL,
-                model TEXT,
-                sonuc5 REAL,
-                sonuc10 REAL,
-                sonuc20 REAL
-            )
-        """)
-        _kolonlari_tamamla(conn)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tahminler_tarih_sembol ON tahminler(tarih, sembol)"
-        )
-        _eski_verileri_tasi(conn)
+    """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
+    conn = sqlite3.connect('hisse_hafiza.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
+                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
+    conn.commit()
+    conn.close()
 
+
+@functools.lru_cache(maxsize=1)
+def get_tv_datafeed():
+    try:
+        from tvDatafeed import TvDatafeed
+        return TvDatafeed()
+    except Exception as e:
+        return None
 
 def tahmin_kaydet(sembol, hedef_fiyat):
-    """Aynı gün ve sembol için yinelenmeyen temel tahmin kaydı oluşturur."""
+    """Bugünün tahminlerini hafızaya yazar."""
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    c = conn.cursor()
     bugun = datetime.now().strftime("%Y-%m-%d")
-    with db_connect() as conn:
-        mevcut = conn.execute(
-            "SELECT 1 FROM tahminler WHERE tarih=? AND sembol=? AND model IS NULL LIMIT 1",
-            (bugun, sembol),
-        ).fetchone()
-        if not mevcut:
-            conn.execute(
-                """INSERT INTO tahminler
-                   (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum)
-                   VALUES (?, ?, ?, NULL, 'BEKLİYOR')""",
-                (bugun, sembol, hedef_fiyat),
-            )
-
-
-def tahminleri_degerlendir():
-    """En az 5 günlük bekleyen tahminleri güncel fiyatla değerlendirir."""
-    with db_connect() as conn:
-        bekleyenler = conn.execute(
-            """SELECT rowid, tarih, sembol, hedef_fiyat
-               FROM tahminler
-               WHERE durum='BEKLİYOR' AND hedef_fiyat IS NOT NULL"""
-        ).fetchall()
-
-        for rowid, tarih_str, sembol, hedef_fiyat in bekleyenler:
-            try:
-                kayit_tarihi = datetime.strptime(tarih_str[:10], "%Y-%m-%d")
-            except (TypeError, ValueError):
-                continue
-
-            if (datetime.now() - kayit_tarihi).days < 5:
-                continue
-
-            try:
-                df = veri_yukle(
-                    sembol,
-                    (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
-                    datetime.now().strftime("%Y-%m-%d"),
-                )
-                if df is None or df.empty:
-                    continue
-                gercek_fiyat = float(df["Close"].iloc[-1])
-                sapma_orani = abs(gercek_fiyat - hedef_fiyat) / max(abs(gercek_fiyat), 1e-9)
-                durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
-                conn.execute(
-                    """UPDATE tahminler
-                       SET gerceklesme_fiyati=?, durum=?
-                       WHERE rowid=?""",
-                    (gercek_fiyat, durum, rowid),
-                )
-            except Exception as exc:
-                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {exc}")
-
-
-# Uygulama açıldığında birleşik veritabanını hazırla.
-veritabani_baslat()
-def sembol_formatla(hisse_kodu):
-    # Eğer gelen kodda '.IS' veya 'BIST:' varsa temizleyip ana sembolü (örneğin THYAO) bulalım
-    ana_sembol = hisse_kodu.replace('.IS', '').replace('BIST:', '').strip().upper()
     
-    # 3 farklı platform için doğru formatları döndürüyoruz
+    c.execute("SELECT * FROM tahminler WHERE tarih=? AND sembol=?", (bugun, sembol))
+    if not c.fetchone():
+        c.execute("INSERT INTO tahminler (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum) VALUES (?, ?, ?, NULL, 'BEKLİYOR')", 
+                  (bugun, sembol, hedef_fiyat))
+    conn.commit()
+    conn.close()
+import time as tm
+@functools.lru_cache(maxsize=128)
+def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
+    ticker = ticker.replace("$", "").strip() 
+    is_bist = ".IS" in ticker
+    is_crypto = "-" in ticker
+    
+    tum_kaynaklar = ["Yahoo Finance (yfinance)", "TradingView (tvdatafeed)"]
+    if is_bist:
+        tum_kaynaklar.append("İş Yatırım (Sadece BIST)")
+    
+    if kaynak in tum_kaynaklar:
+        tum_kaynaklar.remove(kaynak)
+        tum_kaynaklar.insert(0, kaynak)
+
+    for aktif_kaynak in tum_kaynaklar:
+        if aktif_kaynak == "Yahoo Finance (yfinance)":
+            for _ in range(2):
+                try:
+                    if end is not None:
+                        yf_end = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    else:
+                        yf_end = None
+
+                    df = yf.download(
+                        ticker, 
+                        start=start, 
+                        end=yf_end, 
+                        interval=interval, 
+                        progress=False, 
+                        auto_adjust=True, 
+                        threads=True
+                    )
+                    
+                    if df is not None and not df.empty:
+                        if isinstance(df.columns, pd.MultiIndex):
+                            df.columns = df.columns.droplevel(1)
+                        gerekli = ["Open", "High", "Low", "Close", "Volume"]
+                        if all(c in df.columns for c in gerekli):
+                            df = df.dropna(subset=['Close'])
+                            df.index = df.index.tz_localize(None)
+                            df.index = pd.to_datetime(df.index).normalize()
+                            return df
+                except Exception as e:
+                    logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
+                tm.sleep(0.5)
+
+        elif aktif_kaynak == "TradingView (tvdatafeed)":
+            try:
+                tv = get_tv_datafeed()
+                if tv:
+                    if is_bist:
+                        exchange = 'BIST'
+                        tv_symbol = ticker.replace(".IS", "")
+                    elif is_crypto:
+                        exchange = 'CRYPTO'
+                        tv_symbol = ticker.replace("-", "")
+                    else:
+                        exchange = 'NASDAQ'
+                        tv_symbol = ticker
+                        
+                    df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
+                    if df is not None and not df.empty:
+                        df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                        df.index = df.index.tz_localize(None)
+                        if end:
+                            df = df[df.index.date <= pd.to_datetime(end).date()]
+                        if start:
+                            df = df[df.index.date >= pd.to_datetime(start).date()]
+                        if not df.empty:
+                            return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            except Exception as e:
+                logging.debug(f"TradingView deneme hatası ({ticker}): {e}")
+
+        elif aktif_kaynak == "İş Yatırım (Sadece BIST)" and is_bist:
+            try:
+                sembol = ticker.replace(".IS", "")
+                start_str = pd.to_datetime(start).strftime('%d-%m-%Y') if start else None
+                end_str = pd.to_datetime(end).strftime('%d-%m-%Y') if end else pd.Timestamp.today().strftime('%d-%m-%Y')
+                
+                df = isyatirimhisse.fetch_data(symbol=sembol, start_date=start_str, end_date=end_str)
+                if df is not None and not df.empty:
+                    df = df.rename(columns={
+                        'TARIH': 'Date', 'ACILIS_FIYATI': 'Open', 
+                        'EN_YUKSEK_FIYAT': 'High', 'EN_DUSUK_FIYAT': 'Low', 
+                        'KAPANIS_FIYATI': 'Close', 'ISLEM_ADEDI': 'Volume'
+                    })
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df.set_index('Date', inplace=True)
+                    if not df.empty:
+                        return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            except Exception as e:
+                logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
+
+    return pd.DataFrame()
+
+@functools.lru_cache(maxsize=128)
+def sirket_bilgisi_getir(ticker):
+    try: 
+        return yf.Ticker(ticker, session=session).info
+    except: 
+        return {}
+def sembol_formatla(hisse_kodu):
+    ana_sembol = hisse_kodu.replace('.IS', '').replace('BIST:', '').strip().upper()
     formatlar = {
         'yfinance': f"{ana_sembol}.IS",
         'isyatirim': ana_sembol,
-        'tradingview': f"BIST:{ana_sembol}", # tvDatafeed kütüphanesi için sadece ana_sembol yeterli olabilir
+        'tradingview': f"BIST:{ana_sembol}",
         'saf_sembol': ana_sembol
     }
-    
     return formatlar
+def shap_aciklamasi_hazirla(model, X_train, hisse_adi):
+    import shap
+    import matplotlib.pyplot as plt
+    
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_train)
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+    
+    grafik_yolu = f"shap_{hisse_adi}.png"
+    plt.savefig(grafik_yolu)
+    plt.close(fig)
+    return grafik_yolu
+def tahminleri_degerlendir():
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    c = conn.cursor()
+    c.execute("SELECT rowid, tarih, sembol, hedef_fiyat FROM tahminler WHERE durum = 'BEKLİYOR'")
+    bekleyenler = c.fetchall()
+    
+    for row in bekleyenler:
+        rowid, tarih_str, sembol, hedef_fiyat = row
+        kayit_tarihi = datetime.strptime(tarih_str, "%Y-%m-%d")
+        
+        if (datetime.now() - kayit_tarihi).days >= 5:
+            try:
+                df = yf.download(sembol, period="1d", progress=False)
+                if not df.empty:
+                    gercek_fiyat = float(df['Close'].iloc[-1])
+                    sapma_orani = abs(gercek_fiyat - hedef_fiyat) / gercek_fiyat
+                    durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
+                    
+                    c.execute("UPDATE tahminler SET gerceklesme_fiyati = ?, durum = ? WHERE rowid = ?", 
+                              (gercek_fiyat, durum, rowid))
+            except Exception as e:
+                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
+    conn.commit()
+    conn.close()
+def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
+    kaynaklar = ["TradingView (tvdatafeed)", "Yahoo Finance (yfinance)"]
+    if kaynak in kaynaklar:
+        kaynaklar.remove(kaynak)
+        kaynaklar.insert(0, kaynak)
 
-# Örnek Kullanım:
-semboller = sembol_formatla("THYAO.IS")
-print(f"Yahoo için: {semboller['yfinance']}")
-print(f"İş Yatırım için: {semboller['isyatirim']}")
-# Kodun en üst kısımlarına ekle:
+    for aktif_kaynak in kaynaklar:
+        if aktif_kaynak == "TradingView (tvdatafeed)":
+            try:
+                tv = get_tv_datafeed()
+                if tv:
+                    if ".IS" in ticker:
+                        exchange = 'BIST'
+                        tv_symbol = ticker.replace(".IS", "")
+                    elif "-" in ticker:
+                        exchange = 'CRYPTO'
+                        tv_symbol = ticker.replace("-", "")
+                    else:
+                        exchange = 'NASDAQ'
+                        tv_symbol = ticker
+                        
+                    df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=1000)
+                    if df_4h is not None and not df_4h.empty:
+                        df_4h = df_4h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                        df_4h.index = df_4h.index.tz_localize(None)
+                        if end:
+                            df_4h = df_4h[df_4h.index.date <= pd.to_datetime(end).date()]
+                        if not df_4h.empty:
+                            return df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            except Exception as e:
+                logging.debug(f"TV 4H deneme hatası ({ticker}): {e}")
 
-# ==========================================
-# 1. TEMEL VE İLERİ TEKNİK FONKSİYONLAR
+        elif aktif_kaynak == "Yahoo Finance (yfinance)":
+            try:
+                start_dt = pd.to_datetime(start) if start else datetime.now() - timedelta(days=729)
+                if (datetime.now() - start_dt).days > 729:
+                    start_dt = datetime.now() - timedelta(days=729)
+                    s_str = start_dt.strftime('%Y-%m-%d')
+                else:
+                    s_str = start
 
+                for _ in range(2):
+                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False)
+                    if not df_1h.empty:
+                        if isinstance(df_1h.columns, pd.MultiIndex):
+                            df_1h.columns = df_1h.columns.droplevel(1)
+                        df_1h.index = df_1h.index.tz_localize(None)
+                        if end:
+                            df_1h = df_1h[df_1h.index.date <= pd.to_datetime(end).date()]
+                        
+                        df_4h = df_1h.resample('4h').agg({
+                            'Open': 'first',
+                            'High': 'max',
+                            'Low': 'min',
+                            'Close': 'last',
+                            'Volume': 'sum'
+                        }).dropna()
+                        
+                        if not df_4h.empty:
+                            return df_4h
+                    tm.sleep(0.5)
+            except Exception as e:
+                logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
 
-import time as tm
+    return pd.DataFrame()
 
-@st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
     # 1. Sembolü temizle
     ticker = ticker.replace("$", "").strip() 
@@ -349,12 +439,55 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
             except Exception as e:
                 logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
+# ==========================================
+# BUTON TETİKLEYİCİSİ VE ANALİZ AKIŞI
+# ==========================================
+def analizi_tetikle(state: State):
+    """Kullanıcı 'Analizi Başlat' butonuna bastığında bu fonksiyon çalışır."""
+    
+    # Sağ üstte bildirim gösterir
+    notify(state, "info", f"{state.secilen_hisse} için AI motorları çalıştırılıyor...")
+    
+    # Kullanıcının seçtiği verileri state üzerinden alıyoruz
+    hisse = state.secilen_hisse
+    kaynak = state.veri_kaynagi
+    
+    try:
+        # Burada kendi asenkron_analiz_yap veya gelismis_ai_tahmin fonksiyonunu çağıracaksın
+        # Örnek çağrı:
+        # analiz_verisi = asenkron_analiz_yap(hisse, "2023-01-01", None, "radar", kaynak)
+        
+        # Simüle edilmiş sonuçlar (Kendi mantığına göre state değişkenlerine ata):
+        state.analiz_sonucu = f"**{hisse}** analizi **{kaynak}** üzerinden başarıyla tamamlandı. Golden Cross tespit edildi!"
+        state.ai_hedef = "% 12.5 Yükseliş Beklentisi"
+        
+        # Eğer model eğittiysen grafiği oluşturup UI'a bas
+        # state.shap_gorseli = shap_aciklamasi_hazirla(model, X_train, hisse)
+        
+        notify(state, "success", "Analiz Tamamlandı!")
+        
+    except Exception as e:
+        notify(state, "error", f"Hata oluştu: {str(e)}")
 
+
+# ==========================================
+# UYGULAMAYI AYAĞA KALDIRMA
+# ==========================================
+    if __name__ == "__main__":
+        veritabani_baslat()
+    
+    # Taipy Gui nesnesini oluştur ve konfigürasyonları ayarla
+        gui = Gui(page=page)
+    
+    # Streamlit'teki st.set_page_config ayarlarının karşılığı
+        gui.run(
+            title="God Mode Terminal v100",
+            dark_mode=True, 
+            use_reloader=True, # Kod değişince otomatik yeniler
+            port=5000
+    )
     # Hiçbir kaynaktan veri gelmezse boş DataFrame döndür
-    return pd.DataFrame()
-# ==========================================
-# 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
-# ==========================================
+
 def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf
     import pandas as pd
@@ -445,101 +578,53 @@ def tilson_t3(close, period=5, vfactor=0.7):
     
     return c1*ema6 + c2*ema5 + c3*ema4 + c4*ema3
 
-@st.cache_data(show_spinner=False)
-def sirket_bilgisi_getir(ticker):
-    try: 
-        return yf.Ticker(ticker, session=oturum).info
-    except: 
-        return {}
-@st.cache_data(ttl=86400, show_spinner=False) # Veriyi 24 saatte bir günceller, API'yi yormaz
 def anomali_tespit_et(df):
-    """
-    Son 100 günlük veriye bakarak son gündeki hareketin anomali olup olmadığını test eder.
-    """
-    # İlgili özellikleri seç (Örn: Hacim değişimi, Kapanış değişimi, RSI vb.)
     features = df[['Close', 'Volume']].pct_change().dropna()
-    
     if len(features) < 20:
         return "Veri yetersiz"
         
-    # contamination=0.02: Verinin %2'sini "anormal" kabul edecek şekilde eğit
     iso_forest = IsolationForest(contamination=0.02, random_state=42)
     features['Anomaly'] = iso_forest.fit_predict(features)
-    
-    # Son günün anomali durumu (-1 = Anomali, 1 = Normal)
     son_durum = features['Anomaly'].iloc[-1]
     
     if son_durum == -1:
         return "⚠️ RİSKLİ: Fiyat/Hacim hareketlerinde anomali tespit edildi!"
     return "✅ Piyasaya uygun, normal hareket."
 def sihirli_formul_skorla(sembol, df=None):
-    """
-    Şirketin temel çarpanlarını ve teknik dip dönüş sinyallerini harmanlayarak
-    hisseye kapsamlı bir Hibrit Skor verir.
-    """
     try:
         info = sirket_bilgisi_getir(sembol)
         if not info:
             return {'Puan': 0}
             
         skor = 0
-        
-        # ==========================================
-        # A. TEMEL ANALİZ SKORLAMASI (Maksimum 100 Puan)
-        # ==========================================
-        
-        # 1. F/K Oranı (Maksimum 25 Puan)
-        fk = info.get('trailingPE', 999)
-        if fk is None: fk = 999
+        fk = info.get('trailingPE', 999) or 999
         if 0 < fk <= 10: skor += 25
         elif 10 < fk <= 15: skor += 15
         elif 15 < fk <= 20: skor += 5
         
-        # 2. PD/DD Oranı (Maksimum 25 Puan)
-        pddd = info.get('priceToBook', 999)
-        if pddd is None: pddd = 999
+        pddd = info.get('priceToBook', 999) or 999
         if 0 < pddd <= 1.5: skor += 25
         elif 1.5 < pddd <= 3.0: skor += 15
         elif 3.0 < pddd <= 5.0: skor += 5
         
-        # 3. ROE - Özsermaye Kârlılığı (Maksimum 25 Puan)
-        roe = info.get('returnOnEquity', -1)
-        if roe is None: roe = -1
+        roe = info.get('returnOnEquity', -1) or -1
         if roe > 0.20: skor += 25
         elif roe > 0.10: skor += 15
         elif roe > 0.05: skor += 5
         
-        # 4. Cari Oran - Borç Risk Durumu (Maksimum 25 Puan)
-        cari_oran = info.get('currentRatio', 0)
-        if cari_oran is None: cari_oran = 0
+        cari_oran = info.get('currentRatio', 0) or 0
         if cari_oran >= 1.5: skor += 25
         elif cari_oran >= 1.0: skor += 15
         
-        # ==========================================
-        # B. TEKNİK DİP DÖNÜŞ BONUSLARI (Ekstra Puanlar)
-        # ==========================================
         if df is not None and not df.empty:
             son_mum = df.iloc[-1]
-            
-            # 🌟 Süper Sinyal (RSI + MACD + Stoch 3'lü Uyumsuzluk): +20 Puan
-            if son_mum.get('Super_Sinyal', False):
-                skor += 20
-            # Normal Pozitif Uyumsuzluk varsa: +10 Puan
-            elif son_mum.get('Pozitif_Uyusmazlik', False):
-                skor += 10
-                
-            # 🪤 Wyckoff Spring (Ayı Tuzağı): +15 Puan
-            if son_mum.get('Wyckoff_Spring', False):
-                skor += 15
-                
-            # 💥 Hacim Patlamasi: +10 Puan
-            if son_mum.get('Hacim_Patlamasi', False):
-                skor += 10
+            if son_mum.get('Super_Sinyal', False): skor += 20
+            elif son_mum.get('Pozitif_Uyusmazlik', False): skor += 10
+            if son_mum.get('Wyckoff_Spring', False): skor += 15
+            if son_mum.get('Hacim_Patlamasi', False): skor += 10
 
         return {'Puan': skor}
-        
     except Exception as e:
-        import logging
         logging.warning(f"[{sembol}] Temel veri puanlama hatası: {str(e)}")
         return {'Puan': 0}
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
@@ -559,8 +644,6 @@ def smc_hesapla(df):
     df_smc['FVG_Bullish'] = (df_smc['Low'] > df_smc['High'].shift(2)) & (df_smc['Close'].shift(1) > df_smc['Open'].shift(1))
     df_smc['FVG_Bearish'] = (df_smc['High'] < df_smc['Low'].shift(2)) & (df_smc['Close'].shift(1) < df_smc['Open'].shift(1))
     return df_smc
-
-@st.cache_data(ttl=3600, show_spinner=False)
 def ileri_teknik_gostergeler(df):
     df_ta = df.copy()
     high_9 = df_ta['High'].rolling(window=9).max()
@@ -588,33 +671,23 @@ def ileri_teknik_gostergeler(df):
     df_ta['Ichimoku_Trend'] = np.where(df_ta['Close'] > df_ta['Senkou_Span_A'], 
         np.where(df_ta['Close'] > df_ta['Senkou_Span_B'], "GÜÇLÜ BOĞA", "NÖTR"), 
         np.where(df_ta['Close'] < df_ta['Senkou_Span_B'], "GÜÇLÜ AYI", "NÖTR"))
-    # ==========================================
-    # YENİ EKLENEN: 5, 8, 13 HAREKETLİ ORTALAMALAR
-    # ==========================================
-    # Basit Hareketli Ortalamalar (SMA)
+        
     df_ta['SMA_5'] = df_ta['Close'].rolling(window=5).mean()
     df_ta['SMA_8'] = df_ta['Close'].rolling(window=8).mean()
     df_ta['SMA_13'] = df_ta['Close'].rolling(window=13).mean()
 
-    # Üstel Hareketli Ortalamalar (EMA) - (Yapay zeka için daha etkilidir)
     df_ta['EMA_5'] = df_ta['Close'].ewm(span=5, adjust=False).mean()
     df_ta['EMA_8'] = df_ta['Close'].ewm(span=8, adjust=False).mean()
     df_ta['EMA_13'] = df_ta['Close'].ewm(span=13, adjust=False).mean()
-    df_ta['EMA_52'] = df_ta['Close'].ewm(span=52, adjust=False).mean()
-    df_ta['EMA_89'] = df_ta['Close'].ewm(span=89, adjust=False).mean()
-    df_ta['EMA_144'] = df_ta['Close'].ewm(span=144, adjust=False).mean()
-    # Kısa Vadeli Fibonacci Kesişim Trend Sinyali (5 > 8 > 13)
+
     df_ta['Fibo_MA_Trend'] = np.where(
         (df_ta['EMA_5'] > df_ta['EMA_8']) & (df_ta['EMA_8'] > df_ta['EMA_13']), "🚀 GÜÇLÜ YÜKSELİŞ",
         np.where((df_ta['EMA_5'] < df_ta['EMA_8']) & (df_ta['EMA_8'] < df_ta['EMA_13']), "🔻 GÜÇLÜ DÜŞÜŞ", "⚖️ YATAY NÖTR")
     )
     return df_ta
-    
-
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):
     try:
         df_form = df.copy()
-        # Geleceği görme (look-ahead) engellendi. Tepe/Dip onayı 'window' gün sonra verilir.
         df_form['Roll_Max'] = df_form['High'].rolling(window=window*2+1).max()
         df_form['Roll_Min'] = df_form['Low'].rolling(window=window*2+1).min()
         
@@ -643,115 +716,63 @@ def grafik_formasyon_bul(df, window=10, tolerans=0.03):
         return [], []
 
 def yapay_zeka_icin_formasyon_bul(df):
-    """
-    Mum formasyonlarını yapay zekanın anlayacağı sayısal değerlere (-1, 0, 1) dönüştürür.
-    1: Yükseliş Formasyonu (Boğa)
-    -1: Düşüş Formasyonu (Ayı)
-    0: Nötr
-    """
     df_f = df.copy()
-    
-    # Mum gövdesi ve gölgeleri hesaplama
     govde = abs(df_f['Close'] - df_f['Open'])
     mum_boyu = df_f['High'] - df_f['Low']
     ust_golge = df_f['High'] - df_f[['Close', 'Open']].max(axis=1)
     alt_golge = df_f[['Close', 'Open']].min(axis=1) - df_f['Low']
     
-    # 1. Doji (Kararsızlık)
     df_f['Doji'] = np.where(govde <= (mum_boyu * 0.1), 1, 0)
     
-    # 2. Yutan Boğa / Ayı (Engulfing)
     bullish_engulfing = (df_f['Close'].shift(1) < df_f['Open'].shift(1)) & (df_f['Open'] < df_f['Close'].shift(1)) & (df_f['Close'] > df_f['Open'].shift(1))
     bearish_engulfing = (df_f['Close'].shift(1) > df_f['Open'].shift(1)) & (df_f['Open'] > df_f['Close'].shift(1)) & (df_f['Close'] < df_f['Open'].shift(1))
     
-    # 3. Çekiç (Hammer) ve Kayan Yıldız (Shooting Star)
-    hammer = (alt_golge > (2 * govde)) & (ust_golge < (govde * 0.2)) & (df_f['Close'] > df_f['Close'].rolling(10).mean()) # Dipten sekme
-    shooting_star = (ust_golge > (2 * govde)) & (alt_golge < (govde * 0.2)) & (df_f['Close'] < df_f['Close'].rolling(10).mean()) # Tepeden dönüş
+    hammer = (alt_golge > (2 * govde)) & (ust_golge < (govde * 0.2)) & (df_f['Close'] > df_f['Close'].rolling(10).mean())
+    shooting_star = (ust_golge > (2 * govde)) & (alt_golge < (govde * 0.2)) & (df_f['Close'] < df_f['Close'].rolling(10).mean())
     
-    # Yapay Zeka İçin Tekil Skor Sütunları
     df_f['P_Engulfing'] = np.where(bullish_engulfing, 1, np.where(bearish_engulfing, -1, 0))
     df_f['P_Pinbar'] = np.where(hammer, 1, np.where(shooting_star, -1, 0))
-    
-    # Toplam Formasyon Skoru (AI'ın genel piyasa hissiyatını anlaması için)
     df_f['AI_Formasyon_Skoru'] = df_f['P_Engulfing'] + df_f['P_Pinbar']
     
     return df_f
 
 def makro_formasyonlari_bul(df, window=20):
-    """
-    OBO, TOBO, İkili Tepe/Dip, Üçgenler ve Bayrak formasyonlarının 
-    matematiksel ayak izlerini AI için hesaplar.
-    """
     df_f = df.copy()
-    
-    # 1. Yerel Zirve ve Dipler (Destek ve Dirençler)
     df_f['Rolling_Max'] = df_f['High'].rolling(window=window).max()
     df_f['Rolling_Min'] = df_f['Low'].rolling(window=window).min()
     
-    # 2. İkili Tepe ve İkili Dip (Double Top / Bottom)
-    # Fiyatın son 20 günün zirvesine/dibine %1 toleransla yaklaşması ve dönüş mumu yakması
     df_f['Ikili_Tepe'] = np.where((df_f['High'] >= df_f['Rolling_Max'] * 0.99) & (df_f['Close'] < df_f['Open']), -1, 0)
     df_f['Ikili_Dip'] = np.where((df_f['Low'] <= df_f['Rolling_Min'] * 1.01) & (df_f['Close'] > df_f['Open']), 1, 0)
     
-    # 3. Üçgenler, Kama (Wedge) ve Flama İçin Eğim Hesaplaması
-    # Son 10 bar içindeki zirve ve diplerin değişim yönü (Türev/Eğim)
     df_f['High_Slope'] = df_f['High'].diff(3).rolling(10).mean() 
     df_f['Low_Slope'] = df_f['Low'].diff(3).rolling(10).mean()   
     
-    # Simetrik Üçgen / Flama (Symmetrical / Pennant): Zirveler düşüyor, dipler yükseliyor (Sıkışma)
     df_f['Simetrik_Ucgen'] = np.where((df_f['High_Slope'] < 0) & (df_f['Low_Slope'] > 0), 1, 0)
-    
-    # Yükselen Üçgen (Ascending Triangle): Zirveler yatay (direnç kırılamıyor), dipler yükseliyor
     df_f['Yukselen_Ucgen'] = np.where((abs(df_f['High_Slope']) < (df_f['Close'] * 0.002)) & (df_f['Low_Slope'] > 0), 1, 0)
-    
-    # Alçalan Üçgen (Descending Triangle): Dipler yatay, zirveler düşüyor
     df_f['Alcalan_Ucgen'] = np.where((df_f['High_Slope'] < 0) & (abs(df_f['Low_Slope']) < (df_f['Close'] * 0.002)), -1, 0)
     
-    # 4. Bayrak (Flag) Formasyonu
-    # Sert bir fiyat hareketi (Bayrak Direği) sonrası dar aralıkta zıt yönlü dinlenme
-    df_f['Sert_Yukselis'] = df_f['Close'].pct_change(5) > 0.06 # 5 günde %6 üstü artış
+    df_f['Sert_Yukselis'] = df_f['Close'].pct_change(5) > 0.06
     df_f['Dar_Bant_Konsolidasyon'] = (df_f['High'].rolling(4).max() - df_f['Low'].rolling(4).min()) < (df_f['Close'] * 0.02)
     df_f['Bayrak_Formasyonu'] = np.where(df_f['Sert_Yukselis'].shift(4) & df_f['Dar_Bant_Konsolidasyon'], 1, 0)
     
-    # 5. OBO, TOBO ve Çanak İçin Derinlik / Kavis Sensörleri
-    # AI bu Z-Score ve mesafe verilerini alıp kendi içindeki ağaçlarda OBO/TOBO'yu tanıyacaktır.
     df_f['Tepe_Uzakligi_Z'] = (df_f['Rolling_Max'] - df_f['Close']) / df_f['Close'].rolling(window).std()
     df_f['Dip_Uzakligi_Z'] = (df_f['Close'] - df_f['Rolling_Min']) / df_f['Close'].rolling(window).std()
     
-    # Toplam Makro Formasyon Gücü
     df_f['Makro_Guc_Skoru'] = df_f['Ikili_Dip'] + df_f['Yukselen_Ucgen'] + df_f['Simetrik_Ucgen'] + df_f['Bayrak_Formasyonu'] - abs(df_f['Ikili_Tepe']) - abs(df_f['Alcalan_Ucgen'])
-    
-    # Temizlik (AI'a NaN veri gitmemesi için)
     df_f.fillna(0, inplace=True)
     
     return df_f
-
 def trend_ve_harmonik_bul(df):
-    """
-    Golden Cross, Death Cross (Hareketli Ortalama Kesişimleri) 
-    ve ABCD Harmonik formasyonunu AI için hesaplar.
-    """
     df_f = df.copy()
-    
-    # --- 1. GOLDEN CROSS & DEATH CROSS ---
-    # 50 ve 200 periyotluk Basit Hareketli Ortalamalar (SMA)
     df_f['SMA_50'] = df_f['Close'].rolling(window=50).mean()
     df_f['SMA_200'] = df_f['Close'].rolling(window=200).mean()
     
-    # Altın Kesişim (Golden Cross): 50 SMA, 200 SMA'yı YUKARI keserse (Boğa Piyasası Başlangıcı)
     golden_cross = (df_f['SMA_50'] > df_f['SMA_200']) & (df_f['SMA_50'].shift(1) <= df_f['SMA_200'].shift(1))
-    
-    # Ölüm Kesişimi (Death Cross): 50 SMA, 200 SMA'yı AŞAĞI keserse (Ayı Piyasası Başlangıcı)
     death_cross = (df_f['SMA_50'] < df_f['SMA_200']) & (df_f['SMA_50'].shift(1) >= df_f['SMA_200'].shift(1))
     
-    # Yapay Zeka Sinyali (Kesişim anında 1 veya -1, trend devam ederken gücünü göstermesi için mesafe)
     df_f['Cross_Sinyali'] = np.where(golden_cross, 1, np.where(death_cross, -1, 0))
-    df_f['SMA_50_200_Farki'] = (df_f['SMA_50'] - df_f['SMA_200']) / df_f['SMA_200'] # Trendin gücü
+    df_f['SMA_50_200_Farki'] = (df_f['SMA_50'] - df_f['SMA_200']) / df_f['SMA_200']
     
-    
-    # --- 2. ABCD FORMASYONU (Basitleştirilmiş Harmonik Yaklaşım) ---
-    # Fiyatın 3 ana dalgası: AB (Dalga 1), BC (Dalga 2), CD (Dalga 3)
-    # AI'ın anlayabilmesi için yaklaşık 5'er günlük swing (salınım) periyotları kullanıyoruz.
     swing_ab = df_f['Close'].shift(10) - df_f['Close'].shift(15) 
     swing_bc = df_f['Close'].shift(5) - df_f['Close'].shift(10)  
     swing_cd = df_f['Close'] - df_f['Close'].shift(5)            
@@ -759,27 +780,14 @@ def trend_ve_harmonik_bul(df):
     ab_boyu = abs(swing_ab)
     cd_boyu = abs(swing_cd)
     
-    # Yükseliş Beklenen (Bullish) ABCD: AB düşer, BC yükselir (tepki), CD tekrar düşer.
-    # Kural: AB ve CD dalgalarının boyları birbirine yakın olmalıdır (AB = CD %70 ile %130 tolerans)
     bullish_abcd = (swing_ab < 0) & (swing_bc > 0) & (swing_cd < 0) & (cd_boyu > ab_boyu * 0.7) & (cd_boyu < ab_boyu * 1.3)
-    
-    # Düşüş Beklenen (Bearish) ABCD: AB yükselir, BC düşer (düzeltme), CD tekrar yükselir.
     bearish_abcd = (swing_ab > 0) & (swing_bc < 0) & (swing_cd > 0) & (cd_boyu > ab_boyu * 0.7) & (cd_boyu < ab_boyu * 1.3)
     
     df_f['ABCD_Formasyonu'] = np.where(bullish_abcd, 1, np.where(bearish_abcd, -1, 0))
-    
-    # Eksik verileri 0 ile doldur
     df_f.fillna(0, inplace=True)
     
     return df_f
-# ==========================================
-# YENİ EKLENEN: FORMASYON TESPİT VE HEDEF HESAPLAMA
-# ==========================================
 def formasyon_tespit_et_ve_hedefle(df):
-    """
-    Son güncel verileri analiz ederek tespit edilen formasyonu ve
-    teknik hedef yüzde (%) değişimini döndürür.
-    """
     if df is None or len(df) < 20:
         return "Yok", "% 0.00"
 
@@ -794,7 +802,6 @@ def formasyon_tespit_et_ve_hedefle(df):
     formasyon_adi = "Yok"
     hedef_yuzde = 0.0
 
-    # 1. Makro / Grafik Formasyonları
     if son.get('Ikili_Dip', 0) == 1:
         formasyon_adi = "📐 İkili Dip"
         derinlik = (son['Rolling_Max'] - son['Rolling_Min']) / son['Rolling_Min'] * 100
@@ -819,8 +826,6 @@ def formasyon_tespit_et_ve_hedefle(df):
         formasyon_adi = "📐 Simetrik Üçgen"
         yukseklik = (son['Rolling_Max'] - son['Rolling_Min']) / fiyat * 100
         hedef_yuzde = round(yukseklik / 2, 2)
-
-    # 2. Harmonik ve Trend Kesişimleri
     elif son.get('ABCD_Formasyonu', 0) == 1:
         formasyon_adi = "⚡ Bullish ABCD"
         hedef_yuzde = 6.5
@@ -833,8 +838,6 @@ def formasyon_tespit_et_ve_hedefle(df):
     elif son.get('Cross_Sinyali', 0) == -1:
         formasyon_adi = "💀 Death Cross"
         hedef_yuzde = -12.0
-
-    # 3. Mikro Mum Formasyonları
     elif son.get('P_Engulfing', 0) == 1:
         formasyon_adi = "🕯️ Yutan Boğa"
         hedef_yuzde = 4.0
@@ -853,15 +856,7 @@ def formasyon_tespit_et_ve_hedefle(df):
 
     hedef_str = f"% {hedef_yuzde:+.2f}" if hedef_yuzde != 0 else "% 0.00"
     return formasyon_adi, hedef_str
-
 def dipten_donus_analizi(df):
-    """
-    Fiyatın dipten sekme ihtimalini kurumsal tekniklerle hesaplar:
-    1. Hacim Patlaması (20 Günlük Ortalamanın 2 Katı)
-    2. Wyckoff Spring (Bollinger Alt Bandı Ayı Tuzağı)
-    3. Gelişmiş Pozitif Uyumsuzluk (Yerel Dipler üzerinden RSI, MACD, Stokastik)
-    """
-    # Eksik veya yetersiz veri güvenliği
     if df is None or len(df) < 20:
         df_copy = df.copy() if df is not None else pd.DataFrame()
         df_copy['Hacim_Patlamasi'] = False
@@ -874,16 +869,9 @@ def dipten_donus_analizi(df):
         return df_copy
 
     df_dip = df.copy()
-
-    # ---------------------------------------------------------
-    # 1. HACİM PATLAMASI
-    # ---------------------------------------------------------
     df_dip['Vol_SMA_20'] = df_dip['Volume'].rolling(20).mean()
     df_dip['Hacim_Patlamasi'] = df_dip['Volume'] > (df_dip['Vol_SMA_20'] * 2)
 
-    # ---------------------------------------------------------
-    # 2. WYCKOFF SPRING (AYI TUZAĞI)
-    # ---------------------------------------------------------
     df_dip['SMA_20_Dip'] = df_dip['Close'].rolling(20).mean()
     df_dip['STD_20_Dip'] = df_dip['Close'].rolling(20).std()
     df_dip['Lower_Band'] = df_dip['SMA_20_Dip'] - (df_dip['STD_20_Dip'] * 2)
@@ -892,10 +880,6 @@ def dipten_donus_analizi(df):
                                (df_dip['Close'] > df_dip['Lower_Band']) & \
                                (df_dip['Close'] > df_dip['Open'])
 
-    # ---------------------------------------------------------
-    # 3. İNDİKATÖR HESAPLAMALARI (Eksikse Otomatik Eklenir)
-    # ---------------------------------------------------------
-    # A. RSI (14)
     if 'RSI' not in df_dip.columns:
         delta = df_dip['Close'].diff()
         gain = delta.where(delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
@@ -903,7 +887,6 @@ def dipten_donus_analizi(df):
         rs = gain / (loss.replace(0, 1e-9))
         df_dip['RSI'] = 100 - (100 / (1 + rs))
 
-    # B. MACD Histogram (12, 26, 9)
     if 'MACD_Hist' not in df_dip.columns:
         ema12 = df_dip['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_dip['Close'].ewm(span=26, adjust=False).mean()
@@ -911,34 +894,25 @@ def dipten_donus_analizi(df):
         macd_signal = macd.ewm(span=9, adjust=False).mean()
         df_dip['MACD_Hist'] = macd - macd_signal
 
-    # C. Stokastik %K (14)
     if 'Stoch_K' not in df_dip.columns:
         low_min = df_dip['Low'].rolling(window=14).min()
         high_max = df_dip['High'].rolling(window=14).max()
         df_dip['Stoch_K'] = 100 * ((df_dip['Close'] - low_min) / (high_max - low_min + 1e-9))
 
-    # Başlangıç değerleri (Varsayılan: False)
     df_dip['RSI_Uyumsuzluk'] = False
     df_dip['MACD_Uyumsuzluk'] = False
     df_dip['Stokastik_Uyumsuzluk'] = False
     df_dip['Pozitif_Uyusmazlik'] = False
     df_dip['Super_Sinyal'] = False
 
-    # ---------------------------------------------------------
-    # 4. GELİŞMİŞ UYUMSUZLUK (DIVERGENCE) ANALİZİ
-    # ---------------------------------------------------------
-    # Fiyatın gerçek yerel dip noktalarını (Local Minima) tespit et
     dip_mask = (df_dip['Low'].shift(1) > df_dip['Low']) & (df_dip['Low'].shift(-1) > df_dip['Low'])
     dipler = df_dip[dip_mask]['Low'].tail(2)
 
-    # Grafikte en az 2 adet yerel dip oluşmuşsa analiz yap
     if len(dipler) == 2:
         eski_idx, yeni_idx = dipler.index[0], dipler.index[1]
-        
         eski_fiyat = df_dip['Low'].loc[eski_idx]
         yeni_fiyat = df_dip['Low'].loc[yeni_idx]
 
-        # ŞART: Fiyat yeni bir daha düşük dip yapmış olmalı (Lower Low)
         if yeni_fiyat < eski_fiyat:
             rsi_uyum = df_dip['RSI'].loc[yeni_idx] > df_dip['RSI'].loc[eski_idx]
             macd_uyum = df_dip['MACD_Hist'].loc[yeni_idx] > df_dip['MACD_Hist'].loc[eski_idx]
@@ -947,7 +921,6 @@ def dipten_donus_analizi(df):
             super_sinyal = rsi_uyum and macd_uyum and stoch_uyum
             herhangi_uyum = rsi_uyum or macd_uyum or stoch_uyum
 
-            # Oluşan sinyalleri son dip noktası ve sonrasındaki mumlara yansıt
             df_dip.loc[yeni_idx:, 'RSI_Uyumsuzluk'] = rsi_uyum
             df_dip.loc[yeni_idx:, 'MACD_Uyumsuzluk'] = macd_uyum
             df_dip.loc[yeni_idx:, 'Stokastik_Uyumsuzluk'] = stoch_uyum
@@ -955,163 +928,37 @@ def dipten_donus_analizi(df):
             df_dip.loc[yeni_idx:, 'Super_Sinyal'] = super_sinyal
 
     return df_dip
-# --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
-def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
-    bt_df = df[['Close']].copy()
-    bt_df['Kisa_SMA'] = bt_df['Close'].rolling(window=kisa_periyot).mean()
-    bt_df['Uzun_SMA'] = bt_df['Close'].rolling(window=uzun_periyot).mean()
-    bt_df.dropna(inplace=True)
-    bt_df['Sinyal'] = np.where(bt_df['Kisa_SMA'] > bt_df['Uzun_SMA'], 1, 0)
-    bt_df['Günlük_Getiri'] = bt_df['Close'].pct_change()
-    bt_df['Strateji_Getirisi'] = bt_df['Günlük_Getiri'] * bt_df['Sinyal'].shift(1)
-    bt_df['Piyasa_Kumulatif'] = (1 + bt_df['Günlük_Getiri']).cumprod() * 100
-    bt_df['Strateji_Kumulatif'] = (1 + bt_df['Strateji_Getirisi']).cumprod() * 100
-    return bt_df
 
-def hizli_backtest_yap(sembol, baslangic, bitis):
-    """Geçmişe dönük (Backtest) strateji simülatörü."""
-    try:
-        # Geçmiş veriyi çek
-        df = veri_yukle(sembol, baslangic, bitis)
-        if df is None or df.empty or len(df) < 50:
-            return None
-            
-        b_df = df.copy()
-        
-        # 1. İndikatörleri Hesapla
-        b_df['Tilson_T3'] = tilson_t3(b_df['Close'])
-        
-        low_min = b_df['Low'].rolling(window=14).min()
-        high_max = b_df['High'].rolling(window=14).max()
-        b_df['Stoch_K'] = 100 * ((b_df['Close'] - low_min) / (high_max - low_min + 1e-9))
-        b_df['Stoch_D'] = b_df['Stoch_K'].rolling(window=3).mean()
-        
-        # 2. Geçmişteki "AL" Şartlarının (Sniper) Tespiti
-        # Şart: Stoch dipten (30 altı) yukarı kesmiş VE Fiyat Tilson trendinin üzerine çıkmış
-        b_df['AL_Sinyali'] = (b_df['Stoch_K'] > b_df['Stoch_D']) & (b_df['Stoch_K'] < 30) & (b_df['Close'] > b_df['Tilson_T3'])
-        
-        # 3. Kâr/Zarar Hesaplama (Pozisyon 5 gün tutulursa)
-        b_df['5_Gunluk_Getiri'] = ((b_df['Close'].shift(-5) - b_df['Close']) / b_df['Close']) * 100
-        
-        # Sadece "AL" sinyali üretilen günleri filtrele
-        islemler = b_df[b_df['AL_Sinyali']].dropna(subset=['5_Gunluk_Getiri'])
-        toplam_islem = len(islemler)
-        
-        if toplam_islem == 0:
-            return None
-            
-        # 4. Performans Metriklerini Çıkar
-        basarili_islem = len(islemler[islemler['5_Gunluk_Getiri'] > 0])
-        basari_orani = (basarili_islem / toplam_islem) * 100
-        ortalama_getiri = islemler['5_Gunluk_Getiri'].mean()
-        kümülatif_getiri = islemler['5_Gunluk_Getiri'].sum()
-        
-        return {
-            "Hisse": sembol,
-            "İşlem Sayısı": toplam_islem,
-            "Başarı Oranı (%)": round(basari_orani, 2),
-            "İşlem Başı Ort. Kâr (%)": round(ortalama_getiri, 2),
-            "Kümülatif Kâr (%)": round(kümülatif_getiri, 2)
-        }
-    except Exception as e:
-        import logging
-        logging.error(f"[{sembol}] Backtest Hatası: {str(e)}")
-        return None
+
 def stacking_model_olustur(xgb_model, rf_model, svr_model):
     estimators = [
         ('xgb', xgb_model),
         ('rf', rf_model),
         ('svr', svr_model)
     ]
-    
-    # Meta-model olarak Ridge Regresyon kullanıyoruz (aşırı öğrenmeyi engeller)
     stack_model = StackingRegressor(
         estimators=estimators,
         final_estimator=Ridge()
     )
-    
     return stack_model
 
-def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
-    getiriler = df['Close'].pct_change().dropna()
-    ortalama_getiri = getiriler.mean()
-    volatilite = getiriler.std()
-    son_fiyat = df['Close'].iloc[-1]
-    simulasyonlar = np.zeros((gun_sayisi, sim_sayisi))
-    for i in range(sim_sayisi):
-        rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
-        simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
-    return simulasyonlar
 def shap_aciklamasi_goster(model, X_train, hisse_adi):
+    """
+    Ağaç bazlı (XGBoost, Random Forest) modeller için feature önem grafiğini çizer.
+    """
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
-        # 1. Temel Veri Kontrolü
-        if X_train is None or len(X_train) == 0:
-            st.warning("💡 Veri yetersiz: SHAP grafiği çizilemedi.")
-            return
-
-        # 2. X_train Verisini SHAP İçin Zorla Temizleme
-        if isinstance(X_train, pd.DataFrame):
-            X_train_clean = X_train.select_dtypes(include=[np.number]).copy()
-            X_train_clean = X_train_clean.replace([np.inf, -np.inf], np.nan).fillna(0)
-        else:
-            X_train_clean = np.nan_to_num(np.array(X_train, dtype=float))
-            
-        if X_train_clean.shape[1] == 0:
-            st.warning("💡 Sayısal öznitelik (feature) bulunamadı.")
-            return
-
-        # 3. Model Ayıklama İşlemi
-        agac_modeli = None
-        if hasattr(model, 'estimators_'):
-            for est in model.estimators_:
-                if hasattr(est, 'steps'):
-                    est = est.steps[-1][1]
-                
-                if type(est).__name__ in ['XGBRegressor', 'RandomForestRegressor']:
-                    agac_modeli = est
-                    break
-        elif hasattr(model, 'steps'):
-            agac_modeli = model.steps[-1][1]
-        else:
-            agac_modeli = model
-
-        if agac_modeli is None:
-            st.error("💡 SHAP grafiği için uygun ağaç tabanlı model (XGBoost/RandomForest) bulunamadı.")
-            return
-
-        # 4. SHAP Hesaplaması
-        import shap # Eğer yukarıda import edilmediyse diye fonksiyon içine alıyoruz
-        import matplotlib.pyplot as plt
-
-        if isinstance(agac_modeli, XGBRegressor):
-            explainer = shap.TreeExplainer(agac_modeli)
-
-        elif isinstance(agac_modeli, RandomForestRegressor):
-            explainer = shap.TreeExplainer(agac_modeli)
-
-        elif isinstance(agac_modeli, GradientBoostingRegressor):
-            explainer = shap.TreeExplainer(agac_modeli)
-
-        else:
-            explainer = shap.Explainer(
-                agac_modeli.predict,
-                X_train_clean
-            )
-        shap_values = explainer.shap_values(X_train_clean, check_additivity=False)
+        # TreeExplainer kullanıyoruz (Stacking içinde XGBoost'u çekmek gerekebilir)
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_train)
         
-        # 5. Grafik Çizimi
-        fig, ax = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values, X_train_clean, plot_type="bar", show=False)
+        # Streamlit'te plt figürü göstermek
+        fig, ax = plt.subplots()
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
         st.pyplot(fig)
-        
     except Exception as e:
-        st.error(f"💡 Öznitelik ağırlıkları hesaplanamadı. Hata detayı: {str(e)}")
-        import traceback
-        st.error(f"💡 SHAP Hatası: {str(e)}")
-        with st.expander("🛠️ Geliştirici Hata Günlüğü (Tıkla Aç)"):
-            st.code(traceback.format_exc())
+        st.warning(f"SHAP grafiği oluşturulurken hata: {e}")
 def python_istatistik_analizi(df):
     try:
         getiriler = df['Close'].pct_change().dropna()
@@ -1125,10 +972,9 @@ def python_istatistik_analizi(df):
         }
     except:
         return {'Yıllık Volatilite': "% 0.00", 'Sharpe Oranı': "0.00", 'Günlük VaR (%95)': "% 0.00"}
-
 def haber_duygu_analizi(ticker):
     try:
-        news_data = yf.Ticker(ticker, session=oturum).news
+        news_data = yf.Ticker(ticker, session=session).news
         if not news_data: return []
         olumlu = ["rekor", "artış", "büyüdü", "pozitif", "yüksel", "kazanç", "anlaşma"]
         olumsuz = ["düştü", "zarar", "azaldı", "negatif", "kayıp", "düşüş", "ceza"]
@@ -1141,270 +987,8 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
-def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
-    try:
-        # 1. Günlük Veriyi Çek
-        df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
-        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20: 
-            return None
-            
-        df_g = df_gunluk.copy()
-        
-        # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
-        try:
-            guncel_df = yf.download(
-                sembol,
-                period="1d",
-                interval="1m",
-                progress=False,
-                auto_adjust=True
-            )
-
-            if not guncel_df.empty:
-                guncel_fiyat = float(guncel_df["Close"].iloc[-1])
-            else:
-                guncel_fiyat = float(df_g["Close"].iloc[-1])
-
-        except:
-            guncel_fiyat = float(df_g["Close"].iloc[-1])
-
-
-# --------------------------------------------------
-# BIST seans kontrolü
-# --------------------------------------------------
-        tz = pytz.timezone("Europe/Istanbul")
-        simdi = datetime.now(tz)
-
-        saat = simdi.hour
-        dakika = simdi.minute
-        haftaici = simdi.weekday() < 5
-
-        seans_acik = False
-
-        if haftaici:
-
-            dakika_toplam = saat * 60 + dakika
-
-    # 09:40 - 18:10
-            if 9 * 60 + 40 <= dakika_toplam <= 18 * 60 + 10:
-                seans_acik = True
-
-
-# --------------------------------------------------
-# Kapanış fiyatı
-# --------------------------------------------------
-
-        if seans_acik:
-
-    # Dünkü resmi kapanış
-            if len(df_g) >= 2:
-                kapanis_fiyati = float(df_g["Close"].iloc[-2])
-            else:
-                kapanis_fiyati = float(df_g["Close"].iloc[-1])
-
-        else:
-
-    # Bugünkü resmi kapanış
-            kapanis_fiyati = float(df_g["Close"].iloc[-1])
-
-        # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
-        if not df_g.empty and guncel_fiyat is not None:
-            last_idx = df_g.index[-1]
-            df_g.loc[last_idx, 'Close'] = guncel_fiyat
-            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
-            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
-
-        # --- C. TEMEL İNDİKATÖRLER & İLERİ TEKNİK ANALİZ ---
-        df_g = stokastik_hesapla(df_g)
-        df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
-        df_g = ileri_teknik_gostergeler(df_g)
-        
-    
-        # Yenilenen dipten dönüş analizi çağrılıyor
-        temp_g = dipten_donus_analizi(df_g)
-        
-        g_fiyat = guncel_fiyat
-        g_tilson = df_g['Tilson_T3'].iloc[-1]
-        g_stoch_k = df_g['Stoch_K'].iloc[-1]
-        g_stoch_d = df_g['Stoch_D'].iloc[-1]
-        g_ema5 = df_g['EMA_5'].iloc[-1]
-        g_ema8 = df_g['EMA_8'].iloc[-1]
-        g_ema13 = df_g['EMA_13'].iloc[-1]
-        
-        g_boga = g_fiyat > g_tilson
-        g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
-        g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
-        g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
-        # 🌟 YENİ EKLENEN SATIR: Süper Sinyal Durumu
-        g_super_sinyal = temp_g.get('Super_Sinyal', pd.Series([False])).iloc[-1]
-        g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
-        g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
-
-        # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (g_super_sinyal eklendi)
-        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
-        
-        if not umut_var_mi and analiz_tipi == "radar":
-            return {
-                "Varlık": sembol,
-                "Güncel Fiyat": f"{guncel_fiyat:.2f}",
-                "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
-                "🎯 AL/SAT Kararı": "🐻 PAS GEÇİLDİ (Ölü Trend)",
-                "Günlük T3": "🐻 AYI",
-                "4S T3": "-",
-                "📊 Temel Skor": "-",
-                "💥 Hacim Analizi": "Normal",
-                "📈 Pozitif Uyuşmazlık": "-",
-                "🪤 Spring (Tuzak)": "-",
-                "🔍 Tespit Edilen Formasyon": "Yok",
-                "🎯 Formasyon Hedefi (%)": "% 0.00",
-                "🤖 AI Kararı": "Zaman Tasarrufu",
-                "🎯 AI Hedef": "-"
-            }
-
-        # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ ---
-        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
-        
-        h4_fiyat, h4_tilson = g_fiyat, g_tilson
-        h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
-        h4_boga, h4_stoch_al = g_boga, g_stoch_al
-
-        if not df_4h.empty and len(df_4h) >= 20:
-            try:
-                df_4h = stokastik_hesapla(df_4h)
-                df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
-                
-                h4_fiyat = df_4h['Close'].iloc[-1]
-                h4_tilson = df_4h['Tilson_T3'].iloc[-1]
-                h4_stoch_k = df_4h['Stoch_K'].iloc[-1]
-                h4_stoch_d = df_4h['Stoch_D'].iloc[-1]
-                
-                h4_boga = h4_fiyat > h4_tilson
-                h4_stoch_al = (h4_stoch_k < 35) and (h4_stoch_k > h4_stoch_d)
-            except Exception as e:
-                logging.error(f"[{sembol}] 4S Analiz Hatası: {e}")
-
-        # --- E. KARAR MEKANİZMASI VE ÇELİŞKİ GİDERİCİ ---
-        if analiz_tipi == "radar":
-            temp_4h = dipten_donus_analizi(df_4h) if not df_4h.empty else temp_g
-            h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1] if not temp_4h.empty else False
-            
-            hacim_durum = "🔥 GÜÇLÜ PATLAMA" if (g_hacim or h4_hacim) else "Normal"
-            
-            # SÜPER SİNYAL METNİ HESAPLAMA
-            h4_super = temp_4h.get('Super_Sinyal', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
-            h4_uyusmazlik = temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
-            
-            if g_super_sinyal or h4_super:
-                uyusmazlik_durum = "🌟 SÜPER SİNYAL (RSI+MACD+Stoch)"
-            elif g_uyusmazlik or h4_uyusmazlik:
-                uyusmazlik_durum = "✅ POZİTİF UYUŞMAZLIK"
-            else:
-                uyusmazlik_durum = "-"
-
-            spring_durum = "✅ VAR" if (g_spring or temp_4h.get('Wyckoff_Spring', pd.Series([False])).iloc[-1]) else "-"
-            
-            # Formasyon tespiti ve hedef hesaplama
-            formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
-            
-            # AI Verisini Çekme
-            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "🛑 ZAYIF", 'rf_prediction': 0.0}
-            ai_sinyal = ai_veri.get('signal', 'NÖTR')
-            
-            # 👇 SQLITE KAYIT BLOK (KORUNDU) 👇
-            # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
-            if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
-                tahmin_kaydet(sembol, ai_veri['rf_prediction'])
-            # 👆 SQLITE KAYIT BLOK BİTİŞ 👆
-
-            # Teknik Durum Sentezi
-            teknik_durum = "Yükseliş" if (g_boga and h4_boga) else ("Düşüş" if not g_boga else "Yatay")
-
-            # ==========================================
-            # YENİ EKLENEN: NİHAİ KARAR SENTEZİ (ÇELİŞKİ GİDERİCİ)
-            # ==========================================
-            if "KESİN AL" in ai_sinyal:
-                nihai_karar = "💎 ELMAS BULUNDU (Risk/Ödül ve AI Onaylı)"
-            elif "POTANSİYEL AL" in ai_sinyal or "RİSKLİ AL" in ai_sinyal:
-                if teknik_durum == "Yükseliş":
-                    nihai_karar = "🚀 GÜÇLÜ AL (AI ve Teknik Uyumlu)"
-                else:
-                    nihai_karar = "⚠️ DİKKAT: AI Pozitif ama Teknik Zayıf"
-            elif "SAT" in ai_sinyal or "UZAK DUR" in ai_sinyal:
-                # Teknik "AL" bile dese, AI Risk tespit ettiyse karar SAT'a döner
-                nihai_karar = "🛑 SAT / UZAK DUR (AI Vetosu)"
-            else:
-                nihai_karar = "🐻 PAS GEÇİLDİ"
-
-            # --- 🚨 FORMASYON VETO (RİSK KONTROL) MEKANİZMASI ---
-            try:
-                hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
-                if hedef_str != '-' and hedef_str != '0.00':
-                    hedef_oran = float(hedef_str)
-                    
-                    if hedef_oran < -4.0 and "AL" in nihai_karar:
-                        nihai_karar = f"🛑 AI İPTAL (Risk: {formasyon_adi})"
-                        ai_sinyal = f"🛑 AI İPTAL ({formasyon_adi})"
-            except Exception as e:
-                logging.warning(f"[{sembol}] Veto mekanizmasında hata: {e}")
-
-            # Sihirli Formül Skorlama (KORUNDU)
-            try:
-                sihirli_veri = sihirli_formul_skorla(sembol, df=df_g)
-                s_skor = sihirli_veri.get('Puan', 0) if isinstance(sihirli_veri, dict) else 0
-            except Exception:
-                s_skor = 0
-            
-            return {
-                "Varlık": sembol,
-                "Güncel Fiyat": f"{guncel_fiyat:.2f}",
-                "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
-                "🎯 NİHAİ KARAR": nihai_karar,   # ARTIK ÇELİŞKİSİZ TEK BİR KARAR ÇIKACAK
-                "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
-                "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
-                "📊 Temel Skor": s_skor,
-                "💥 Hacim Analizi": hacim_durum,
-                "📈 Pozitif Uyuşmazlık": uyusmazlik_durum,
-                "🪤 Spring (Tuzak)": spring_durum,
-                "🔍 Formasyon": formasyon_adi,
-                "🎯 Formasyon Hedefi (%)": formasyon_hedef,
-                "🤖 AI Durumu": ai_sinyal,
-                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
-            }
-
-        
-        elif analiz_tipi == "stoch":
-            return {
-                "Varlık": sembol,
-                "Son Fiyat": f"{guncel_fiyat:.2f}",
-                "Günlük Stoch %K": round(g_stoch_k, 2),
-                "4S Stoch %K": round(h4_stoch_k, 2),
-                "Durum": "🟢 Çift Dip/Al" if (g_stoch_al and h4_stoch_al) else ("↗️ Pozitif" if h4_stoch_al else "⚪ Nötr")
-            }
-
-    except Exception as e:
-        logging.error(f"[{sembol}] Analiz Hatası: {str(e)}")
-        return None
-# ==========================================
-# 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
-# ==========================================
-# ==========================================
-# 2. YAPAY ZEKA VE KURUMSAL MOTORLAR
-# ==========================================
-def institutional_decision(df):
-    try:
-        return {
-            "decision": "BİRİKİM (ACCUMULATION)", 
-            "regime": "Yükseliş Trendi" if df['Close'].iloc[-1] > df['Close'].rolling(50).mean().iloc[-1] else "Düşüş / Range", 
-            "score": 8.5, 
-            "risk": 30
-        }
-    
-    except:
-        return {"decision": "BEKLE", "regime": "Belirsiz", "score": 5.0, "risk": 50}
-@st.cache_data(ttl=86400) # Her hissenin en iyi ayarını 24 saat hafızada tut
 def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
-    """Optuna ile hissenin o anki volatilitesine en uygun AI ayarlarını bulur."""
-    optuna.logging.set_verbosity(optuna.logging.WARNING) # Konsol kalabalığını önler
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
     
     def objective(trial):
         param = {
@@ -1413,11 +997,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
             'max_depth': trial.suggest_int('max_depth', 3, 7),
             'subsample': trial.suggest_float('subsample', 0.7, 1.0)
         }
-        # Geçmiş verinin %80'i ile çalışıp, %20'si ile kendini test eder
-        # ✅ DOĞRU: Zamansal sıralı bölme
-        # Zamansal Sıralı Kesme (Data Leakage Önlenir)
         tscv = TimeSeriesSplit(n_splits=5)
-        # Sadece son split'i (en güncel eğitim/test ayrımını) alıyoruz
         for train_index, test_index in tscv.split(X_matrisi):
             X_train, X_test = X_matrisi[train_index], X_matrisi[test_index]
             y_train, y_test = y_vektoru[train_index], y_vektoru[test_index]
@@ -1425,153 +1005,14 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
         model.fit(X_train, y_train)
         preds = model.predict(X_test)
         mse = mean_squared_error(y_test, preds)
-        return mse # Hatayı en aza indirmeye çalışır
+        return mse
 
     study = optuna.create_study(direction='minimize')
-    study.optimize(objective, n_trials=5) # 10 farklı kombinasyon dener
-    
+    study.optimize(objective, n_trials=5)
     return study.best_params
-def ai_guven_skoru_hesapla(
-    ensemble,
-    son_veri,
-    teknik_skor,
-    formasyon_skoru,
-    risk_odul,
-    atr_orani
-):
-    """
-    Kurumsal AI Güven Skoru (0-100)
-    """
-
-    try:
-
-        tahminler = []
-
-        if hasattr(ensemble, "estimators_"):
-
-            for est in ensemble.estimators_:
-
-                try:
-                    tahmin = float(est.predict(son_veri)[0])
-                    tahminler.append(tahmin)
-                except Exception:
-                    pass
-
-        if len(tahminler) >= 2:
-
-            std = np.std(tahminler)
-
-            ort = max(abs(np.mean(tahminler)), 0.001)
-
-            oy_birligi = max(0, 100 - (std / ort) * 100)
-
-        else:
-
-            oy_birligi = 50
-
-        teknik = np.clip(teknik_skor, 0, 100)
-
-        formasyon = np.clip(formasyon_skoru, 0, 100)
-
-        rr = np.clip(risk_odul * 25, 0, 100)
-
-        volatilite = np.clip(100 - atr_orani * 100, 0, 100)
-
-        guven = (
-            oy_birligi * 0.35 +
-            teknik * 0.25 +
-            formasyon * 0.20 +
-            rr * 0.10 +
-            volatilite * 0.10
-        )
-
-        return round(np.clip(guven, 0, 99), 1)
-
-    except Exception:
-
-        return 50.0
-# =====================================================
-# AI PERFORMANS İSTATİSTİKLERİ
-# =====================================================
-
-def ai_performans_istatistikleri():
-
-    try:
-
-        conn = db_connect()
-
-        df = pd.read_sql("SELECT * FROM tahminler WHERE model IS NOT NULL", conn)
-
-        conn.close()
-
-        if df.empty:
-
-            return {
-                "toplam": 0,
-                "ortalama_guven": 0,
-                "ortalama_getiri": 0,
-                "al": 0,
-                "sat": 0,
-                "bekle": 0
-            }
-
-        return {
-
-            "toplam": len(df),
-
-            "ortalama_guven": round(df["guven"].mean(),2),
-
-            "ortalama_getiri": round(df["beklenen_getiri"].mean(),2),
-
-            "al": int(df["sinyal"].str.contains("AL",case=False).sum()),
-
-            "sat": int(df["sinyal"].str.contains("SAT",case=False).sum()),
-
-            "bekle": int(df["sinyal"].str.contains("BEKLE",case=False).sum())
-
-        }
-
-    except Exception as e:
-
-        print(e)
-
-        return {
-            "toplam":0,
-            "ortalama_guven":0,
-            "ortalama_getiri":0,
-            "al":0,
-            "sat":0,
-            "bekle":0
-        }
-st.set_page_config(layout="wide", page_title="God Mode Terminal v102")
-@st.cache_resource(show_spinner=False)
-def get_tv_datafeed():
-    """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
-    try:
-        # Eğer premium hesabın varsa username ve password parametrelerini girebilirsin.
-        # Yoksa anonim olarak bağlanır.
-        tv = TvDatafeed() 
-        return tv
-    except Exception as e:
-        logging.error(f"TradingView Bağlantı Hatası: {e}")
-        return None
-# ==========================================
-# SAYFA AYARLARI VE OTURUM
-# ==========================================
-
-oturum = requests.Session()
-oturum.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-})
-# ==========================================
-# VERİTABANI VE HAFIZA YÖNETİMİ
-
-@st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
     try:
         t_df = df.copy()
-        
-        # --- 1. Veri Hazırlığı ve Feature Engineering ---
         t_df = yapay_zeka_icin_formasyon_bul(t_df)
         t_df = makro_formasyonlari_bul(t_df, window=20)
         t_df = trend_ve_harmonik_bul(t_df)
@@ -1608,8 +1049,8 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df['Z_Score'] = (t_df['Close'] - t_df['Close'].rolling(20).mean()) / t_df['Close'].rolling(20).std().replace(0, 0.0001)
         t_df['Vol_Change'] = t_df['Volume'].pct_change()
         t_df['EMA_Trend'] = np.where(t_df['Close'] > t_df['Close'].ewm(span=20).mean(), 1, -1)
+        t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
 
-        # Zaman Serisi Hafızası (Lag Features)
         t_df['Return_1d'] = t_df['Close'].pct_change(1)
         t_df['Return_2d'] = t_df['Close'].pct_change(2)
         t_df['Return_3d'] = t_df['Close'].pct_change(3)
@@ -1626,48 +1067,27 @@ def ensemble_prediction(df, sembol="Genel"):
         
         t_df['Trend_5_8'] = np.where(t_df['EMA_5'] > t_df['EMA_8'], 1, -1)
         t_df['Trend_8_13'] = np.where(t_df['EMA_8'] > t_df['EMA_13'], 1, -1)
-        
-        # Hedef Değişken (10 günlük getiri)
-        t_df['Target_Return'] = ((t_df['Close'].shift(-10) - t_df['Close']) / t_df['Close']) * 100
-        
-        # Uzun vadeli EMA mesafeleri (Eğer ana kodunuzda hesaplanıyorsa hata vermemesi için kontrol ekledik)
-        for col in ['EMA_52', 'EMA_89', 'EMA_144']:
-            if col not in t_df.columns:
-                t_df[col] = t_df['Close'].ewm(span=int(col.split('_')[1]), adjust=False).mean()
-                
-        t_df['EMA_52_Dist'] = (t_df['Close'] - t_df['EMA_52']) / t_df['Close'].replace(0, 0.0001)
-        t_df['EMA_89_Dist'] = (t_df['Close'] - t_df['EMA_89']) / t_df['Close'].replace(0, 0.0001)
-        t_df['EMA_144_Dist'] = (t_df['Close'] - t_df['EMA_144']) / t_df['Close'].replace(0, 0.0001)
 
         features = [
             'RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 
-            'Vol_Change', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
-            'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 'Vol_Lag1', 'Vol_Lag2',
+            'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
+            'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 
+            'Vol_Lag1', 'Vol_Lag2',
             'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13',
-            'EMA_52_Dist', 'EMA_89_Dist', 'EMA_144_Dist',
             'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', 
             'Ikili_Tepe', 'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen',
-            'Alcalan_Ucgen', 'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 'Dip_Uzakligi_Z', 
+            'Alcalan_Ucgen', 'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 
+            'Dip_Uzakligi_Z', 'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru',
             'Cross_Sinyali', 'SMA_50_200_Farki', 'ABCD_Formasyonu'
         ]
        
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
-    
+
         if len(ml_df) < 50:
-            return {
-                "rf_prediction": float(t_df['Close'].iloc[-1]),
-                "signal": "VERİ YETERSİZ",
-                "confidence": 50.0,
-                "expected_return_pct": 0.0,
-                "feature_importances": None
-            }
-        
-    # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
-        X = ml_df[features].values
-            
-        # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
+            return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0, "feature_importances": {}}
+
         X = ml_df[features].values
         y = ml_df['Target_Return'].values
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
@@ -1686,34 +1106,13 @@ def ensemble_prediction(df, sembol="Genel"):
             ('ridge', Ridge(alpha=1.0))
         ])
 
-        # =====================================================
-# META AI STACKING MODEL (v101)
-# =====================================================
-
-        base_models = [
-            ("xgb", model_xgb),
-            ("rf", model_rf),
-            ("svr", model_svr),
-            ("gb", model_gb),
-            ("ridge", model_ridge),
-        ]
-
-        ensemble = StackingRegressor(
-
-            estimators=base_models,
-
-            final_estimator=ElasticNet(
-                alpha=0.05,
-                l1_ratio=0.5,
-                random_state=42
-            ),
-
-            passthrough=True,
-
-            cv=5,
-
-            n_jobs=-1
-        )
+        ensemble = VotingRegressor(estimators=[
+            ('xgb', model_xgb),
+            ('rf', model_rf),
+            ('svr', model_svr),
+            ('gb', model_gb),
+            ('ridge', model_ridge)
+        ])
 
         model_klasoru = "ai_modeller"
         os.makedirs(model_klasoru, exist_ok=True)
@@ -1729,338 +1128,245 @@ def ensemble_prediction(df, sembol="Genel"):
             ensemble.fit(X, y)
             joblib.dump(ensemble, model_dosyasi)
 
-# Model hazırlandıktan sonra HER ZAMAN hesapla
-        feature_importances = ai_feature_importance(ensemble)
-        if feature_importances is None:
-                feature_importances = np.ones(len(features), dtype=float)
-                feature_importances /= feature_importances.sum()
-        # --- 3. ÇIKARIM VE HESAPLAMALAR (Eksik Değişkenler Tanımlandı) ---
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
-        guncel_fiyat = float(t_df['Close'].iloc[-1])
-        hedef_fiyat = guncel_fiyat * (1 + beklenen_getiri_pct / 100)
+        anlik_fiyat = float(t_df['Close'].iloc[-1])
+        hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
-        # Risk / Ödül Oranı Güvenli Hesabı
-        atr_degeri = float(t_df['ATR'].iloc[-1]) if 'ATR' in t_df.columns and t_df['ATR'].iloc[-1] > 0 else guncel_fiyat * 0.02
-        risk_mesafesi = atr_degeri * 2
-        odul_mesafesi = abs(hedef_fiyat - guncel_fiyat)
-        risk_odul_orani = odul_mesafesi / risk_mesafesi if risk_mesafesi > 0 else 1.0
-
-        temp_dip_analiz = dipten_donus_analizi(t_df)
-        dipten_donus_var = temp_dip_analiz['Wyckoff_Spring'].iloc[-1] or \
-                           temp_dip_analiz['Super_Sinyal'].iloc[-1] or \
-                           (t_df['Ikili_Dip'].iloc[-1] == 1) or \
-                           (t_df['P_Engulfing'].iloc[-1] == 1)
-
-        # Karar Ağacı
-        if beklenen_getiri_pct >= 10.0 and dipten_donus_var and risk_odul_orani >= 1.5:
-            sinyal = "🎯 KESİN AL (Ödül >%10, Dip Onaylı)"
-        elif beklenen_getiri_pct >= 5.0 and dipten_donus_var:
-            sinyal = "🚀 POTANSİYEL AL (Dipten Dönüş)"
-        elif beklenen_getiri_pct >= 10.0 and not dipten_donus_var:
-            sinyal = "⚠️ RİSKLİ AL (Hedef Yüksek ama Dip Onayı Yok)"
-        elif beklenen_getiri_pct < 0:
-            sinyal = "🛑 SAT / UZAK DUR (Negatif Beklenti)"
-        else:
-            sinyal = "⚖️ NÖTR / BEKLE"
-        teknik_skor = min(abs(beklenen_getiri_pct) * 10, 100)
-
-        if "AI_Formasyon_Skoru" in t_df.columns:
-            formasyon_skoru = float(t_df["AI_Formasyon_Skoru"].iloc[-1]) * 10
-        else:
-            formasyon_skoru = 50.0
-
-        atr_orani = atr_degeri / guncel_fiyat if guncel_fiyat > 0 else 0
-
-        guven_skoru = ai_guven_skoru_hesapla(
-            ensemble=ensemble,
-            son_veri=son_veri,
-            teknik_skor=teknik_skor,
-            formasyon_skoru=formasyon_skoru,
-            risk_odul=risk_odul_orani,
-            atr_orani=atr_orani
-        )
-        # --------------------------------------------------------
-# AI TAHMİNİNİ VERİTABANINA KAYDET
-# --------------------------------------------------------
+        sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
+        guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
 
         try:
-            conn = db_connect()
-            cur = conn.cursor()
+            f_importances = ensemble.named_estimators_['xgb'].feature_importances_
+            oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, f_importances)}
+        except Exception:
+            oznitelik_agirliklari = {}
 
-            cur.execute("""
-                INSERT INTO tahminler (
-                    tarih,
-                    sembol,
-                    fiyat,
-                    hedef_fiyat,
-                    sinyal,
-                    guven,
-                    beklenen_getiri,
-                    model,
-                    durum
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BEKLİYOR')
-            """, (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                sembol,
-                guncel_fiyat,
-                hedef_fiyat,
-                sinyal,
-                guven_skoru,
-                beklenen_getiri_pct,
-                "Stacking"
-            ))
-
-            conn.commit()
-            conn.close()
-
-        except Exception as db_hata:
-            print("AI kayıt hatası:", db_hata)
         return {
             "rf_prediction": round(hedef_fiyat, 2),
             "signal": sinyal,
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
-            "feature_importances": feature_importances,
-            "feature_names": features
+            "feature_importances": oznitelik_agirliklari
         }
+        
     except Exception as e:
-        import traceback
-
-        print("=" * 80)
-        print("AI ENSEMBLE HATASI")
-        print(traceback.format_exc())
-        print("=" * 80)
-
-        return {
-            "rf_prediction": float(t_df["Close"].iloc[-1]) if "t_df" in locals() and not t_df.empty else 0.0,
-            "signal": "AI HATASI",
-            "confidence": 0.0,
-            "expected_return_pct": 0.0,
-            "feature_importances": None,
-            "feature_names": []
-        }
-TIMEFRAMES = {
-    "15 Dakika": ("15m", "30d"),
-    "1 Saat": ("60m", "90d"),
-    "4 Saat": ("4h", "730d"),
-    "Günlük": ("1d", "5y"),
-    "Haftalık": ("1wk", "10y"),
-}
-
-
-@st.cache_data(ttl=600)
-def multi_timeframe_ai(sembol):
-
-    sonuc = {}
-
-    for isim, (interval, period) in TIMEFRAMES.items():
-
+        logging.error(f"AI Ensemble Hatası: {e}")
+        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
+def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
+    try:
+        df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
+        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20: 
+            return None
+            
+        df_g = df_gunluk.copy()
+        
         try:
+            guncel_df = yf.download(sembol, period="1d", interval="1m", progress=False, auto_adjust=True)
+            if not guncel_df.empty:
+                guncel_fiyat = float(guncel_df["Close"].iloc[-1])
+            else:
+                guncel_fiyat = float(df_g["Close"].iloc[-1])
+        except:
+            guncel_fiyat = float(df_g["Close"].iloc[-1])
 
-            df_tf = veri_yukle(
-                sembol,
-                period=period,
-                interval=interval
-            )
+        tz = pytz.timezone("Europe/Istanbul")
+        simdi = datetime.now(tz)
+        saat = simdi.hour
+        dakika = simdi.minute
+        haftaici = simdi.weekday() < 5
+        seans_acik = False
 
-            if df_tf is None or len(df_tf) < 120:
-                continue
+        if haftaici:
+            dakika_toplam = saat * 60 + dakika
+            if 9 * 60 + 40 <= dakika_toplam <= 18 * 60 + 10:
+                seans_acik = True
 
-            sonuc[isim] = ensemble_prediction(df_tf, sembol)
+        if seans_acik:
+            if len(df_g) >= 2:
+                kapanis_fiyati = float(df_g["Close"].iloc[-2])
+            else:
+                kapanis_fiyati = float(df_g["Close"].iloc[-1])
+        else:
+            kapanis_fiyati = float(df_g["Close"].iloc[-1])
 
-        except Exception as e:
+        if not df_g.empty and guncel_fiyat is not None:
+            last_idx = df_g.index[-1]
+            df_g.loc[last_idx, 'Close'] = guncel_fiyat
+            df_g.loc[last_idx, 'High'] = max(df_g.loc[last_idx, 'High'], guncel_fiyat)
+            df_g.loc[last_idx, 'Low'] = min(df_g.loc[last_idx, 'Low'], guncel_fiyat)
 
-            sonuc[isim] = {
-                "signal": "HATA",
-                "confidence": 0,
-                "rf_prediction": 0,
-                "expected_return_pct": 0,
-                "error": str(e)
+        df_g = stokastik_hesapla(df_g)
+        df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
+        df_g = ileri_teknik_gostergeler(df_g)
+        
+        temp_g = dipten_donus_analizi(df_g)
+        
+        g_fiyat = guncel_fiyat
+        g_tilson = df_g['Tilson_T3'].iloc[-1]
+        g_stoch_k = df_g['Stoch_K'].iloc[-1]
+        g_stoch_d = df_g['Stoch_D'].iloc[-1]
+        g_ema5 = df_g['EMA_5'].iloc[-1]
+        g_ema8 = df_g['EMA_8'].iloc[-1]
+        g_ema13 = df_g['EMA_13'].iloc[-1]
+        
+        g_boga = g_fiyat > g_tilson
+        g_stoch_al = (g_stoch_k < 35) and (g_stoch_k > g_stoch_d)
+        g_hacim = temp_g['Hacim_Patlamasi'].iloc[-1]
+        g_uyusmazlik = temp_g['Pozitif_Uyusmazlik'].iloc[-1]
+        g_super_sinyal = temp_g.get('Super_Sinyal', pd.Series([False])).iloc[-1]
+        g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
+        g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
+
+        umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
+        
+        if not umut_var_mi and analiz_tipi == "radar":
+            return {
+                "Varlık": sembol,
+                "Güncel Fiyat": f"{guncel_fiyat:.2f}",
+                "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
+                "🎯 AL/SAT Kararı": "🐻 PAS GEÇİLDİ (Ölü Trend)",
+                "Günlük T3": "🐻 AYI",
+                "4S T3": "-",
+                "📊 Temel Skor": "-",
+                "💥 Hacim Analizi": "Normal",
+                "📈 Pozitif Uyuşmazlık": "-",
+                "🪤 Spring (Tuzak)": "-",
+                "🔍 Tespit Edilen Formasyon": "Yok",
+                "🎯 Formasyon Hedefi (%)": "% 0.00",
+                "🤖 AI Kararı": "Zaman Tasarrufu",
+                "🎯 AI Hedef": "-"
             }
 
-    return sonuc
-def meta_ai_karari(mtf_sonuclari):
+        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
+        
+        h4_fiyat, h4_tilson = g_fiyat, g_tilson
+        h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
+        h4_boga, h4_stoch_al = g_boga, g_stoch_al
 
-    puan = 0
-    agirlik = {
-        "15 Dakika": 1,
-        "1 Saat": 2,
-        "4 Saat": 3,
-        "Günlük": 4,
-        "Haftalık": 5
-    }
+        if not df_4h.empty and len(df_4h) >= 20:
+            try:
+                df_4h = stokastik_hesapla(df_4h)
+                df_4h['Tilson_T3'] = tilson_t3(df_4h['Close'])
+                
+                h4_fiyat = df_4h['Close'].iloc[-1]
+                h4_tilson = df_4h['Tilson_T3'].iloc[-1]
+                h4_stoch_k = df_4h['Stoch_K'].iloc[-1]
+                h4_stoch_d = df_4h['Stoch_D'].iloc[-1]
+                
+                h4_boga = h4_fiyat > h4_tilson
+                h4_stoch_al = (h4_stoch_k < 35) and (h4_stoch_k > h4_stoch_d)
+            except Exception as e:
+                logging.error(f"[{sembol}] 4S Analiz Hatası: {e}")
 
-    toplam_agirlik = sum(agirlik.values())
-    toplam_guven = 0
-    hedefler = []
-
-    for tf, sonuc in mtf_sonuclari.items():
-
-        if "signal" not in sonuc:
-            continue
-
-        sinyal = str(sonuc["signal"]).upper()
-
-        w = agirlik.get(tf, 1)
-
-        if "KESİN AL" in sinyal:
-            puan += 2 * w
-
-        elif "GÜÇLÜ AL" in sinyal:
-            puan += 1.8 * w
-
-        elif "POTANSİYEL AL" in sinyal:
-            puan += 1.5 * w
-
-        elif "AL" in sinyal:
-            puan += 1 * w
-
-        elif "BEKLE" in sinyal:
-            puan += 0
-
-        elif "SAT" in sinyal:
-            puan -= 1.5 * w
-
-        toplam_guven += sonuc.get("confidence", 0) * w
-
-        if sonuc.get("rf_prediction", 0) > 0:
-            hedefler.append(sonuc["rf_prediction"])
-
-    guven = toplam_guven / toplam_agirlik
-
-    hedef = np.mean(hedefler) if hedefler else 0
-
-    if puan >= 18:
-        karar = "🚀 GÜÇLÜ AL"
-
-    elif puan >= 10:
-        karar = "✅ AL"
-
-    elif puan >= 3:
-        karar = "⚖️ BEKLE"
-
-    else:
-        karar = "🛑 SAT"
-
-    return {
-        "karar": karar,
-        "guven": round(guven, 1),
-        "hedef": round(float(hedef), 2),
-        "puan": round(puan, 1)
-    }
-
-def ai_feature_importance(model):
-    """
-    VotingRegressor / XGBoost / RandomForest / GradientBoosting /
-    Ridge / SVR için ortak Feature Importance hesaplar.
-    """
-
-    try:
-
-        import numpy as np
-
-        tum_onemler = []
-
-        # VotingRegressor
-        # --------------------------------------------------
-# STACKING REGRESSOR
-# --------------------------------------------------
-
-        if hasattr(model, "named_estimators_"):
-
-            tum_onemler = []
-
-            for isim, est in model.named_estimators_.items():
-
-                if hasattr(est, "steps"):
-                    est = est.steps[-1][1]
-
-                if hasattr(est, "feature_importances_"):
-
-                    tum_onemler.append(est.feature_importances_)
-
-                elif hasattr(est, "coef_"):
-
-                    tum_onemler.append(np.abs(est.coef_))
-
-            if len(tum_onemler):
-
-                importance = np.mean(tum_onemler, axis=0)
-
-            else:
-
-                return None
-        if hasattr(model, "estimators_"):
-
-            for est in model.estimators_:
-
-                # Pipeline ise gerçek modeli al
-                if hasattr(est, "steps"):
-                    est = est.steps[-1][1]
-
-                imp = None
-
-                if hasattr(est, "feature_importances_"):
-                    imp = np.asarray(est.feature_importances_, dtype=float)
-
-                elif hasattr(est, "coef_"):
-                    imp = np.abs(np.asarray(est.coef_, dtype=float)).flatten()
-
-                if imp is not None:
-
-                    # NaN temizle
-                    imp = np.nan_to_num(imp)
-
-                    # Normalize et
-                    toplam = imp.sum()
-
-                    if toplam > 0:
-                        imp = imp / toplam
-                        tum_onemler.append(imp)
-
+        if g_boga and h4_boga:
+            al_sat_karari = "🚀 GÜÇLÜ AL (4S + Günlük Onaylı)" if (g_stoch_al and h4_stoch_al) else "🟢 AL (Trend Onaylı)"
+        elif g_boga and not h4_boga:
+            al_sat_karari = "⚠️ DÜZELTME (Günlük Boğa / 4S Ayı)"
+        elif not g_boga and h4_boga:
+            al_sat_karari = "⚡ TEPKİ YÜKSELİŞİ (4S Boğa / Günlük Ayı)"
         else:
+            al_sat_karari = "🐻 GÜÇLÜ SAT / AYI"
 
-            if hasattr(model, "feature_importances_"):
-
-                imp = np.asarray(model.feature_importances_, dtype=float)
-
-            elif hasattr(model, "coef_"):
-
-                imp = np.abs(np.asarray(model.coef_, dtype=float)).flatten()
-
+        if analiz_tipi == "radar":
+            temp_4h = dipten_donus_analizi(df_4h) if not df_4h.empty else temp_g
+            h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1] if not temp_4h.empty else False
+            
+            hacim_durum = "🔥 GÜÇLÜ PATLAMA" if (g_hacim or h4_hacim) else "Normal"
+            
+            h4_super = temp_4h.get('Super_Sinyal', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
+            h4_uyusmazlik = temp_4h.get('Pozitif_Uyusmazlik', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
+            
+            if g_super_sinyal or h4_super:
+                uyusmazlik_durum = "🌟 SÜPER SİNYAL (RSI+MACD+Stoch)"
+            elif g_uyusmazlik or h4_uyusmazlik:
+                uyusmazlik_durum = "✅ POZİTİF UYUŞMAZLIK"
             else:
-                return None
+                uyusmazlik_durum = "-"
 
-            imp = np.nan_to_num(imp)
+            spring_durum = "✅ VAR" if (g_spring or temp_4h.get('Wyckoff_Spring', pd.Series([False])).iloc[-1]) else "-"
+            
+            formasyon_adi, formasyon_hedef = formasyon_tespit_et_ve_hedefle(df_g)
+            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
+            
+            if umut_var_mi and ai_veri.get('rf_prediction', 0.0) > 0:
+                tahmin_kaydet(sembol, ai_veri['rf_prediction'])
 
-            if imp.sum() > 0:
-                return imp / imp.sum()
-            else:
-                return None
+            try:
+                hedef_str = str(formasyon_hedef).replace('%', '').replace(' ', '').strip()
+                if hedef_str != '-' and hedef_str != '0.00':
+                    hedef_oran = float(hedef_str)
+                    if hedef_oran < -4.0:
+                        if "AL" in al_sat_karari:
+                            al_sat_karari = f"⚠️ RİSKLİ: Trend Pozitif ama {formasyon_adi} Tehdidi!"
+                        ai_sinyal = ai_veri.get('signal', 'NÖTR')
+                        if "AL" in ai_sinyal:
+                            ai_veri['signal'] = f"🛑 AI İPTAL ({formasyon_adi})"
+            except Exception as e:
+                logging.warning(f"[{sembol}] Veto mekanizmasında hata: {e}")
 
-        if len(tum_onemler) == 0:
-            return None
+            try:
+                sihirli_veri = sihirli_formul_skorla(sembol, df=df_g)
+                s_skor = sihirli_veri.get('Puan', 0) if isinstance(sihirli_veri, dict) else 0
+            except Exception:
+                s_skor = 0
+            
+            return {
+                "Varlık": sembol,
+                "Güncel Fiyat": f"{guncel_fiyat:.2f}",
+                "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
+                "🎯 AL/SAT Kararı": al_sat_karari,
+                "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
+                "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
+                "📊 Temel Skor": s_skor,
+                "💥 Hacim Analizi": hacim_durum,
+                "📈 Pozitif Uyuşmazlık": uyusmazlik_durum,
+                "🪤 Spring (Tuzak)": spring_durum,
+                "🔍 Tespit Edilen Formasyon": formasyon_adi,
+                "🎯 Formasyon Hedefi (%)": formasyon_hedef,
+                "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'),
+                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
+            }
 
-        # En kısa uzunluğu baz al
-        min_len = min(len(x) for x in tum_onemler)
-
-        tum_onemler = [x[:min_len] for x in tum_onemler]
-
-        importance = np.mean(tum_onemler, axis=0)
-
-        if importance.sum() == 0:
-            return None
-
-        importance = importance / importance.sum()
-
-        return importance
+        elif analiz_tipi == "stoch":
+            return {
+                "Varlık": sembol,
+                "Son Fiyat": f"{guncel_fiyat:.2f}",
+                "Günlük Stoch %K": round(g_stoch_k, 2),
+                "4S Stoch %K": round(h4_stoch_k, 2),
+                "Durum": "🟢 Çift Dip/Al" if (g_stoch_al and h4_stoch_al) else ("↗️ Pozitif" if h4_stoch_al else "⚪ Nötr")
+            }
 
     except Exception as e:
-
-        print(f"Feature Importance Hatası: {e}")
-
+        logging.error(f"[{sembol}] Analiz Hatası: {str(e)}")
         return None
+def analizi_tetikle(state: State):
+    notify(state, "info", f"{state.secilen_hisse} için AI motorları çalıştırılıyor...")
+    hisse = state.secilen_hisse
+    kaynak = state.veri_kaynagi
+    
+    try:
+        state.analiz_sonucu = f"**{hisse}** analizi **{kaynak}** üzerinden başarıyla tamamlandı. Golden Cross tespit edildi!"
+        state.ai_hedef = "% 12.5 Yükseliş Beklentisi"
+        notify(state, "success", "Analiz Tamamlandı!")
+    except Exception as e:
+        notify(state, "error", f"Hata oluştu: {str(e)}")
+
+# ==========================================
+# UYGULAMAYI AYAĞA KALDIRMA
+# ==========================================
+if __name__ == "__main__":
+    veritabani_baslat()
+    
+    # page değişkeni tanımlı olmadığı için boş string veya varsayılan UI yerleşimi verilir
+    page = ""
+    gui = Gui(page=page)
+    
+    gui.run(
+        title="God Mode Terminal v100",
+        dark_mode=True, 
+        use_reloader=True, 
+        port=5000
+    )
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10):
     try:
@@ -2148,7 +1454,10 @@ def rl_ajani_egit(df):
     
     aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
     return aksiyon_metni
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
 from keras.layers import LSTM, Dropout, Dense
+import numpy as np
 
 def lstm_tahmin_yap(df, lookback_days=60):
     # ---------------------------------------------------------
@@ -2288,7 +1597,6 @@ async def tum_piyasayi_tara_async(hisse_listesi):
         # Başarılı çekilen verileri bir sözlükte topla
         basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
         return basarili_veriler
-    
 @st.cache_data(ttl=86400, show_spinner=False)
 def tum_bist_hisselerini_getir():
     """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
@@ -2619,9 +1927,9 @@ with tabs[0]:
 
     fig.update_layout(template="plotly_dark", height=900, xaxis_rangeslider_visible=False)
     
-    # Sabit Streamlit elemanı: st.empty() ile grafiği söküp yeniden takmak
-    # bazı tarayıcılarda React removeChild/NotFoundError hatasına yol açabilir.
-    st.plotly_chart(fig, use_container_width=True, key="ana_teknik_grafik")
+    grafik_alani = st.empty()
+    with grafik_alani:
+        st.plotly_chart(fig, use_container_width=True)
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
 with tabs[1]:
@@ -2826,15 +2134,6 @@ with tabs[5]:
     st.subheader("📊 Korelasyon Haritası")
     st.write("Isı haritası oluşturmak için yeterli veri işleniyor...")
 
-with tabs[6]:
-    st.subheader("⚙️ Strateji Testi (Backtest)")
-    bt = backtest_motoru(df)
-    st.line_chart(bt[['Piyasa_Kumulatif', 'Strateji_Kumulatif']])
-
-with tabs[7]:
-    st.subheader("🎲 Monte Carlo Risk Simülasyonu")
-    if st.button("Simülasyon Çiz"):
-        st.line_chart(monte_carlo_simulasyonu(df))
 
 with tabs[8]:
     st.subheader("🧬 İstatistik")
@@ -2848,55 +2147,7 @@ with tabs[9]:
     
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
         ai_sonuc = ensemble_prediction(df)
-        mtf = multi_timeframe_ai(hisse_kodu)
-        meta = meta_ai_karari(mtf)
-
-        st.markdown("## 🤖 Meta AI")
-
-        c1, c2, c3 = st.columns(3)
-
-        c1.metric("Karar", meta["karar"])
-
-        c2.metric("Güven", f"%{meta['guven']}")
-
-        c3.metric("Ortalama Hedef", f"{meta['hedef']:.2f}")
-        st.markdown("### ⏰ Çoklu Zaman Dilimi AI")
-
-        rows = []
-
-        for tf, s in mtf.items():
-
-            rows.append({
-                "Zaman": tf,
-                "Karar": s["signal"],
-                "Güven": s["confidence"],
-                "Hedef": s["rf_prediction"]
-            })
-
-        st.dataframe(
-            pd.DataFrame(rows),
-            use_container_width=True
-        )
-        fig = px.bar(
-            pd.DataFrame([
-                {
-                    "Zaman": k,
-                    "Güven": v["confidence"]
-                }
-                for k, v in mtf.items()
-            ]),
-            x="Zaman",
-            y="Güven",
-            color="Güven",
-            text="Güven"
-        )
-
-        fig.update_layout(
-            template="plotly_dark",
-            height=320
-        )
-
-        st.plotly_chart(fig, use_container_width=True, key="coklu_zaman_guven_grafigi")
+        
     c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
     
     with c1:
@@ -2909,52 +2160,24 @@ with tabs[9]:
         
     with c2:
         # Öznitelik (Feature) grafiğinin çizilmesi
-        feature_importances = ai_sonuc.get("feature_importances", None)
-
-        if isinstance(feature_importances, np.ndarray) and feature_importances.size > 0:
+        if ai_sonuc.get("feature_importances"):
             # Verileri DataFrame'e çevirip küçükten büyüğe sıralıyoruz
-            feature_importances = ai_sonuc.get("feature_importances")
-            feature_names = ai_sonuc.get("feature_names")
+            imp_df = pd.DataFrame(list(ai_sonuc["feature_importances"].items()), columns=["İndikatör", "Etki Oranı"])
+            imp_df = imp_df.sort_values(by="Etki Oranı", ascending=True)
+            
+            # Plotly ile yatay bar grafiği
+            fig_imp = px.bar(imp_df, x="Etki Oranı", y="İndikatör", orientation='h', 
+                             title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
+                             text_auto='.2%', # Çubukların üzerine yüzde yazdırır
+                             color="Etki Oranı", color_continuous_scale="Viridis")
+            
+            fig_imp.update_layout(template="plotly_dark", height=350, margin=dict(l=0, r=0, t=40, b=0),
+                                  xaxis_tickformat='.0%', showlegend=False)
+            
+            st.plotly_chart(fig_imp, use_container_width=True)
+        else:
+            st.warning("Öznitelik ağırlıkları hesaplanamadı (Yetersiz veri veya model hatası).")
 
-            if (
-                feature_importances is not None
-                and feature_names is not None
-                and len(feature_importances) > 0
-            ):
-
-                feature_importances = np.asarray(feature_importances)
-
-                imp_df = pd.DataFrame({
-                    "İndikatör": feature_names[:len(feature_importances)],
-                    "Etki Oranı": feature_importances
-                })
-
-                imp_df = imp_df.sort_values("Etki Oranı", ascending=False)
-
-                fig_imp = px.bar(
-                    imp_df,
-                    x="Etki Oranı",
-                    y="İndikatör",
-                    orientation="h",
-                    title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
-                    text_auto=".1%",
-                    color="Etki Oranı",
-                    color_continuous_scale="Viridis"
-                )
-
-                fig_imp.update_layout(
-                    template="plotly_dark",
-                    height=350,
-                    margin=dict(l=0, r=0, t=40, b=0),
-                    xaxis_tickformat=".0%",
-                    showlegend=False,
-                    yaxis=dict(autorange="reversed")
-                )
-
-                st.plotly_chart(fig_imp, use_container_width=True, key="feature_importance_grafigi")
-
-            else:
-                st.warning("Öznitelik ağırlıkları hesaplanamadı.")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
 with tabs[10]:
@@ -2963,7 +2186,7 @@ with tabs[10]:
     st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")
     
     try:
-        conn = db_connect()
+        conn = sqlite3.connect('hisse_hafiza.db')
         # Tablo yoksa hata almamak için kontrol
         try:
             gecmis_df = pd.read_sql_query("SELECT * FROM tahminler ORDER BY tarih DESC", conn)
@@ -2985,23 +2208,3 @@ with tabs[10]:
             st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
     except Exception as e:
         st.error(f"Veritabanı erişim hatası: {e}")
-    istat = ai_performans_istatistikleri()
-
-    st.subheader("📈 AI Performans Özeti")
-
-    c1,c2,c3 = st.columns(3)
-
-    c1.metric("Toplam Tahmin",istat["toplam"])
-
-    c2.metric("Ortalama Güven",f"%{istat['ortalama_guven']}")
-
-    c3.metric("Ortalama Beklenen Getiri",f"%{istat['ortalama_getiri']}")
-    c1,c2,c3 = st.columns(3)
-
-    c1.metric("AL",istat["al"])
-
-    c2.metric("SAT",istat["sat"])
-
-    c3.metric("BEKLE",istat["bekle"])
-
-

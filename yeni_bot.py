@@ -217,6 +217,20 @@ def tahminleri_degerlendir():
 
 # Uygulama açıldığında birleşik veritabanını hazırla.
 veritabani_baslat()
+# Güncel ve geçerli BIST hisselerinin listesini tutan bir yapı
+GECERLI_BIST_SEMBOLLERI = ["THYAO", "ASELS", "BIMAS", "TUPRS"] # Bu listeyi API ile dinamik çekebilirsiniz
+
+def gecerli_bist_sembolu_mu(hisse_kodu):
+    ana_sembol = hisse_kodu.replace('.IS', '').replace('BIST:', '').strip().upper()
+    if ana_sembol not in GECERLI_BIST_SEMBOLLERI:
+        return False
+    return True
+@st.cache_resource
+def model_yukle(sembol):
+    model_dosyasi = os.path.join("ai_modeller", f"{sembol}_ai_model.pkl")
+    if os.path.exists(model_dosyasi):
+        return joblib.load(model_dosyasi)
+    return None
 def sembol_formatla(hisse_kodu):
     # Eğer gelen kodda '.IS' veya 'BIST:' varsa temizleyip ana sembolü (örneğin THYAO) bulalım
     ana_sembol = hisse_kodu.replace('.IS', '').replace('BIST:', '').strip().upper()
@@ -1543,7 +1557,7 @@ def ai_performans_istatistikleri():
             "sat":0,
             "bekle":0
         }
-st.set_page_config(layout="wide", page_title="God Mode Terminal v102")
+
 @st.cache_resource(show_spinner=False)
 def get_tv_datafeed():
     """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""

@@ -517,19 +517,25 @@ def ileri_teknik_gostergeler(df):
     df_ta['SMA_5'] = df_ta['Close'].rolling(window=5).mean()
     df_ta['SMA_8'] = df_ta['Close'].rolling(window=8).mean()
     df_ta['SMA_13'] = df_ta['Close'].rolling(window=13).mean()
-
+    df_ta['EMA_21'] = df_ta['Close'].ewm(span=21, adjust=False).mean()
+    df_ta['EMA_34'] = df_ta['Close'].ewm(span=34, adjust=False).mean()
+    df_ta['EMA_52'] = df_ta['Close'].ewm(span=52, adjust=False).mean()
+    df_ta['EMA_89'] = df_ta['Close'].ewm(span=89, adjust=False).mean()
+    df_ta['EMA_144'] = df_ta['Close'].ewm(span=144, adjust=False).mean()
     # Üstel Hareketli Ortalamalar (EMA) - (Yapay zeka için daha etkilidir)
     df_ta['EMA_5'] = df_ta['Close'].ewm(span=5, adjust=False).mean()
     df_ta['EMA_8'] = df_ta['Close'].ewm(span=8, adjust=False).mean()
     df_ta['EMA_13'] = df_ta['Close'].ewm(span=13, adjust=False).mean()
-
+    df_ta['Destek'] = df_ta['Low'].rolling(window=20).min()
+    df_ta['Direnc'] = df_ta['High'].rolling(window=20).max()
+    df_ta['Destege_Uzaklik'] = (df_ta['Close'] - df_ta['Destek']) / df_ta['Close'].replace(0, 1e-9)
+    df_ta['Dirence_Uzaklik'] = (df_ta['Direnc'] - df_ta['Close']) / df_ta['Close'].replace(0, 1e-9)
     # Kısa Vadeli Fibonacci Kesişim Trend Sinyali (5 > 8 > 13)
     df_ta['Fibo_MA_Trend'] = np.where(
         (df_ta['EMA_5'] > df_ta['EMA_8']) & (df_ta['EMA_8'] > df_ta['EMA_13']), "🚀 GÜÇLÜ YÜKSELİŞ",
         np.where((df_ta['EMA_5'] < df_ta['EMA_8']) & (df_ta['EMA_8'] < df_ta['EMA_13']), "🔻 GÜÇLÜ DÜŞÜŞ", "⚖️ YATAY NÖTR")
     )
     return df_ta
-
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):
     try:
         df_form = df.copy()
@@ -1562,6 +1568,8 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
     except Exception:
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
+
+
 def rl_ajani_egit(df):
     """
     Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.

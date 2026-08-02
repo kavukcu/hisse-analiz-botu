@@ -31,15 +31,18 @@ from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 import sqlite3
 import joblib
+import os
 import optuna
 from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
+from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import IsolationForest
 import shap
 import streamlit as st
 import matplotlib.pyplot as plt
+import numpy as np
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
@@ -48,174 +51,72 @@ import gym_anytrading
 from stable_baselines3 import A2C
 import asyncio
 import aiohttp
+import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import ElasticNet
+import sqlite3
+from datetime import datetime
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 # ==========================================
-DB_NAME = "godmode_ai.db"
-LEGACY_DB_NAMES = ("hisse_hafiza.db", "ai_memory.db")
-
-
-def db_connect(db_name=DB_NAME):
-    """SQLite bağlantılarını tek noktadan ve güvenli ayarlarla açar."""
-    conn = sqlite3.connect(db_name, timeout=10)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    return conn
-
-
-def _kolonlari_tamamla(conn):
-    """Eski tahminler tablosunu veri kaybetmeden birleşik şemaya yükseltir."""
-    mevcut = {row[1] for row in conn.execute("PRAGMA table_info(tahminler)").fetchall()}
-    kolonlar = {
-        "id": "INTEGER",
-        "fiyat": "REAL",
-        "sinyal": "TEXT",
-        "guven": "REAL",
-        "beklenen_getiri": "REAL",
-        "model": "TEXT",
-        "sonuc5": "REAL",
-        "sonuc10": "REAL",
-        "sonuc20": "REAL",
-    }
-    for kolon, tip in kolonlar.items():
-        if kolon not in mevcut:
-            conn.execute(f"ALTER TABLE tahminler ADD COLUMN {kolon} {tip}")
-
-
-def _eski_verileri_tasi(conn):
-    """Eski DB dosyalarındaki kayıtları birleşik veritabanına bir kez taşır."""
-    for eski_db in LEGACY_DB_NAMES:
-        if not os.path.exists(eski_db) or os.path.abspath(eski_db) == os.path.abspath(DB_NAME):
-            continue
-        try:
-            eski = sqlite3.connect(eski_db, timeout=5)
-            tablolar = {r[0] for r in eski.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-
-            if "tahminler" in tablolar:
-                for row in eski.execute(
-                    "SELECT tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum FROM tahminler"
-                ).fetchall():
-                    conn.execute(
-                        """INSERT INTO tahminler
-                           (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum)
-                           SELECT ?, ?, ?, ?, ?
-                           WHERE NOT EXISTS (
-                               SELECT 1 FROM tahminler
-                               WHERE tarih=? AND sembol=? AND hedef_fiyat=?
-                           )""",
-                        (*row, row[0], row[1], row[2]),
-                    )
-
-            if "ai_predictions" in tablolar:
-                for row in eski.execute(
-                    """SELECT tarih, sembol, fiyat, hedef, sinyal, guven,
-                              beklenen_getiri, model, sonuc5, sonuc10, sonuc20
-                       FROM ai_predictions"""
-                ).fetchall():
-                    conn.execute(
-                        """INSERT INTO tahminler
-                           (tarih, sembol, fiyat, hedef_fiyat, sinyal, guven,
-                            beklenen_getiri, model, sonuc5, sonuc10, sonuc20, durum)
-                           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BEKLİYOR'
-                           WHERE NOT EXISTS (
-                               SELECT 1 FROM tahminler
-                               WHERE tarih=? AND sembol=? AND hedef_fiyat=? AND model IS NOT NULL
-                           )""",
-                        (*row, row[0], row[1], row[3]),
-                    )
-            eski.close()
-        except Exception as exc:
-            logging.warning(f"Eski veritabanı taşınamadı [{eski_db}]: {exc}")
-
-
 def veritabani_baslat():
-    """Tek tahmin tablosunu oluşturur ve eski verileri güvenle birleştirir."""
-    with db_connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS tahminler (
-                id INTEGER,
-                tarih TEXT NOT NULL,
-                sembol TEXT NOT NULL,
-                fiyat REAL,
-                hedef_fiyat REAL,
-                gerceklesme_fiyati REAL,
-                durum TEXT DEFAULT 'BEKLİYOR',
-                sinyal TEXT,
-                guven REAL,
-                beklenen_getiri REAL,
-                model TEXT,
-                sonuc5 REAL,
-                sonuc10 REAL,
-                sonuc20 REAL
-            )
-        """)
-        _kolonlari_tamamla(conn)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_tahminler_tarih_sembol ON tahminler(tarih, sembol)"
-        )
-        _eski_verileri_tasi(conn)
-
+    """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
+    conn = sqlite3.connect('hisse_hafiza.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
+                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
+    conn.commit()
+    conn.close()
 
 def tahmin_kaydet(sembol, hedef_fiyat):
-    """Aynı gün ve sembol için yinelenmeyen temel tahmin kaydı oluşturur."""
+    """Bugünün tahminlerini hafızaya yazar."""
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    c = conn.cursor()
     bugun = datetime.now().strftime("%Y-%m-%d")
-    with db_connect() as conn:
-        mevcut = conn.execute(
-            "SELECT 1 FROM tahminler WHERE tarih=? AND sembol=? AND model IS NULL LIMIT 1",
-            (bugun, sembol),
-        ).fetchone()
-        if not mevcut:
-            conn.execute(
-                """INSERT INTO tahminler
-                   (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum)
-                   VALUES (?, ?, ?, NULL, 'BEKLİYOR')""",
-                (bugun, sembol, hedef_fiyat),
-            )
-
+    
+    # Aynı gün aynı hisse için zaten kayıt yapıldıysa tekrar eklemeyi önle
+    c.execute("SELECT * FROM tahminler WHERE tarih=? AND sembol=?", (bugun, sembol))
+    if not c.fetchone():
+        c.execute("INSERT INTO tahminler (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum) VALUES (?, ?, ?, NULL, 'BEKLİYOR')", 
+                  (bugun, sembol, hedef_fiyat))
+    conn.commit()
+    conn.close()
 
 def tahminleri_degerlendir():
-    """En az 5 günlük bekleyen tahminleri güncel fiyatla değerlendirir."""
-    with db_connect() as conn:
-        bekleyenler = conn.execute(
-            """SELECT rowid, tarih, sembol, hedef_fiyat
-               FROM tahminler
-               WHERE durum='BEKLİYOR' AND hedef_fiyat IS NOT NULL"""
-        ).fetchall()
-
-        for rowid, tarih_str, sembol, hedef_fiyat in bekleyenler:
+    """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar."""
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
+    c = conn.cursor()
+    c.execute("SELECT rowid, tarih, sembol, hedef_fiyat FROM tahminler WHERE durum = 'BEKLİYOR'")
+    bekleyenler = c.fetchall()
+    
+    for row in bekleyenler:
+        rowid, tarih_str, sembol, hedef_fiyat = row
+        kayit_tarihi = datetime.strptime(tarih_str, "%Y-%m-%d")
+        
+        # Eğer tahminin üzerinden 5 gün geçmişse kontrol et
+        if (datetime.now() - kayit_tarihi).days >= 5:
             try:
-                kayit_tarihi = datetime.strptime(tarih_str[:10], "%Y-%m-%d")
-            except (TypeError, ValueError):
-                continue
-
-            if (datetime.now() - kayit_tarihi).days < 5:
-                continue
-
-            try:
-                df = veri_yukle(
-                    sembol,
-                    (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
-                    datetime.now().strftime("%Y-%m-%d"),
-                )
-                if df is None or df.empty:
-                    continue
-                gercek_fiyat = float(df["Close"].iloc[-1])
-                sapma_orani = abs(gercek_fiyat - hedef_fiyat) / max(abs(gercek_fiyat), 1e-9)
-                durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
-                conn.execute(
-                    """UPDATE tahminler
-                       SET gerceklesme_fiyati=?, durum=?
-                       WHERE rowid=?""",
-                    (gercek_fiyat, durum, rowid),
-                )
-            except Exception as exc:
-                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {exc}")
-
-
-# Uygulama açıldığında birleşik veritabanını hazırla.
+                # Güncel fiyatı çek
+                df = yf.download(sembol, period="1d", progress=False)
+                if not df.empty:
+                    gercek_fiyat = float(df['Close'].iloc[-1])
+                    
+                    # Hedef fiyat ile gerçek fiyat arasındaki sapmayı (hata payını) hesapla
+                    sapma_orani = abs(gercek_fiyat - hedef_fiyat) / gercek_fiyat
+                    
+                    # %5'lik bir yanılma payını başarılı kabul ediyoruz
+                    durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
+                    
+                    c.execute("UPDATE tahminler SET gerceklesme_fiyati = ?, durum = ? WHERE rowid = ?", 
+                              (gercek_fiyat, durum, rowid))
+            except Exception as e:
+                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
+    conn.commit()
+    conn.close()
+# Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
 def sembol_formatla(hisse_kodu):
     # Eğer gelen kodda '.IS' veya 'BIST:' varsa temizleyip ana sembolü (örneğin THYAO) bulalım
@@ -242,6 +143,11 @@ print(f"İş Yatırım için: {semboller['isyatirim']}")
 
 
 import time as tm
+import yfinance as yf
+import pandas as pd
+import logging
+from tvDatafeed import TvDatafeed, Interval
+import isyatirimhisse
 
 @st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
@@ -676,6 +582,8 @@ def yapay_zeka_icin_formasyon_bul(df):
     df_f['AI_Formasyon_Skoru'] = df_f['P_Engulfing'] + df_f['P_Pinbar']
     
     return df_f
+import numpy as np
+import pandas as pd
 
 def makro_formasyonlari_bul(df, window=20):
     """
@@ -725,6 +633,8 @@ def makro_formasyonlari_bul(df, window=20):
     df_f.fillna(0, inplace=True)
     
     return df_f
+import numpy as np
+import pandas as pd
 
 def trend_ve_harmonik_bul(df):
     """
@@ -853,6 +763,8 @@ def formasyon_tespit_et_ve_hedefle(df):
 
     hedef_str = f"% {hedef_yuzde:+.2f}" if hedef_yuzde != 0 else "% 0.00"
     return formasyon_adi, hedef_str
+import pandas as pd
+import numpy as np
 
 def dipten_donus_analizi(df):
     """
@@ -1490,60 +1402,48 @@ def ai_guven_skoru_hesapla(
     except Exception:
 
         return 50.0
-# =====================================================
-# AI PERFORMANS İSTATİSTİKLERİ
-# =====================================================
+def ai_veritabani_olustur():
 
-def ai_performans_istatistikleri():
+    conn = sqlite3.connect("ai_memory.db")
 
-    try:
+    cur = conn.cursor()
 
-        conn = db_connect()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_predictions(
 
-        df = pd.read_sql("SELECT * FROM tahminler WHERE model IS NOT NULL", conn)
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-        conn.close()
+            tarih TEXT,
 
-        if df.empty:
+            sembol TEXT,
 
-            return {
-                "toplam": 0,
-                "ortalama_guven": 0,
-                "ortalama_getiri": 0,
-                "al": 0,
-                "sat": 0,
-                "bekle": 0
-            }
+            fiyat REAL,
 
-        return {
+            hedef REAL,
 
-            "toplam": len(df),
+            sinyal TEXT,
 
-            "ortalama_guven": round(df["guven"].mean(),2),
+            guven REAL,
 
-            "ortalama_getiri": round(df["beklenen_getiri"].mean(),2),
+            beklenen_getiri REAL,
 
-            "al": int(df["sinyal"].str.contains("AL",case=False).sum()),
+            model TEXT,
 
-            "sat": int(df["sinyal"].str.contains("SAT",case=False).sum()),
+            sonuc5 REAL,
 
-            "bekle": int(df["sinyal"].str.contains("BEKLE",case=False).sum())
+            sonuc10 REAL,
 
-        }
+            sonuc20 REAL
 
-    except Exception as e:
+        )
+    """)
 
-        print(e)
+    conn.commit()
 
-        return {
-            "toplam":0,
-            "ortalama_guven":0,
-            "ortalama_getiri":0,
-            "al":0,
-            "sat":0,
-            "bekle":0
-        }
-st.set_page_config(layout="wide", page_title="God Mode Terminal v102")
+    conn.close()
+st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
+ai_veritabani_olustur()
+st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
 def get_tv_datafeed():
     """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
@@ -1784,22 +1684,21 @@ def ensemble_prediction(df, sembol="Genel"):
 # --------------------------------------------------------
 
         try:
-            conn = db_connect()
+            conn = sqlite3.connect("ai_memory.db")
             cur = conn.cursor()
 
             cur.execute("""
-                INSERT INTO tahminler (
+                INSERT INTO ai_predictions (
                     tarih,
                     sembol,
                     fiyat,
-                    hedef_fiyat,
+                    hedef,
                     sinyal,
                     guven,
                     beklenen_getiri,
-                    model,
-                    durum
+                    model
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BEKLİYOR')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 sembol,
@@ -1950,6 +1849,8 @@ def meta_ai_karari(mtf_sonuclari):
         "puan": round(puan, 1)
     }
 
+import pandas as pd
+import numpy as np
 def ai_feature_importance(model):
     """
     VotingRegressor / XGBoost / RandomForest / GradientBoosting /
@@ -2148,7 +2049,10 @@ def rl_ajani_egit(df):
     
     aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
     return aksiyon_metni
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
 from keras.layers import LSTM, Dropout, Dense
+import numpy as np
 
 def lstm_tahmin_yap(df, lookback_days=60):
     # ---------------------------------------------------------
@@ -2505,32 +2409,26 @@ df = stokastik_hesapla(df)
 # ==========================================
 # 4. ARAYÜZ (TABS) SEKMELERİ
 # ==========================================
-SEKME_ADLARI = [
-    "📈 SMC & Quant Grafiği",
-    "🔍 Akıllı Radar",
-    "💼 Cüzdan & Stop",
-    "🏢 Temel Analiz",
-    "📰 Haber",
-    "📊 Isı Haritası",
-    "⚙️ Backtest",
-    "🎲 Risk Simülasyonu",
+tabs = st.tabs([
+    "📈 SMC & Quant Grafiği", 
+    "🔍 Akıllı Radar", 
+    "💼 Cüzdan & Stop", 
+    "🏢 Temel Analiz", 
+    "📰 Haber", 
+    "📊 Isı Haritası", 
+    "⚙️ Backtest", 
+    "🎲 Risk Simülasyonu", 
     "🧬 İstatistik",
     "🤖 AI Ensemble Karar",
-    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi",
-]
-
-# st.tabs bütün sekmeleri aynı anda ön yüzde oluşturur. Büyük grafik ve tabloların
-# birlikte yeniden çizilmesi bazı Streamlit sürümlerinde React removeChild
-# uyuşmazlığına neden olabilir. Yalnızca seçilen modülü oluşturuyoruz.
-aktif_sekme = st.sidebar.radio(
-    "📌 Aktif Modül",
-    SEKME_ADLARI,
-    key="aktif_modul_secimi",
-)
+    "🧠 Yapay Zeka Öğrenme & Başarı Karnesi"
+    
+    
+    
+])
 
 # --- SEKME 0: QUANT GRAFİK ---
 # --- SEKME 0: QUANT GRAFİK ---
-if aktif_sekme == SEKME_ADLARI[0]:
+with tabs[0]:
     st.subheader("📈 Kurumsal Quant Grafiği & Likidite Analizi")
     
     c_ayar1, c_ayar2, c_ayar3 = st.columns(3)
@@ -2625,12 +2523,12 @@ if aktif_sekme == SEKME_ADLARI[0]:
 
     fig.update_layout(template="plotly_dark", height=900, xaxis_rangeslider_visible=False)
     
-    # Sabit Streamlit elemanı: st.empty() ile grafiği söküp yeniden takmak
-    # bazı tarayıcılarda React removeChild/NotFoundError hatasına yol açabilir.
-    st.plotly_chart(fig, use_container_width=True, key="ana_teknik_grafik")
+    grafik_alani = st.empty()
+    with grafik_alani:
+        st.plotly_chart(fig, use_container_width=True)
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
-if aktif_sekme == SEKME_ADLARI[1]:
+with tabs[1]:
     st.subheader("🔍 Akıllı Asenkron Radar & Çoklu Gösterge (Quant)")
     
     # Session State Tanımlamaları
@@ -2775,7 +2673,7 @@ if aktif_sekme == SEKME_ADLARI[1]:
                     taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, use_container_width=True, hide_index=True)
-                    st.success("✅ Tarama tamamlandı.")
+                    st.balloons()
                 else:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
@@ -2810,46 +2708,46 @@ if aktif_sekme == SEKME_ADLARI[1]:
             st.dataframe(df_goster, use_container_width=True, hide_index=True)
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
-if aktif_sekme == SEKME_ADLARI[2]:
+with tabs[2]:
     st.subheader("📊 Varlık Portföyüm & Akıllı Stop")
     tavsiye_stop = round(float(df['Close'].iloc[-1]) - (float(df['ATR_14'].iloc[-1]) * 2), 2)
     st.info(f"💡 Tavsiye edilen teknik Stop-Loss: **{tavsiye_stop}**")
 
 # --- SEKME 3, 4, 5, 6, 7, 8: DİĞER MODÜLLER ---
-if aktif_sekme == SEKME_ADLARI[3]:
+with tabs[3]:
     st.subheader("🏢 Temel Analiz")
     c1, c2, c3 = st.columns(3)
     c1.metric("F/K Oranı", info.get('trailingPE', '-'))
     c2.metric("PD/DD", info.get('priceToBook', '-'))
     c3.metric("Piyasa Değeri", info.get('marketCap', '-'))
 
-if aktif_sekme == SEKME_ADLARI[4]:
+with tabs[4]:
     st.subheader("📰 Haber Duygu Analizi")
     for h in haber_duygu_analizi(hisse_kodu):
         st.write(f"**{h['duygu']}** - [{h['baslik']}]({h['link']})")
 
-if aktif_sekme == SEKME_ADLARI[5]:
+with tabs[5]:
     st.subheader("📊 Korelasyon Haritası")
     st.write("Isı haritası oluşturmak için yeterli veri işleniyor...")
 
-if aktif_sekme == SEKME_ADLARI[6]:
+with tabs[6]:
     st.subheader("⚙️ Strateji Testi (Backtest)")
     bt = backtest_motoru(df)
-    st.line_chart(bt[['Piyasa_Kumulatif', 'Strateji_Kumulatif']], key='backtest_cizgisi')
+    st.line_chart(bt[['Piyasa_Kumulatif', 'Strateji_Kumulatif']])
 
-if aktif_sekme == SEKME_ADLARI[7]:
+with tabs[7]:
     st.subheader("🎲 Monte Carlo Risk Simülasyonu")
-    if st.button("Simülasyon Çiz", key="btn_monte_carlo"):
-        st.line_chart(monte_carlo_simulasyonu(df), key='monte_carlo_cizgisi')
+    if st.button("Simülasyon Çiz"):
+        st.line_chart(monte_carlo_simulasyonu(df))
 
-if aktif_sekme == SEKME_ADLARI[8]:
+with tabs[8]:
     st.subheader("🧬 İstatistik")
     stats = python_istatistik_analizi(df)
     st.write(stats)
 
 # --- SEKME 9: YAPAY ZEKA ---
 # --- SEKME 9: YAPAY ZEKA ---
-if aktif_sekme == SEKME_ADLARI[9]:
+with tabs[9]:
     st.subheader("🧠 v100 AI Ensemble & Kurumsal Karar Motoru")
     
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
@@ -2902,7 +2800,7 @@ if aktif_sekme == SEKME_ADLARI[9]:
             height=320
         )
 
-        st.plotly_chart(fig, use_container_width=True, key="coklu_zaman_guven_grafigi")
+        st.plotly_chart(fig, use_container_width=True)
     c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
     
     with c1:
@@ -2957,19 +2855,19 @@ if aktif_sekme == SEKME_ADLARI[9]:
                     yaxis=dict(autorange="reversed")
                 )
 
-                st.plotly_chart(fig_imp, use_container_width=True, key="feature_importance_grafigi")
+                st.plotly_chart(fig_imp, use_container_width=True)
 
             else:
                 st.warning("Öznitelik ağırlıkları hesaplanamadı.")
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
-if aktif_sekme == SEKME_ADLARI[10]:
+with tabs[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
     tahminleri_degerlendir()
     st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")
     
     try:
-        conn = db_connect()
+        conn = sqlite3.connect('hisse_hafiza.db')
         # Tablo yoksa hata almamak için kontrol
         try:
             gecmis_df = pd.read_sql_query("SELECT * FROM tahminler ORDER BY tarih DESC", conn)
@@ -2991,23 +2889,3 @@ if aktif_sekme == SEKME_ADLARI[10]:
             st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
     except Exception as e:
         st.error(f"Veritabanı erişim hatası: {e}")
-    istat = ai_performans_istatistikleri()
-
-    st.subheader("📈 AI Performans Özeti")
-
-    c1,c2,c3 = st.columns(3)
-
-    c1.metric("Toplam Tahmin",istat["toplam"])
-
-    c2.metric("Ortalama Güven",f"%{istat['ortalama_guven']}")
-
-    c3.metric("Ortalama Beklenen Getiri",f"%{istat['ortalama_getiri']}")
-    c1,c2,c3 = st.columns(3)
-
-    c1.metric("AL",istat["al"])
-
-    c2.metric("SAT",istat["sat"])
-
-    c3.metric("BEKLE",istat["bekle"])
-
-

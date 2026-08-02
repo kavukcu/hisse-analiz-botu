@@ -1314,7 +1314,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     return study.best_params
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
-    
+    df.dropna(inplace=True)
     try:
         t_df = df.copy()
         

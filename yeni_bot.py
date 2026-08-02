@@ -2958,4 +2958,50 @@ with tabs[9]:
 # --- YENİ SEKME: AI BAŞARI KARNESİ ---
 # --- SEKME 10: AI BAŞARI KARNESİ ---
 with tabs[10]:
-    st.write("TEST")
+    st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
+    tahminleri_degerlendir()
+    st.markdown("Yapay zeka, geçmişteki tahminlerini güncel fiyatlarla kıyaslar. **Hata payı %5'in altındaki tahminler başarılı kabul edilir.**")
+    
+    try:
+        conn = db_connect()
+        # Tablo yoksa hata almamak için kontrol
+        try:
+            gecmis_df = pd.read_sql_query("SELECT * FROM tahminler ORDER BY tarih DESC", conn)
+        except:
+            st.warning("Veritabanı tablosu henüz oluşturulmamış.")
+            gecmis_df = pd.DataFrame()
+        conn.close()
+        
+        if not gecmis_df.empty:
+            st.dataframe(gecmis_df, use_container_width=True, hide_index=True)
+            
+            basarili_sayisi = len(gecmis_df[gecmis_df['durum'] == 'BAŞARILI ✅'])
+            degerlendirilen_sayisi = len(gecmis_df[gecmis_df['durum'] != 'BEKLİYOR'])
+            
+            if degerlendirilen_sayisi > 0:
+                basari_orani = (basarili_sayisi / degerlendirilen_sayisi) * 100
+                st.metric(label="Net Başarı Oranı", value=f"% {basari_orani:.1f}")
+        else:
+            st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
+    except Exception as e:
+        st.error(f"Veritabanı erişim hatası: {e}")
+    istat = ai_performans_istatistikleri()
+
+    st.subheader("📈 AI Performans Özeti")
+
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric("Toplam Tahmin",istat["toplam"])
+
+    c2.metric("Ortalama Güven",f"%{istat['ortalama_guven']}")
+
+    c3.metric("Ortalama Beklenen Getiri",f"%{istat['ortalama_getiri']}")
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric("AL",istat["al"])
+
+    c2.metric("SAT",istat["sat"])
+
+    c3.metric("BEKLE",istat["bekle"])
+
+

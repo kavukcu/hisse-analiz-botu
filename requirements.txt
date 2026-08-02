@@ -26,4 +26,4 @@ gym-anytrading
 stable-baselines3
 
 isyatirimhisse
-tvDatafeed
+git+https://github.com/rongardF/tvdatafeed.git

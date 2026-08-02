@@ -2586,8 +2586,8 @@ with tabs[1]:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
                 # -------------------------------------
                 
-                # st.dataframe(df_goster, use_container_width=True, hide_index=True)
-                # st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
+                st.dataframe(df_goster, use_container_width=True, hide_index=True)
+                st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
 
@@ -2749,118 +2749,161 @@ with tabs[8]:
 # --- SEKME 9: YAPAY ZEKA ---
 with tabs[9]:
     st.subheader("🧠 v100 AI Ensemble & Kurumsal Karar Motoru")
-    
+
+    # ============================
+    # AI Hesaplamaları
+    # ============================
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):
         ai_sonuc = ensemble_prediction(df)
         mtf = multi_timeframe_ai(hisse_kodu)
         meta = meta_ai_karari(mtf)
 
-        st.markdown("## 🤖 Meta AI")
+    # ============================
+    # META AI SONUCU
+    # ============================
+    c1, c2, c3 = st.columns(3)
 
-        c1, c2, c3 = st.columns(3)
+    c1.metric("Karar", meta["karar"])
+    c2.metric("Güven", f"%{meta['guven']:.1f}")
+    c3.metric("Ortalama Hedef", f"{meta['hedef']:.2f}")
 
-        c1.metric("Karar", meta["karar"])
+    st.markdown("### ⏰ Çoklu Zaman Dilimi AI")
 
-        c2.metric("Güven", f"%{meta['guven']}")
+    rows = [
+        {
+            "Zaman": tf,
+            "Karar": veri["signal"],
+            "Güven": veri["confidence"],
+            "Hedef": veri["rf_prediction"]
+        }
+        for tf, veri in mtf.items()
+    ]
 
-        c3.metric("Ortalama Hedef", f"{meta['hedef']:.2f}")
-        st.markdown("### ⏰ Çoklu Zaman Dilimi AI")
+    if rows:
 
-        rows = []
-
-        for tf, s in mtf.items():
-
-            rows.append({
-                "Zaman": tf,
-                "Karar": s["signal"],
-                "Güven": s["confidence"],
-                "Hedef": s["rf_prediction"]
-            })
+        df_rows = pd.DataFrame(rows)
 
         st.dataframe(
-            pd.DataFrame(rows),
-            use_container_width=True
+            df_rows,
+            use_container_width=True,
+            hide_index=True
         )
+
         fig = px.bar(
-            pd.DataFrame([
-                {
-                    "Zaman": k,
-                    "Güven": v["confidence"]
-                }
-                for k, v in mtf.items()
-            ]),
+            df_rows,
             x="Zaman",
             y="Güven",
             color="Güven",
-            text="Güven"
+            text="Güven",
+            color_continuous_scale="Viridis"
         )
 
         fig.update_layout(
             template="plotly_dark",
-            height=320
+            height=320,
+            showlegend=False,
+            xaxis_title="",
+            yaxis_title="Güven (%)"
         )
 
         st.plotly_chart(fig, use_container_width=True)
-    c1, c2 = st.columns([1, 2]) # 1'e 2 oranında sütunlar
-    
+
+    else:
+        st.warning("MTF verisi oluşturulamadı.")
+
+    st.divider()
+
+    # ============================
+    # AI SONUCU
+    # ============================
+    c1, c2 = st.columns([1, 2])
+
     with c1:
+
         st.metric("Yapay Zeka Kararı", ai_sonuc["signal"])
-        st.metric("Tahmini Hedef", f"{ai_sonuc['rf_prediction']} TL")
-        st.progress(int(ai_sonuc["confidence"]), text=f"Güven Skoru: %{ai_sonuc['confidence']}")
-        
-        st.markdown("---")
-        st.info("💡 **Nasıl Okunmalı?** Yandaki grafik, yapay zekanın hedef fiyatı belirlerken sağladığınız indikatörlerden hangilerine en çok dikkat ettiğini yüzdelik ağırlık olarak gösterir.")
-        
+
+        st.metric(
+            "Tahmini Hedef",
+            f"{ai_sonuc['rf_prediction']:.2f} TL"
+        )
+
+        st.progress(
+            int(ai_sonuc["confidence"]),
+            text=f"Güven Skoru: %{ai_sonuc['confidence']:.1f}"
+        )
+
+        st.info(
+            "💡 Sağdaki grafik, AI modelinin karar verirken "
+            "hangi indikatörleri daha fazla kullandığını gösterir."
+        )
+
     with c2:
-        # Öznitelik (Feature) grafiğinin çizilmesi
-        feature_importances = ai_sonuc.get("feature_importances", None)
 
-        if isinstance(feature_importances, np.ndarray) and feature_importances.size > 0:
-            # Verileri DataFrame'e çevirip küçükten büyüğe sıralıyoruz
-            feature_importances = ai_sonuc.get("feature_importances")
-            feature_names = ai_sonuc.get("feature_names")
+        feature_importances = ai_sonuc.get("feature_importances")
+        feature_names = ai_sonuc.get("feature_names")
 
-            if (
-                feature_importances is not None
-                and feature_names is not None
-                and len(feature_importances) > 0
-            ):
+        if (
+            isinstance(feature_importances, np.ndarray)
+            and feature_importances.size > 0
+            and feature_names is not None
+        ):
 
-                feature_importances = np.asarray(feature_importances)
+            imp_df = pd.DataFrame({
 
-                imp_df = pd.DataFrame({
-                    "İndikatör": feature_names[:len(feature_importances)],
-                    "Etki Oranı": feature_importances
-                })
+                "İndikatör": feature_names[:len(feature_importances)],
+                "Etki Oranı": feature_importances
 
-                imp_df = imp_df.sort_values("Etki Oranı", ascending=False)
+            })
 
-                fig_imp = px.bar(
-                    imp_df,
-                    x="Etki Oranı",
-                    y="İndikatör",
-                    orientation="h",
-                    title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
-                    text_auto=".1%",
-                    color="Etki Oranı",
-                    color_continuous_scale="Viridis"
-                )
+            imp_df = imp_df.sort_values(
+                "Etki Oranı",
+                ascending=False
+            )
 
-                fig_imp.update_layout(
-                    template="plotly_dark",
-                    height=350,
-                    margin=dict(l=0, r=0, t=40, b=0),
-                    xaxis_tickformat=".0%",
-                    showlegend=False,
-                    yaxis=dict(autorange="reversed")
-                )
+            fig_imp = px.bar(
 
-                st.plotly_chart(fig_imp, use_container_width=True)
+                imp_df,
 
-            else:
-                st.warning("Öznitelik ağırlıkları hesaplanamadı.")
-# --- YENİ SEKME: AI BAŞARI KARNESİ ---
-# --- SEKME 10: AI BAŞARI KARNESİ ---
+                x="Etki Oranı",
+
+                y="İndikatör",
+
+                orientation="h",
+
+                color="Etki Oranı",
+
+                color_continuous_scale="Viridis",
+
+                text_auto=".1%",
+
+                title="🤖 AI Kararında İndikatör Etkileri"
+
+            )
+
+            fig_imp.update_layout(
+
+                template="plotly_dark",
+
+                height=420,
+
+                showlegend=False,
+
+                xaxis_tickformat=".0%",
+
+                yaxis=dict(autorange="reversed")
+
+            )
+
+            st.plotly_chart(
+                fig_imp,
+                use_container_width=True
+            )
+
+        else:
+
+            st.warning(
+                "Öznitelik ağırlıkları hesaplanamadı."
+            )
 with tabs[10]:
     st.subheader("🧠 Yapay Zeka Öğrenme & Başarı Karnesi")
     tahminleri_degerlendir()

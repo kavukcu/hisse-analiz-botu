@@ -117,6 +117,41 @@ def veritabani_baslat():
         """)
 
         _kolonlari_tamamla(conn)
+def tahminleri_degerlendir():
+    """Bekleyen tahminleri değerlendirir."""
+    with db_connect() as conn:
+        bekleyenler = conn.execute("""
+            SELECT rowid, tarih, sembol, hedef_fiyat
+            FROM tahminler
+            WHERE durum='BEKLİYOR'
+        """).fetchall()
+
+        for rowid, tarih, sembol, hedef_fiyat in bekleyenler:
+            try:
+                df = veri_yukle(
+                    sembol,
+                    (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
+                    datetime.now().strftime("%Y-%m-%d")
+                )
+
+                if df.empty:
+                    continue
+
+                gercek = float(df["Close"].iloc[-1])
+
+                hata = abs(gercek - hedef_fiyat) / max(abs(gercek), 1e-9)
+
+                durum = "BAŞARILI ✅" if hata <= 0.05 else "BAŞARISIZ ❌"
+
+                conn.execute("""
+                    UPDATE tahminler
+                    SET gerceklesme_fiyati=?,
+                        durum=?
+                    WHERE rowid=?
+                """, (gercek, durum, rowid))
+
+            except Exception as e:
+                logging.warning(e)
 def tahmin_kaydet(sembol, hedef_fiyat):
     """Bugünün tahminlerini hafızaya yazar."""
     conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
@@ -1274,41 +1309,7 @@ def lstm_tahmin_yap(df, lookback_days=60):
 # ==========================================
 # 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
-def tahminleri_degerlendir():
-    """Bekleyen tahminleri değerlendirir."""
-    with db_connect() as conn:
-        bekleyenler = conn.execute("""
-            SELECT rowid, tarih, sembol, hedef_fiyat
-            FROM tahminler
-            WHERE durum='BEKLİYOR'
-        """).fetchall()
 
-        for rowid, tarih, sembol, hedef_fiyat in bekleyenler:
-            try:
-                df = veri_yukle(
-                    sembol,
-                    (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
-                    datetime.now().strftime("%Y-%m-%d")
-                )
-
-                if df.empty:
-                    continue
-
-                gercek = float(df["Close"].iloc[-1])
-
-                hata = abs(gercek - hedef_fiyat) / max(abs(gercek), 1e-9)
-
-                durum = "BAŞARILI ✅" if hata <= 0.05 else "BAŞARISIZ ❌"
-
-                conn.execute("""
-                    UPDATE tahminler
-                    SET gerceklesme_fiyati=?,
-                        durum=?
-                    WHERE rowid=?
-                """, (gercek, durum, rowid))
-
-            except Exception as e:
-                logging.warning(e)
 async def tek_hisse_getir(session, sem, hisse_kodu):
     """
     Tek bir hissenin verisini asenkron olarak çeker.

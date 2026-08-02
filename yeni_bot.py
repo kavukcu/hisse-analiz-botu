@@ -47,7 +47,10 @@ import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-
+import os
+import pytz
+import joblib
+from sklearn.linear_model import ElasticNet
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
@@ -74,14 +77,46 @@ oturum.headers.update({
 # VERİTABANI VE HAFIZA YÖNETİMİ
 # ==========================================
 def veritabani_baslat():
-    """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
-    conn = sqlite3.connect('hisse_hafiza.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
-                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
-    conn.commit()
-    conn.close()
 
+    with db_connect() as conn:
+
+        conn.execute("""
+
+        CREATE TABLE IF NOT EXISTS tahminler(
+
+            id INTEGER,
+
+            tarih TEXT,
+
+            sembol TEXT,
+
+            fiyat REAL,
+
+            hedef_fiyat REAL,
+
+            gerceklesme_fiyati REAL,
+
+            durum TEXT,
+
+            sinyal TEXT,
+
+            guven REAL,
+
+            beklenen_getiri REAL,
+
+            model TEXT,
+
+            sonuc5 REAL,
+
+            sonuc10 REAL,
+
+            sonuc20 REAL
+
+        )
+
+        """)
+
+        _kolonlari_tamamla(conn)
 def tahmin_kaydet(sembol, hedef_fiyat):
     """Bugünün tahminlerini hafızaya yazar."""
     conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
@@ -96,41 +131,49 @@ def tahmin_kaydet(sembol, hedef_fiyat):
     conn.commit()
     conn.close()
 
-def tahminleri_degerlendir():
-    """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar."""
-    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
-    c = conn.cursor()
-    c.execute("SELECT rowid, tarih, sembol, hedef_fiyat FROM tahminler WHERE durum = 'BEKLİYOR'")
-    bekleyenler = c.fetchall()
-    
-    for row in bekleyenler:
-        rowid, tarih_str, sembol, hedef_fiyat = row
-        kayit_tarihi = datetime.strptime(tarih_str, "%Y-%m-%d")
-        
-        # Eğer tahminin üzerinden 5 gün geçmişse kontrol et
-        if (datetime.now() - kayit_tarihi).days >= 5:
-            try:
-                # Güncel fiyatı çek
-                df = yf.download(sembol, period="1d", progress=False)
-                if not df.empty:
-                    gercek_fiyat = float(df['Close'].iloc[-1])
-                    
-                    # Hedef fiyat ile gerçek fiyat arasındaki sapmayı (hata payını) hesapla
-                    sapma_orani = abs(gercek_fiyat - hedef_fiyat) / gercek_fiyat
-                    
-                    # %5'lik bir yanılma payını başarılı kabul ediyoruz
-                    durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
-                    
-                    c.execute("UPDATE tahminler SET gerceklesme_fiyati = ?, durum = ? WHERE rowid = ?", 
-                              (gercek_fiyat, durum, rowid))
-            except Exception as e:
-                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
-                
-    conn.commit()
-    conn.close()
+DB_NAME="godmode_ai.db"
+LEGACY_DB_NAMES=("hisse_hafiza.db","ai_memory.db")
 
-# Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
-veritabani_baslat()
+def db_connect():
+
+    conn=sqlite3.connect(DB_NAME,timeout=10)
+
+    conn.execute("PRAGMA journal_mode=WAL")
+
+    conn.execute("PRAGMA busy_timeout=10000")
+
+    return conn
+def _kolonlari_tamamla(conn):
+
+    mevcut={r[1] for r in conn.execute("PRAGMA table_info(tahminler)")}
+
+    kolonlar={
+
+        "id":"INTEGER",
+
+        "fiyat":"REAL",
+
+        "sinyal":"TEXT",
+
+        "guven":"REAL",
+
+        "beklenen_getiri":"REAL",
+
+        "model":"TEXT",
+
+        "sonuc5":"REAL",
+
+        "sonuc10":"REAL",
+
+        "sonuc20":"REAL"
+
+    }
+
+    for k,v in kolonlar.items():
+
+        if k not in mevcut:
+
+            conn.execute(f"ALTER TABLE tahminler ADD COLUMN {k} {v}")
 def sembol_formatla(hisse_kodu):
     # Eğer gelen kodda '.IS' veya 'BIST:' varsa temizleyip ana sembolü (örneğin THYAO) bulalım
     ana_sembol = hisse_kodu.replace('.IS', '').replace('BIST:', '').strip().upper()
@@ -188,6 +231,13 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         if aktif_kaynak == "Yahoo Finance (yfinance)":
             for _ in range(2):
                 try:
+                    if end is not None:
+
+                        yf_end=(pd.to_datetime(end)+pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+                    else:
+
+                        end=yf_end
                     # Sadece yfinance formatına uygun orijinal ticker string'ini veriyoruz
                     df = yf.download(
                         ticker, 
@@ -383,7 +433,7 @@ def anomali_tespit_et(df):
     if son_durum == -1:
         return "⚠️ RİSKLİ: Fiyat/Hacim hareketlerinde anomali tespit edildi!"
     return "✅ Piyasaya uygun, normal hareket."
-def sihirli_formul_skorla(sembol):
+def sihirli_formul_skorla(sembol,df=None):
     """
     Şirketin temel çarpanlarını çeker ve hissenin 
     'ucuz', 'kârlı' ve 'güvenli' olup olmadığını 0-100 arası puanlar.
@@ -421,13 +471,32 @@ def sihirli_formul_skorla(sembol):
         if cari_oran is None: cari_oran = 0
         if cari_oran >= 1.5: skor += 25
         elif cari_oran >= 1.0: skor += 15
-        
+        if df is not None:
+
+            son=df.iloc[-1]
+
+            if son.get("Super_Sinyal",False):
+
+                skor+=20
+
+            elif son.get("Pozitif_Uyusmazlik",False):
+
+                skor+=10
+
+            if son.get("Wyckoff_Spring",False):
+
+                skor+=15
+
+            if son.get("Hacim_Patlamasi",False):
+
+                skor+=10
         return {'Puan': skor}
         
     except Exception as e:
         import logging
         logging.warning(f"[{sembol}] Temel veri puanlama hatası: {str(e)}")
         return {'Puan': 0}
+    
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()
@@ -472,8 +541,42 @@ def ileri_teknik_gostergeler(df):
     df_ta['Cam_L4'] = prev_close - (range_hl * 1.1 / 2)
 
     df_ta['Ichimoku_Trend'] = np.where(df_ta['Close'] > df_ta['Senkou_Span_A'], 
-                                       np.where(df_ta['Close'] > df_ta['Senkou_Span_B'], "GÜÇLÜ BOĞA", "NÖTR"), 
-                                       np.where(df_ta['Close'] < df_ta['Senkou_Span_B'], "GÜÇLÜ AYI", "NÖTR"))
+            np.where(df_ta['Close'] > df_ta['Senkou_Span_B'], "GÜÇLÜ BOĞA", "NÖTR"), 
+            np.where(df_ta['Close'] < df_ta['Senkou_Span_B'], "GÜÇLÜ AYI", "NÖTR"))
+    df_ta["SMA_5"]=df_ta["Close"].rolling(5).mean()
+
+    df_ta["SMA_8"]=df_ta["Close"].rolling(8).mean()
+
+    df_ta["SMA_13"]=df_ta["Close"].rolling(13).mean()
+
+    df_ta["EMA_5"]=df_ta["Close"].ewm(span=5,adjust=False).mean()
+
+    df_ta["EMA_8"]=df_ta["Close"].ewm(span=8,adjust=False).mean()
+
+    df_ta["EMA_13"]=df_ta["Close"].ewm(span=13,adjust=False).mean()
+
+    df_ta["EMA_52"]=df_ta["Close"].ewm(span=52,adjust=False).mean()
+
+    df_ta["EMA_89"]=df_ta["Close"].ewm(span=89,adjust=False).mean()
+
+    df_ta["EMA_144"]=df_ta["Close"].ewm(span=144,adjust=False).mean()
+
+    df_ta["Fibo_MA_Trend"]=np.where(
+
+        (df_ta["EMA_5"]>df_ta["EMA_8"])&(df_ta["EMA_8"]>df_ta["EMA_13"]),
+
+        "🚀 GÜÇLÜ YÜKSELİŞ",
+
+        np.where(
+
+            (df_ta["EMA_5"]<df_ta["EMA_8"])&(df_ta["EMA_8"]<df_ta["EMA_13"]),
+
+            "🔻 GÜÇLÜ DÜŞÜŞ",
+
+            "⚖️ YATAY"
+        )
+
+    )
     return df_ta
 
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):

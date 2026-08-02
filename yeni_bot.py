@@ -426,7 +426,8 @@ def sihirli_formul_skorla(sembol, df=None):
     try:
         info = sirket_bilgisi_getir(sembol)
         if not info:
-            return {'Puan': 0}
+            # 1. DÜZELTİLEN YER: Sadece puan değil, iki değer (boş bilgi ve 0 puan) dönmeli
+            return {}, 0 
             
         skor = 0
         
@@ -482,12 +483,14 @@ def sihirli_formul_skorla(sembol, df=None):
             if son_mum.get('Hacim_Patlamasi', False):
                 skor += 10
 
-        return {'Puan': skor}
+        # 2. DÜZELTİLEN YER: Hem 'info' (temel_bilgi değişkeni için) hem de 'skor' (temel_puan değişkeni için) dönmeli
+        return info, skor
         
     except Exception as e:
         import logging
         logging.warning(f"[{sembol}] Temel veri puanlama hatası: {str(e)}")
-        return {'Puan': 0}
+        # 3. DÜZELTİLEN YER: Hata durumunda da çökmemesi için iki değer dönmeli
+        return {}, 0
 def stokastik_hesapla(df, k_periyot=14, d_periyot=3):
     try:
         low_min = df['Low'].rolling(window=k_periyot).min()

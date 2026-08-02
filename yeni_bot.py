@@ -1433,7 +1433,7 @@ def ensemble_prediction(df, sembol="Genel"):
             'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen', 'Alcalan_Ucgen', 
             'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 'Dip_Uzakligi_Z', 
             'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru', 'Cross_Sinyali', 
-            'SMA_50_200_Farki', 'ABCD_Formasyonu',
+            'SMA_50_200_Farki', 'ABCD_Formasyonu', 'F_K', 'PD_DD', 'ROE', 'Cari_Oran', 'Temel_Skor', 
             'XU100_Return', 'XU100_Trend'
         ]
         
@@ -1648,9 +1648,31 @@ def ensemble_prediction(df, sembol="Genel"):
         return {"rf_prediction": 0.0, "signal": f"Hata: {e}", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def gelismis_ai_tahmin(df, gelecek_gun=10):
+def gelismis_ai_tahmin(df, gelecek_gun=10, temel_veriler=None, temel_skor=0):
     try:
         df_ml = df.copy()
+        
+        # --- 1. ADIM: Temel Analiz Verilerini Dahil Etme ---
+        if temel_veriler is None:
+            temel_veriler = {}
+            
+        fk = float(temel_veriler.get('F/K', 0))
+        pd_dd = float(temel_veriler.get('PD/DD', 0))
+        roe = float(temel_veriler.get('ROE', 0))
+        cari_oran = float(temel_veriler.get('Cari_Oran', 0))
+        
+        # Temel verileri DataFrame'e ekliyoruz
+        df_ml['F_K'] = fk
+        df_ml['PD_DD'] = pd_dd
+        df_ml['ROE'] = roe
+        df_ml['Cari_Oran'] = cari_oran
+        df_ml['Temel_Skor'] = temel_skor
+        
+        # Boş ve sonsuz değerleri temizliyoruz
+        df_ml.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df_ml.fillna(0, inplace=True)
+
+        # --- Teknik Metrikler ---
         df_ml['Return'] = df_ml['Close'].pct_change()
         df_ml['Log_Return'] = np.log(df_ml['Close'] / df_ml['Close'].shift(1))
         df_ml['SMA_10_Dist'] = df_ml['Close'] / df_ml['Close'].rolling(10).mean() - 1
@@ -1662,7 +1684,12 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
             son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
             return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
 
-        features = ['Close', 'Volume', 'Log_Return', 'SMA_10_Dist', 'Volatilite_14']
+        # --- 2. ADIM: Özellik (Features) Listesine Temel Verileri Ekleme ---
+        features = [
+            'Close', 'Volume', 'Log_Return', 'SMA_10_Dist', 'Volatilite_14',
+            'F_K', 'PD_DD', 'ROE', 'Cari_Oran', 'Temel_Skor'  # Temel Analiz Sütunları
+        ]
+        
         X = df_ml[features].values
         y = df_ml['Target'].values
 
@@ -1675,19 +1702,17 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
         tahminler = []
         son_veri = X_scaled[-1].reshape(1, -1)
         
-        # 1. Döngüye girmeden ÖNCE geçmiş kapanış verilerini hafızaya alıyoruz
         gecmis_kapanislar = df_ml['Close'].tail(20).tolist()
         
-        # 2. Çok adımlı dinamik tahmin döngüsü
+        # Çok adımlı dinamik tahmin döngüsü
         for _ in range(gelecek_gun):
             pred = float(model.predict(son_veri)[0])
             tahminler.append(pred)
             
-            # Kapanış listesini yeni tahminle güncelle
             gecmis_kapanislar.append(pred)
-            gecmis_kapanislar = gecmis_kapanislar[-20:]  # Son 20 günü tut
+            gecmis_kapanislar = gecmis_kapanislar[-20:]
             
-            # İndikatörleri yeni tahmine göre dinamik hesapla
+            # Teknik göstergelerin dinamik hesabı
             yeni_log_ret = np.log(gecmis_kapanislar[-1] / gecmis_kapanislar[-2])
             yeni_sma_10 = np.mean(gecmis_kapanislar[-10:])
             yeni_sma_10_dist = (gecmis_kapanislar[-1] / yeni_sma_10) - 1
@@ -1695,11 +1720,17 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
             getiriler = [np.log(gecmis_kapanislar[i] / gecmis_kapanislar[i-1]) for i in range(1, len(gecmis_kapanislar))]
             yeni_vol = np.std(getiriler[-14:]) if len(getiriler) >= 14 else np.std(getiriler)
             
-            # Yeni veriyi ölçeklendirip (Scaler) bir sonraki gün için hazırlar
-            yeni_ham_veri = np.array([[pred, son_veri[0, 1], yeni_log_ret, yeni_sma_10_dist, yeni_vol]])
+            # --- 3. ADIM: Gelecek Günler İçin Temel Verileri Sabit Tutup Diziye Ekleme ---
+            yeni_ham_veri = np.array([[
+                pred, 
+                son_veri[0, 1],  # Hacim (Volume) sabit tutuluyor
+                yeni_log_ret, 
+                yeni_sma_10_dist, 
+                yeni_vol,
+                fk, pd_dd, roe, cari_oran, temel_skor  # Temel analiz verileri her gün için ekleniyor
+            ]])
+            
             son_veri = scaler.transform(yeni_ham_veri)            
-            
-            
             
         tarihler = [df.index[-1] + timedelta(days=i) for i in range(1, gelecek_gun + 1)]
         return tarihler, tahminler
@@ -1707,8 +1738,6 @@ def gelismis_ai_tahmin(df, gelecek_gun=10):
     except Exception:
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
-
-
 def rl_ajani_egit(df):
     """
     Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.
@@ -1807,6 +1836,23 @@ def lstm_tahmin_yap(df, lookback_days=60):
         print(f"LSTM Çalıştırılamadı: {e}")
         return None
 
+
+def temel_verileri_temizle(df):
+    """
+    Temel analiz sütunlarındaki eksik (NaN) veya sonsuz (inf) değerleri temizler.
+    """
+    df_temiz = df.copy()
+    temel_sutunlar = ['F_K', 'PD_DD', 'ROE', 'Cari_Oran', 'Temel_Skor']
+
+    # Boş değerleri 0 ile doldur
+    for sutun in temel_sutunlar:
+        if sutun in df_temiz.columns:
+            df_temiz[sutun] = df_temiz[sutun].fillna(0)
+
+    # Sonsuz değerleri (inf, -inf) 0 ile değiştir
+    df_temiz.replace([np.inf, -np.inf], 0, inplace=True)
+    
+    return df_temiz
 # ==========================================
 # 4. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
@@ -2174,9 +2220,20 @@ with tabs[0]:
         fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
     if goster_ai:
-        tarihler, tahminler = gelismis_ai_tahmin(df, gelecek_gun=30)
-        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)
-
+        # 1. Önce Sihirli Formül (Temel Analiz) verilerini hesaplıyoruz
+        # (Not: 'hisse' veya 'hisse_kodu' değişkeni bu sayfanın üst kısımlarında tanımlanmış olmalı)
+        temel_bilgi, temel_puan = sihirli_formul_skorla(hisse_kodu) 
+        
+        # 2. Fonksiyonu güncellenmiş parametrelerle çağırıyoruz
+        tarihler, tahminler = gelismis_ai_tahmin(
+            df=df, 
+            gelecek_gun=30, 
+            temel_veriler=temel_bilgi, 
+            temel_skor=temel_puan
+        )
+        
+        # 3. Sonuçları grafiğe çizdiriyoruz
+        fig.add_trace(go.Scatter(x=tarihler, y=tahminler, mode='lines', name="XGBoost AI (Temel+Teknik)", line=dict(color='cyan', width=3, dash='dot')), row=1, col=1)
     # MACD ve Stoch Çizimleri
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD", line=dict(color='#2962FF')), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name="Sinyal", line=dict(color='#FF6D00')), row=2, col=1)

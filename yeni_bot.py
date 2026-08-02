@@ -16,7 +16,6 @@ session.headers.update({
 import concurrent.futures
 import logging
 import os
-from datetime import datetime
 import pytz
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
@@ -28,7 +27,6 @@ from sklearn.model_selection import TimeSeriesSplit
 from xgboost import XGBRegressor
 import sqlite3
 import joblib
-import os
 import optuna
 from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
@@ -161,7 +159,6 @@ print(f"İş Yatırım için: {semboller['isyatirim']}")
 import time as tm
 import yfinance as yf
 import pandas as pd
-import logging
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
 
@@ -1314,37 +1311,21 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     return study.best_params
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
-    df.dropna(inplace=True)
     try:
+        # 🟢 DÜZELTME: Orijinal dataframe'i bozmamak için doğrudan kopyalıyoruz
         t_df = df.copy()
         
         # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        
-        # 🌟 YENİ: YAPAY ZEKA FORMASYON TANIMA SİSTEMİ 🌟
         t_df = yapay_zeka_icin_formasyon_bul(t_df)
-        
-        if 'Stoch_K' not in t_df.columns:
-            low_min = t_df['Low'].rolling(window=14).min()
-        # --- 1. Veri Hazırlığı ve Feature Engineering ---
-        
-        # 🌟 MUM FORMASYONLARI 🌟
-        t_df = yapay_zeka_icin_formasyon_bul(t_df)
-        t_df = yapay_zeka_icin_formasyon_bul(t_df)
-        t_df = makro_formasyonlari_bul(t_df, window=20)
-        # 🌟 GRAFİK (MAKRO) FORMASYONLARI 🌟
         t_df = makro_formasyonlari_bul(t_df, window=20)
         t_df = trend_ve_harmonik_bul(t_df)
+        
         if 'Stoch_K' not in t_df.columns:
             low_min = t_df['Low'].rolling(window=14).min()
             high_max = t_df['High'].rolling(window=14).max()
             t_df['Stoch_K'] = 100 * ((t_df['Close'] - low_min) / (high_max - low_min + 1e-9))
             
-        # 1. Stoch_D (Sinyal Çizgisi) Hesaplaması (%K'nın 3 günlük ortalaması)
         t_df['Stoch_D'] = t_df['Stoch_K'].rolling(window=3).mean()
-
-        # 2. Kesişim ve Momentum Farkı (%K - %D)
         t_df['Stoch_Diff'] = t_df['Stoch_K'] - t_df['Stoch_D']
         
         t_df['Tilson_T3'] = tilson_t3(t_df['Close'])
@@ -1374,51 +1355,43 @@ def ensemble_prediction(df, sembol="Genel"):
 
         t_df['Target_Return'] = ((t_df['Close'].shift(-5) - t_df['Close']) / t_df['Close']) * 100
 
-        # --- YENİ: ZAMAN SERİSİ HAFIZASI (Lag Features) ---
-        # Modelin son 3 günün hafızasını tutması için geçmiş verileri ekliyoruz
+        # Hafıza Verileri
         t_df['Return_1d'] = t_df['Close'].pct_change(1)
         t_df['Return_2d'] = t_df['Close'].pct_change(2)
         t_df['Return_3d'] = t_df['Close'].pct_change(3)
-        
         t_df['Vol_Lag1'] = t_df['Vol_Change'].shift(1)
         t_df['Vol_Lag2'] = t_df['Vol_Change'].shift(2)
         
-        # Yeni 'Hafıza' verileri (Return_X ve Vol_LagX) eğitim matrisine eklendi
-        # 3. Güncellenmiş Öznitelik (Features) Listesi
-        # --- 5, 8, 13 EMA HESAPLAMALARI VE YAPAY ZEKA MANTIĞI ---
+        # EMA
         t_df['EMA_5'] = t_df['Close'].ewm(span=5, adjust=False).mean()
         t_df['EMA_8'] = t_df['Close'].ewm(span=8, adjust=False).mean()
         t_df['EMA_13'] = t_df['Close'].ewm(span=13, adjust=False).mean()
         
-        # ML modelleri fiyatın kendisi yerine, fiyata olan oransal mesafeyi çok daha iyi öğrenir:
         t_df['EMA_5_Dist'] = (t_df['Close'] - t_df['EMA_5']) / t_df['Close'].replace(0, 0.0001)
         t_df['EMA_8_Dist'] = (t_df['Close'] - t_df['EMA_8']) / t_df['Close'].replace(0, 0.0001)
         t_df['EMA_13_Dist'] = (t_df['Close'] - t_df['EMA_13']) / t_df['Close'].replace(0, 0.0001)
         
-        # Yapay zekanın "Altın Kesişim (Golden Cross)" mantığını yakalaması için sinyal:
         t_df['Trend_5_8'] = np.where(t_df['EMA_5'] > t_df['EMA_8'], 1, -1)
         t_df['Trend_8_13'] = np.where(t_df['EMA_8'] > t_df['EMA_13'], 1, -1)
 
-        # 3. Güncellenmiş Öznitelik (Features) Listesi
-        features = [
+        # Ham Öznitelik Listesi
+        raw_features = [
             'RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 
             'Vol_Change', 'EMA_Trend', 'Stoch_K', 'Stoch_D', 'Stoch_Diff',
             'Tilson_Dist', 'Return_1d', 'Return_2d', 'Return_3d', 
-            'Vol_Lag1', 'Vol_Lag2',
-            'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13',
-            # 👇 YENİ EKLENEN FORMASYON ÖZNİTELİKLERİ 👇
-            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', 'EMA_21', 'EMA_34', 'EMA_52', 'EMA_89', 'EMA_144', 'Destege_Uzaklik', 'Dirence_Uzaklik', 
-           # Mikro Mum Formasyonları
-            # Makro Grafik Formasyonları (YENİ)
-            'Ikili_Tepe', 'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen',
-            'Alcalan_Ucgen', 'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 
-            'Dip_Uzakligi_Z', 'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru',
-            # 👇 YENİ: Harmonik ve Dev Trend Kesişimleri 👇
-            'Cross_Sinyali', 'SMA_50_200_Farki', 'ABCD_Formasyonu'
+            'Vol_Lag1', 'Vol_Lag2', 'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 
+            'Trend_5_8', 'Trend_8_13', 'Doji', 'P_Engulfing', 'P_Pinbar', 
+            'AI_Formasyon_Skoru', 'EMA_21', 'EMA_34', 'EMA_52', 'EMA_89', 
+            'EMA_144', 'Destege_Uzaklik', 'Dirence_Uzaklik', 'Ikili_Tepe', 
+            'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen', 'Alcalan_Ucgen', 
+            'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 'Dip_Uzakligi_Z', 
+            'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru', 'Cross_Sinyali', 
+            'SMA_50_200_Farki', 'ABCD_Formasyonu'
         ]
-       
-        # ----------------------------------------------------------------------------
         
+        # Sadece tabloda var olan özellikleri güvenli şekilde filtreliyoruz
+        features = [f for f in raw_features if f in t_df.columns]
+       
         t_df.replace([np.inf, -np.inf], np.nan, inplace=True)
         t_df[features] = t_df[features].ffill().bfill().fillna(0)
         ml_df = t_df.dropna(subset=['Target_Return'])
@@ -1426,90 +1399,59 @@ def ensemble_prediction(df, sembol="Genel"):
         if len(ml_df) < 50:
             return {"rf_prediction": float(t_df['Close'].iloc[-1]), "signal": "VERİ YETERSİZ", "confidence": 50.0, "expected_return_pct": 0.0, "feature_importances": {}}
 
-        # --- 2. OPTUNA VE YAPAY ZEKA MODELLEME ---
         X = ml_df[features].values
         y = ml_df['Target_Return'].values
         son_veri = t_df[features].iloc[-1].values.reshape(1, -1)
 
-        best_xgb_params = en_iyi_xgb_parametrelerini_bul(sembol, X, y)
-
-        # Diğer modellerin tanımlandığı yer...
-        # Diğer modellerin tanımlandığı yer...
-        model_xgb = XGBRegressor(**best_xgb_params, random_state=42, n_jobs=-1)
-        model_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
-        model_svr = Pipeline([
-            ('scaler', StandardScaler()),
-            ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))
-        ])
-        
-        # Gradient Boosting modelini tanımlıyoruz
-        model_gb = GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)
-
-        # YENİ: Ridge modelini standartlaştırma (scaler) ile tanımlıyoruz
-        model_ridge = Pipeline([
-            ('scaler', StandardScaler()),
-            ('ridge', Ridge(alpha=1.0))
-        ])
-
-        # YENİ: gb ve ridge'i de oylamaya (VotingRegressor) ekliyoruz
-        ensemble = VotingRegressor(estimators=[
-            ('xgb', model_xgb),
-            ('rf', model_rf),
-            ('svr', model_svr),
-            ('gb', model_gb),
-            ('ridge', model_ridge)
-        ])
-
-
-        # YENİ: gb ve ridge'i de oylamaya (VotingRegressor) ekliyoruz
-        ensemble = VotingRegressor(estimators=[
-            ('xgb', model_xgb),
-            ('rf', model_rf),
-            ('svr', model_svr),
-            ('gb', model_gb),
-            ('ridge', model_ridge)
-        ])
-
-        # AŞAĞIDAKİ TEK SATIRLIK fit İŞLEMİNİ SİLİYORUZ
-        # ensemble.fit(X, y) 
-
-        # YERİNE BU YAPIYI EKLİYORUZ (Öğrenmeyi Diske Kaydetme Mantığı):
+        # --- MODEL YÜKLEME VEYA EĞİTME BLOĞU ---
         model_klasoru = "ai_modeller"
         os.makedirs(model_klasoru, exist_ok=True)
         model_dosyasi = os.path.join(model_klasoru, f"{sembol}_ai_model.pkl")
 
-        # Eğer model daha önce eğitilip kaydedilmişse, hafızadan yükle
+        def model_egit_ve_kaydet():
+            # Optuna aramasını sadece model eğitilirken yapıyoruz (Yüksek Hız Kazancı)
+            best_xgb_params = en_iyi_xgb_parametrelerini_bul(sembol, X, y)
+            
+            m_xgb = XGBRegressor(**best_xgb_params, random_state=42, n_jobs=-1)
+            m_rf = RandomForestRegressor(n_estimators=100, max_depth=4, random_state=42, n_jobs=-1)
+            m_svr = Pipeline([('scaler', StandardScaler()), ('svr', SVR(C=1.5, epsilon=0.1, kernel='rbf'))])
+            m_gb = GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)
+            m_ridge = Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))])
+
+            ens = VotingRegressor(estimators=[
+                ('xgb', m_xgb), ('rf', m_rf), ('svr', m_svr), 
+                ('gb', m_gb), ('ridge', m_ridge)
+            ])
+            ens.fit(X, y)
+            joblib.dump(ens, model_dosyasi)
+            return ens
+
         if os.path.exists(model_dosyasi):
             try:
                 ensemble = joblib.load(model_dosyasi)
+                # Özellik sayısı değişmişse veya model bozuksa yeniden eğit
+                if not hasattr(ensemble, "n_features_in_") or ensemble.n_features_in_ != X.shape[1]:
+                    ensemble = model_egit_ve_kaydet()
             except Exception:
-                # Dosya bozuksa yeniden eğit ve kaydet
-                ensemble.fit(X, y)
-                joblib.dump(ensemble, model_dosyasi)
+                ensemble = model_egit_ve_kaydet()
         else:
-            # İlk kez tarama yapıyorsa sıfırdan öğren ve kaydet
-            ensemble.fit(X, y)
-            joblib.dump(ensemble, model_dosyasi)
+            ensemble = model_egit_ve_kaydet()
 
-        # --- 3. ÇIKARIM VE KARAR ---
+        # --- 3. TAHMİN VE KARAR ---
         beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
-        
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
         
-        # ---------------------------------------------------------
-        # YENİ: GRAFİK OKUMA VE ZAYIF AI KARARI KURTARMA
-        # ---------------------------------------------------------
-        makro_skor = int(t_df['Makro_Guc_Skoru'].iloc[-1])
-        mikro_skor = int(t_df['AI_Formasyon_Skoru'].iloc[-1])
+        # Grafik Okuma
+        makro_skor = int(t_df['Makro_Guc_Skoru'].iloc[-1]) if 'Makro_Guc_Skoru' in t_df.columns else 0
+        mikro_skor = int(t_df['AI_Formasyon_Skoru'].iloc[-1]) if 'AI_Formasyon_Skoru' in t_df.columns else 0
         grafik_okuma_skoru = makro_skor + mikro_skor
         
-        # AI'ın kendi tahmini çok zayıfsa (Örn: Beklenen getiri %1.5'tan küçükse veya Güven < 65)
         if abs(beklenen_getiri_pct) < 1.5 or guven_skoru < 65:
             if grafik_okuma_skoru >= 2:
                 sinyal = "🟢 TEKNİK AL (Formasyon Keşfi)"
-                beklenen_getiri_pct = 3.0 + grafik_okuma_skoru # Formasyon bazlı manuel getiri hedefi
+                beklenen_getiri_pct = 3.0 + grafik_okuma_skoru
                 guven_skoru = 70.0
                 hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
             elif grafik_okuma_skoru <= -2:
@@ -1522,35 +1464,40 @@ def ensemble_prediction(df, sembol="Genel"):
         else:
             sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct >= 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
 
-        # ---------------------------------------------------------
-        # YENİ: HEDEFİN KAÇ GÜNDE GELECEĞİNİ HESAPLAMA
-        # ---------------------------------------------------------
-        # Fiyatın günlük ortalama ne kadar hareket ettiğini bul (ATR Yüzdesi)
         gunluk_atr_pct = (t_df['ATR'].iloc[-1] / anlik_fiyat) * 100
-        
         if beklenen_getiri_pct > 0 and gunluk_atr_pct > 0:
-            # Tahmini gün = Hedeflenen Getiri / Hissenin Günlük Hızı
             tahmini_gun = int(np.ceil(beklenen_getiri_pct / gunluk_atr_pct))
-            tahmini_gun = max(1, min(tahmini_gun, 15)) # 1 ile 15 gün arasına sınırla
+            tahmini_gun = max(1, min(tahmini_gun, 15))
             hedef_sure_metni = f"{tahmini_gun} ile {tahmini_gun + 3} gün içinde"
         else:
             hedef_sure_metni = "Belirsiz"
 
-        # Orijinal eğitim (shift-5) sebebiyle baz alınan süreyi de ekliyoruz
         if "AL" in sinyal:
             ai_karar_metni = f"{sinyal} (Hedef %{beklenen_getiri_pct:.1f} | Süre: {hedef_sure_metni})"
         else:
             ai_karar_metni = sinyal
 
+        # --- Ensemble Modellerinin Ortak Öznitelik Ağırlıklarını Hesaplama ---
+        oznitelik_agirliklari = {}
         try:
-            f_importances = ensemble.named_estimators_['xgb'].feature_importances_
-            oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, f_importances)}
+            importances_list = []
+            if hasattr(ensemble, 'named_estimators_'):
+                for est_name in ['xgb', 'rf', 'gb']:
+                    if est_name in ensemble.named_estimators_:
+                        est = ensemble.named_estimators_[est_name]
+                        if hasattr(est, 'feature_importances_'):
+                            importances_list.append(est.feature_importances_)
+            
+            if importances_list:
+                # Modellerin ortak ortalamasını al
+                avg_importances = np.mean(importances_list, axis=0)
+                oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, avg_importances) if imp > 0}
         except Exception:
-            oznitelik_agirliklari = {}
+            pass
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
-            "signal": ai_karar_metni, # Artık süre tahminini de barındırıyor
+            "signal": ai_karar_metni,
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
             "feature_importances": oznitelik_agirliklari,
@@ -1560,7 +1507,7 @@ def ensemble_prediction(df, sembol="Genel"):
     except Exception as e:
         import logging
         logging.error(f"AI Ensemble Hatası: {e}")
-        return {"rf_prediction": 0.0, "signal": "Hata", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
+        return {"rf_prediction": 0.0, "signal": f"Hata: {e}", "confidence": 0.0, "expected_return_pct": 0.0, "feature_importances": {}}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10):

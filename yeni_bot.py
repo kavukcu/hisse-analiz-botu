@@ -609,7 +609,17 @@ def grafik_formasyon_bul(df, window=10, tolerans=0.03):
         return ikili_tepeler, ikili_dipler
     except:
         return [], []
+def yapay_zeka_icin_formasyon_bul(df):
 
+    df=df.copy()
+
+    df["Bullish_Engulfing_AI"]=0
+
+    df["Bearish_Engulfing_AI"]=0
+
+    df["Hammer_AI"]=0
+
+    return df
 def mum_formasyonlarini_bul(df):
     df_f = df.copy()
     govde = abs(df_f['Close'] - df_f['Open'])
@@ -1264,6 +1274,41 @@ def lstm_tahmin_yap(df, lookback_days=60):
 # ==========================================
 # 3. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
+def tahminleri_degerlendir():
+    """Bekleyen tahminleri değerlendirir."""
+    with db_connect() as conn:
+        bekleyenler = conn.execute("""
+            SELECT rowid, tarih, sembol, hedef_fiyat
+            FROM tahminler
+            WHERE durum='BEKLİYOR'
+        """).fetchall()
+
+        for rowid, tarih, sembol, hedef_fiyat in bekleyenler:
+            try:
+                df = veri_yukle(
+                    sembol,
+                    (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
+                    datetime.now().strftime("%Y-%m-%d")
+                )
+
+                if df.empty:
+                    continue
+
+                gercek = float(df["Close"].iloc[-1])
+
+                hata = abs(gercek - hedef_fiyat) / max(abs(gercek), 1e-9)
+
+                durum = "BAŞARILI ✅" if hata <= 0.05 else "BAŞARISIZ ❌"
+
+                conn.execute("""
+                    UPDATE tahminler
+                    SET gerceklesme_fiyati=?,
+                        durum=?
+                    WHERE rowid=?
+                """, (gercek, durum, rowid))
+
+            except Exception as e:
+                logging.warning(e)
 async def tek_hisse_getir(session, sem, hisse_kodu):
     """
     Tek bir hissenin verisini asenkron olarak çeker.
@@ -1928,12 +1973,12 @@ with tabs[9]:
             
             # Plotly ile yatay bar grafiği
             fig_imp = px.bar(imp_df, x="Etki Oranı", y="İndikatör", orientation='h', 
-                             title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
-                             text_auto='.2%', # Çubukların üzerine yüzde yazdırır
-                             color="Etki Oranı", color_continuous_scale="Viridis")
+             title="🤖 Karar Verirken Hangi Verilere Odaklandı?",
+            text_auto='.2%', # Çubukların üzerine yüzde yazdırır
+            color="Etki Oranı", color_continuous_scale="Viridis")
             
             fig_imp.update_layout(template="plotly_dark", height=350, margin=dict(l=0, r=0, t=40, b=0),
-                                  xaxis_tickformat='.0%', showlegend=False)
+                xaxis_tickformat='.0%', showlegend=False)
             
             st.plotly_chart(fig_imp, use_container_width=True)
         else:

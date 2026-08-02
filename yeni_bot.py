@@ -2840,10 +2840,11 @@ with tabs[8]:
     st.subheader("🧬 İstatistik")
     stats = python_istatistik_analizi(df)
     st.write(stats)
-
-# --- SEKME 9: YAPAY ZEKA ---
-# --- SEKME 9: YAPAY ZEKA ---
 with tabs[9]:
+    st.write("AI TEST")
+# --- SEKME 9: YAPAY ZEKA ---
+# --- SEKME 9: YAPAY ZEKA ---
+# with tabs[9]:
     st.subheader("🧠 v100 AI Ensemble & Kurumsal Karar Motoru")
     
     with st.spinner("Yapay Zeka Kararı Hesaplanıyor..."):

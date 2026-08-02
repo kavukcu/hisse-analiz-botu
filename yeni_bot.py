@@ -39,7 +39,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout
+from keras.layers import LSTM, Dropout, Dense, Input
 from sklearn.preprocessing import MinMaxScaler
 import gymnasium as gym
 import gym_anytrading
@@ -55,6 +55,7 @@ import tensorflow as tf
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
+import keras.backend as K
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
@@ -1709,7 +1710,7 @@ def gelismis_ai_tahmin(df, gelecek_gun=10, temel_veriler=None, temel_skor=0):
         
         # Çok adımlı dinamik tahmin döngüsü
         for _ in range(gelecek_gun):
-            pred = float(model.predict(son_veri)[0])
+            pred = model.predict(son_veri).item()
             tahminler.append(pred)
             
             gecmis_kapanislar.append(pred)
@@ -1815,7 +1816,8 @@ def lstm_tahmin_yap(df, lookback_days=60):
 
         # Model Mimarisi
         model = Sequential([
-            LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+            Input(shape=(X_train.shape[1], X_train.shape[2])), # Açıkça Input katmanı eklendi
+            LSTM(50, return_sequences=True), # input_shape buradan kaldırıldı
             Dropout(0.2),
             LSTM(50, return_sequences=False),
             Dropout(0.2),
@@ -1832,8 +1834,9 @@ def lstm_tahmin_yap(df, lookback_days=60):
         
         tahmin_olcekli = model.predict(X_test, verbose=0)
         gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
+        K.clear_session()
+        pred = model.predict(son_veri).item()
         
-        return float(gercek_tahmin[0][0])
         
     except Exception as e:
         print(f"LSTM Çalıştırılamadı: {e}")

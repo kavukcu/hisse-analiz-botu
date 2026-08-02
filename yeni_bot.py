@@ -884,7 +884,15 @@ def dipten_donus_analizi(df):
             df_dip.loc[yeni_idx:, 'Stokastik_Uyumsuzluk'] = stoch_uyum
             df_dip.loc[yeni_idx:, 'Pozitif_Uyusmazlik'] = herhangi_uyum
             df_dip.loc[yeni_idx:, 'Super_Sinyal'] = super_sinyal
-
+            destek = df_dip['Low'].rolling(window=20).min()
+            destege_yakinlik = (df_dip['Close'] - destek) / df_dip['Close']
+    
+            df_dip['Kesin_Dip_Donusu'] = (
+                (df_dip['RSI'] < 40) & 
+                (df_dip['Hacim_Patlamasi'] | df_dip['Wyckoff_Spring']) & 
+                (df_dip['Super_Sinyal'] | df_dip['Pozitif_Uyusmazlik']) &
+                (destege_yakinlik < 0.03) # Desteğe maksimum %3 uzaklıkta
+    )
     return df_dip
 # --- MEVCUT KODUNUZ (BUNA KESİNLİKLE DOKUNMUYORUZ) ---
 def backtest_motoru(df, kisa_periyot=20, uzun_periyot=50):
@@ -1226,20 +1234,22 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             except Exception:
                 s_skor = 0
             
+            kesin_dip_mi = temp_4h.get('Kesin_Dip_Donusu', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
+            dip_durum = "🔥 KESİN DÖNÜŞ ONAYI!" if kesin_dip_mi else "-"
+
             return {
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
                 "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
                 "🎯 AL/SAT Kararı": al_sat_karari,
                 "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
-                "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
                 "📊 Temel Skor": s_skor,
                 "💥 Hacim Analizi": hacim_durum,
                 "📈 Pozitif Uyuşmazlık": uyusmazlik_durum,
-                "🪤 Spring (Tuzak)": spring_durum,
+                "🎯 Kesin Dip Onayı": dip_durum, # YENİ EKLENDİ
                 "🔍 Tespit Edilen Formasyon": formasyon_adi,
                 "🎯 Formasyon Hedefi (%)": formasyon_hedef,
-                "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'),
+                "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'), # İçinde gün tahmini de yazacak
                 "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
             }
 
@@ -1397,7 +1407,7 @@ def ensemble_prediction(df, sembol="Genel"):
             'Vol_Lag1', 'Vol_Lag2',
             'EMA_5_Dist', 'EMA_8_Dist', 'EMA_13_Dist', 'Trend_5_8', 'Trend_8_13',
             # 👇 YENİ EKLENEN FORMASYON ÖZNİTELİKLERİ 👇
-            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', 
+            'Doji', 'P_Engulfing', 'P_Pinbar', 'AI_Formasyon_Skoru', 'EMA_21', 'EMA_34', 'EMA_52', 'EMA_89', 'EMA_144', 'Destege_Uzaklik', 'Dirence_Uzaklik', 
            # Mikro Mum Formasyonları
             # Makro Grafik Formasyonları (YENİ)
             'Ikili_Tepe', 'Ikili_Dip', 'Simetrik_Ucgen', 'Yukselen_Ucgen',
@@ -1486,8 +1496,51 @@ def ensemble_prediction(df, sembol="Genel"):
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
         
-        sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct > 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
         guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
+        
+        # ---------------------------------------------------------
+        # YENİ: GRAFİK OKUMA VE ZAYIF AI KARARI KURTARMA
+        # ---------------------------------------------------------
+        makro_skor = int(t_df['Makro_Guc_Skoru'].iloc[-1])
+        mikro_skor = int(t_df['AI_Formasyon_Skoru'].iloc[-1])
+        grafik_okuma_skoru = makro_skor + mikro_skor
+        
+        # AI'ın kendi tahmini çok zayıfsa (Örn: Beklenen getiri %1.5'tan küçükse veya Güven < 65)
+        if abs(beklenen_getiri_pct) < 1.5 or guven_skoru < 65:
+            if grafik_okuma_skoru >= 2:
+                sinyal = "🟢 TEKNİK AL (Formasyon Keşfi)"
+                beklenen_getiri_pct = 3.0 + grafik_okuma_skoru # Formasyon bazlı manuel getiri hedefi
+                guven_skoru = 70.0
+                hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
+            elif grafik_okuma_skoru <= -2:
+                sinyal = "🔴 TEKNİK SAT (Ayı Formasyonu)"
+                beklenen_getiri_pct = -3.0 + grafik_okuma_skoru
+                guven_skoru = 70.0
+                hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
+            else:
+                sinyal = "🟡 NÖTR (Yön Belirsiz)"
+        else:
+            sinyal = "🚀 GÜÇLÜ AL" if beklenen_getiri_pct >= 2.0 else ("⚠️ SAT" if beklenen_getiri_pct < -1.0 else "NÖTR")
+
+        # ---------------------------------------------------------
+        # YENİ: HEDEFİN KAÇ GÜNDE GELECEĞİNİ HESAPLAMA
+        # ---------------------------------------------------------
+        # Fiyatın günlük ortalama ne kadar hareket ettiğini bul (ATR Yüzdesi)
+        gunluk_atr_pct = (t_df['ATR'].iloc[-1] / anlik_fiyat) * 100
+        
+        if beklenen_getiri_pct > 0 and gunluk_atr_pct > 0:
+            # Tahmini gün = Hedeflenen Getiri / Hissenin Günlük Hızı
+            tahmini_gun = int(np.ceil(beklenen_getiri_pct / gunluk_atr_pct))
+            tahmini_gun = max(1, min(tahmini_gun, 15)) # 1 ile 15 gün arasına sınırla
+            hedef_sure_metni = f"{tahmini_gun} ile {tahmini_gun + 3} gün içinde"
+        else:
+            hedef_sure_metni = "Belirsiz"
+
+        # Orijinal eğitim (shift-5) sebebiyle baz alınan süreyi de ekliyoruz
+        if "AL" in sinyal:
+            ai_karar_metni = f"{sinyal} (Hedef %{beklenen_getiri_pct:.1f} | Süre: {hedef_sure_metni})"
+        else:
+            ai_karar_metni = sinyal
 
         try:
             f_importances = ensemble.named_estimators_['xgb'].feature_importances_
@@ -1497,10 +1550,11 @@ def ensemble_prediction(df, sembol="Genel"):
 
         return {
             "rf_prediction": round(hedef_fiyat, 2),
-            "signal": sinyal,
+            "signal": ai_karar_metni, # Artık süre tahminini de barındırıyor
             "confidence": max(round(guven_skoru, 1), 0.0),
             "expected_return_pct": round(beklenen_getiri_pct, 2),
-            "feature_importances": oznitelik_agirliklari
+            "feature_importances": oznitelik_agirliklari,
+            "estimated_days": hedef_sure_metni
         }
         
     except Exception as e:

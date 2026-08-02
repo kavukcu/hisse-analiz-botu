@@ -2222,7 +2222,15 @@ with tabs[0]:
     if goster_ai:
         # 1. Önce Sihirli Formül (Temel Analiz) verilerini hesaplıyoruz
         # (Not: 'hisse' veya 'hisse_kodu' değişkeni bu sayfanın üst kısımlarında tanımlanmış olmalı)
-        temel_bilgi, temel_puan = sihirli_formul_skorla(hisse_kodu) 
+        skor_sonucu = sihirli_formul_skorla(hisse_kodu)
+
+# Eğer fonksiyon düzgün çalışıp 2 değer döndürdüyse:
+        if skor_sonucu is not None and isinstance(skor_sonucu, tuple) and len(skor_sonucu) == 2:
+            temel_bilgi, temel_puan = skor_sonucu
+        else:
+    # Eğer hata olduysa veya eksik veri geldiyse varsayılan değerler ata:
+            temel_bilgi = {} # veya None (kodunuzun geri kalanı nasıl bekliyorsa)
+            temel_puan = 0
         
         # 2. Fonksiyonu güncellenmiş parametrelerle çağırıyoruz
         tarihler, tahminler = gelismis_ai_tahmin(

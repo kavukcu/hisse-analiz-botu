@@ -1835,7 +1835,7 @@ def lstm_tahmin_yap(df, lookback_days=60):
         tahmin_olcekli = model.predict(X_test, verbose=0)
         gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
         K.clear_session()
-        pred = model.predict(son_veri).item()
+        return float(gercek_tahmin[0][0])
         
         
     except Exception as e:

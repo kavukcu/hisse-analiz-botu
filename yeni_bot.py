@@ -1570,6 +1570,7 @@ def ensemble_prediction(df, sembol="Genel"):
         # --- Ensemble Modellerinin Ortak Öznitelik Ağırlıklarını Hesaplama ---
         # --- Evrensel ve Güvenli Öznitelik Ağırlıkları Hesaplama ---
         # --- KESİN ÇÖZÜMLÜ ÖZNİTELİK AĞIRLIKLARI ---
+        # --- ÖZNİTELİK AĞIRLIKLARI (BOYUT UYUŞMAZLIĞI GİDERİLMİŞ) ---
         oznitelik_agirliklari = {}
         try:
             importances_list = []
@@ -1579,46 +1580,53 @@ def ensemble_prediction(df, sembol="Genel"):
                 estimators = list(ensemble.named_estimators_.values())
             elif hasattr(ensemble, 'estimators_'):
                 estimators = [est[1] if isinstance(est, tuple) else est for est in ensemble.estimators_]
-            elif hasattr(ensemble, 'feature_importances_'):
-                estimators = [ensemble]
 
-            for est in estimators:
-                target_obj = est
-                if hasattr(est, 'named_steps'):
-                    for s_name, s_obj in est.named_steps.items():
-                        if hasattr(s_obj, 'feature_importances_') or hasattr(s_obj, 'coef_'):
-                            target_obj = s_obj
+            for pipe in estimators:
+                if isinstance(pipe, Pipeline):
+                    fs = pipe.named_steps.get('fs') # Feature Selector
+                    
+                    # Pipeline içindeki ana tahmin modelini bul
+                    model_obj = None
+                    for name, step in pipe.named_steps.items():
+                        if name != 'fs' and name != 'scaler':
+                            model_obj = step
                             break
-                
-                if hasattr(target_obj, 'feature_importances_'):
-                    imp = target_obj.feature_importances_
-                    if len(imp) == len(features):
-                        importances_list.append(imp)
-                elif hasattr(target_obj, 'coef_'):
-                    coef = np.abs(target_obj.coef_)
-                    if coef.ndim > 1:
-                        coef = np.mean(coef, axis=0)
-                    if len(coef) == len(features):
-                        importances_list.append(coef)
-            
+                    
+                    if model_obj is not None:
+                        imp = None
+                        if hasattr(model_obj, 'feature_importances_'):
+                            imp = model_obj.feature_importances_
+                        elif hasattr(model_obj, 'coef_'):
+                            imp = np.abs(model_obj.coef_)
+                            if imp.ndim > 1:
+                                imp = np.mean(imp, axis=0)
+
+                        if imp is not None:
+                            # Seçilen öznitelikleri orijinal feature boyutuna haritala
+                            full_imp = np.zeros(len(features))
+                            if fs is not None and hasattr(fs, 'get_support'):
+                                mask = fs.get_support() # Hangi öznitelikler seçildi (True/False)
+                                full_imp[mask] = imp
+                            elif len(imp) == len(features):
+                                full_imp = imp
+                            
+                            importances_list.append(full_imp)
+
             if importances_list:
                 avg_importances = np.mean(importances_list, axis=0)
                 total = np.sum(avg_importances)
                 if total > 0:
                     avg_importances = avg_importances / total
                 oznitelik_agirliklari = {f: float(imp) for f, imp in zip(features, avg_importances) if imp > 0}
-            
-            # Eğer modellerden skor alınamadıysa güvenli yedek plan: Eşit ağırlık ver
-            if not oznitelik_agirliklari and len(features) > 0:
+            else:
+                # Güvenli yedek plan
                 equal_val = 1.0 / len(features)
                 oznitelik_agirliklari = {f: float(equal_val) for f in features}
-                
+
         except Exception as e:
-            print(f"Öznitelik hesaplama detayı: {e}")
-            if len(features) > 0:
-                equal_val = 1.0 / len(features)
-                oznitelik_agirliklari = {f: float(equal_val) for f in features}
-        
+            print(f"Öznitelik hesaplama hatası: {e}")
+            equal_val = 1.0 / len(features)
+            oznitelik_agirliklari = {f: float(equal_val) for f in features}
         try:
             tahmini_logla(sembol, anlik_fiyat, hedef_fiyat, ai_karar_metni, guven_skoru)
         except Exception:

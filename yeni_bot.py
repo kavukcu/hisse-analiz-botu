@@ -51,10 +51,10 @@ from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+import tensorflow as tf
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
-
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)

@@ -46,6 +46,7 @@ import gym_anytrading
 from stable_baselines3 import A2C
 import asyncio
 import aiohttp
+import time
 import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
@@ -81,24 +82,30 @@ oturum.headers.update({
 # VERİTABANI VE HAFIZA YÖNETİMİ
 # ==========================================
 import yfinance as yf
-
-def saglam_veri_cek(sembol):
-    try:
-        t = yf.Ticker(sembol)
-        veri = t.history(period="5d")
-        
-        # Eğer veri boş dönerse veya hata verirse
-        if veri.empty:
-            print(f"Atlanıyor: {sembol} Yahoo Finance üzerinde bulunamadı (Delisted veya hatalı kod).")
-            return None
+def guvenli_veri_cek(sembol_listesi):
+    basarili_veriler = {}
+    
+    for sembol in sembol_listesi:
+        try:
+            # İstekler arasında 1 saniye bekleyerek rate limit'e takılmayı önle
+            time.sleep()
             
-        return veri
-    except Exception as e:
-        print(f"Hata oluştu ({sembol}): {e}")
-        return None
+            t = yf.Ticker(sembol)
+            veri = t.history(period="5d")
+            
+            if veri.empty:
+                print(f"Uyarı: {sembol} için veri bulunamadı veya hisse listeden kaldırılmış.")
+                continue
+                
+            basarili_veriler[sembol] = veri
+            print(f"Başarılı: {sembol} verisi çekildi.")
+            
+        except Exception as e:
+            print(f"Bağlantı hatası ({sembol}): {e}. 3 saniye bekleniyor...")
+            time.sleep(3) # Bağlantı kopmalarında biraz daha uzun bekle
+            
+    return basarili_veriler
 
-# Kullanım örneği
-hisse_verisi = saglam_veri_cek("ATLFA.IS")
 def tum_bist_hisselerini_getir():
     """BIST hisselerini sabit listeden hızlıca getirir. API engellerine takılmaz."""
     return ["XU100.IS", "A1CAP.IS", "A1YEN.IS", "AAGYO.IS", "ACSEL.IS", "ADBNK.IS", "ADEL.IS",

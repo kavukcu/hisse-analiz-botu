@@ -1873,19 +1873,22 @@ def lstm_tahmin_yap(df, lookback_days=60):
         model.fit(X_train, y_train, batch_size=32, epochs=10, verbose=0)
         
         # Gelecek Tahmini
+        # Gelecek Tahmini
         son_veri = scaled_X[-lookback_days:]
         X_test = np.reshape(son_veri, (1, son_veri.shape[0], son_veri.shape[1]))
         
-        tahmin_olcekli = model.predict(X_test, verbose=0)
+        # ✅ DÜZELTME 1: predict yerine doğrudan modeli çağırıp numpy dizisine çeviriyoruz (10x hızlı)
+        tahmin_olcekli = model(X_test, training=False).numpy()
         gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
-        K.clear_session()
-        return float(gercek_tahmin[0][0])
         
+        # 💡 NOT: Döngü içinde retracing uyarısı almamak için K.clear_session() satırını kaldırdık/yorum yaptık
+        # K.clear_session() 
+        
+        return float(gercek_tahmin[0][0])
         
     except Exception as e:
         print(f"LSTM Çalıştırılamadı: {e}")
         return None
-
 
 def temel_verileri_temizle(df):
     """

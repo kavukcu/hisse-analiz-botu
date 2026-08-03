@@ -80,6 +80,25 @@ oturum.headers.update({
 # ==========================================
 # VERİTABANI VE HAFIZA YÖNETİMİ
 # ==========================================
+import yfinance as yf
+
+def saglam_veri_cek(sembol):
+    try:
+        t = yf.Ticker(sembol)
+        veri = t.history(period="5d")
+        
+        # Eğer veri boş dönerse veya hata verirse
+        if veri.empty:
+            print(f"Atlanıyor: {sembol} Yahoo Finance üzerinde bulunamadı (Delisted veya hatalı kod).")
+            return None
+            
+        return veri
+    except Exception as e:
+        print(f"Hata oluştu ({sembol}): {e}")
+        return None
+
+# Kullanım örneği
+hisse_verisi = saglam_veri_cek("ATLFA.IS")
 def tum_bist_hisselerini_getir():
     """BIST hisselerini sabit listeden hızlıca getirir. API engellerine takılmaz."""
     return ["XU100.IS", "A1CAP.IS", "A1YEN.IS", "AAGYO.IS", "ACSEL.IS", "ADBNK.IS", "ADEL.IS",
@@ -166,14 +185,6 @@ def tum_bist_hisselerini_getir():
  "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "YYLGD.IS", "ZEDUR.IS", "ZERGY.IS", "ZGYO.IS", "ZKBVK.IS", "ZKBVR.IS",
  "ZOREN.IS", "ZRGYO.IS"
     ]
-
-    """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
-    conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
-                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
-    conn.commit()
-    conn.close()
 
 def tahmin_kaydet(sembol, hedef_fiyat):
     bugun = datetime.now().strftime("%Y-%m-%d")

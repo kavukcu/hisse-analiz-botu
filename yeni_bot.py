@@ -1562,7 +1562,7 @@ def ensemble_prediction(df, sembol="Genel"):
 
         # --- 3. TAHMİN VE KARAR ---
         # --- 3. TAHMİN VE KARAR ---
-        beklenen_getiri_pct = float(ensemble.predict(son_veri)[0])
+        beklenen_getiri_pct = float(ensemble.predict(son_veri).item())
         
         # LSTM Entegrasyon Kontrolü
         try:

@@ -80,6 +80,44 @@ oturum.headers.update({
 # ==========================================
 # VERİTABANI VE HAFIZA YÖNETİMİ
 # ==========================================
+import requests
+import logging
+
+# Loglama ayarları (Uygulamanızın başlangıcında bir kez tanımlanması yeterlidir)
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def tum_bist_hisselerini_getir():
+    """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
+    try:
+        url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseOzet"
+        res = requests.get(url, timeout=10)
+        res.raise_for_status() # HTTP 200 OK dışındaki yanıtlarda hata fırlatır
+        data = res.json()
+        
+        # Endeksleri (X ile başlayanlar) hariç tutup sonuna .IS ekliyoruz
+        hisseler = [f"{row['kod']}.IS" for row in data['value'] if not str(row['kod']).startswith("X")]
+        return hisseler
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Bağlantı hatası - BIST Hisseleri çekilemedi: {e}")
+    except ValueError as e:
+        logging.error(f"JSON Parse hatası - Veri yapısı bozuk olabilir: {e}")
+    except Exception as e:
+        logging.error(f"Beklenmeyen bir hata oluştu: {e}")
+        
+    # Hata durumunda çalışacak güçlü Acil Durum Listesi (Fallback)
+    # (Yukarıda hazırladığımız 500+ hisselik temiz listeyi buraya koyabilirsiniz)
+    print("Uyarı: Canlı veri çekilemedi, sistem yedek (fallback) liste ile çalışıyor...")
+    return [
+        "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", 
+        "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS",
+        # ... (Az önce verdiğim uzun listeyi buraya yapıştırabilirsiniz) ...
+        "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS"
+    ]
+
+# Test etmek için:
+# hisse_listem = tum_bist_hisselerini_getir()
+# print(f"Toplam {len(hisse_listem)} hisse yüklendi.")
 def veritabani_baslat():
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
     conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
@@ -2009,21 +2047,7 @@ async def tum_piyasayi_tara_async(hisse_listesi):
         basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
         return basarili_veriler
 @st.cache_data(ttl=86400, show_spinner=False)
-def tum_bist_hisselerini_getir():
-    """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
-    try:
-        url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseOzet"
-        res = requests.get(url, timeout=10)
-        data = res.json()
-        # Sembollerin sonuna .IS ekleyerek Yahoo Finance (yfinance) formatına uygun hale getiriyoruz
-        return [f"{row['kod']}.IS" for row in data['value']]
-    except Exception as e:
-        import logging
-        logging.error(f"BIST Hisseleri çekilemedi: {e}")
-        # Bağlantı hatası olursa acil durum listesi (Fallback)
-        return ["XU100.IS",
-"SVGYO.IS", "AHSGY.IS", "BEGYO.IS", "BORLS.IS", "HOROZ.IS", "KBORU.IS", "KLSER.IS", "KOCMT.IS", "MEGMT.IS", "ODINE.IS", "RGYAS.IS", "SKYMD.IS", "TNZTP.IS", "YIGIT.IS", "THYAO.IS", "TUPRS.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS" 
-]
+
 def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
     """
     fiyat_df: Sütunlarında hisse isimleri, satırlarında ise son 1 yıllık 

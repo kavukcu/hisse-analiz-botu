@@ -481,7 +481,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                         
                         if not df_4h.empty:
                             return df_4h
-                    time.sleep(0.5)
+                    time.sleep(1.5)
             except Exception as e:
                 logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
 

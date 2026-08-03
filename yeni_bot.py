@@ -82,20 +82,28 @@ oturum.headers.update({
 # ==========================================
 import requests
 import logging
-
-# Loglama ayarları (Uygulamanızın başlangıcında bir kez tanımlanması yeterlidir)
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def tum_bist_hisselerini_getir():
-    """BIST'teki tüm hisseleri (yaklaşık 700+) dinamik olarak çeker."""
     try:
         url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseOzet"
-        res = requests.get(url, timeout=10)
-        res.raise_for_status() # HTTP 200 OK dışındaki yanıtlarda hata fırlatır
-        data = res.json()
         
-        # Endeksleri (X ile başlayanlar) hariç tutup sonuna .IS ekliyoruz
+        # Siteye kendimizi normal bir Google Chrome kullanıcısı gibi tanıtıyoruz
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest", # Sitenin bizim bir AJAX isteği attığımızı bilmesi için önemli
+            "Referer": "https://www.isyatirim.com.tr/tr-tr/analiz/hisse/Sayfalar/default.aspx"
+        }
+        
+        # İsteğe headers'ı ekledik
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status() 
+        
+        data = res.json()
         hisseler = [f"{row['kod']}.IS" for row in data['value'] if not str(row['kod']).startswith("X")]
+        
+        print("Bağlantı başarılı, canlı veriler çekildi!")
         return hisseler
         
     except requests.exceptions.RequestException as e:
@@ -105,15 +113,9 @@ def tum_bist_hisselerini_getir():
     except Exception as e:
         logging.error(f"Beklenmeyen bir hata oluştu: {e}")
         
-    # Hata durumunda çalışacak güçlü Acil Durum Listesi (Fallback)
-    # (Yukarıda hazırladığımız 500+ hisselik temiz listeyi buraya koyabilirsiniz)
     print("Uyarı: Canlı veri çekilemedi, sistem yedek (fallback) liste ile çalışıyor...")
-    return [
-        "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", 
-        "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS",
-        # ... (Az önce verdiğim uzun listeyi buraya yapıştırabilirsiniz) ...
-        "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS"
-    ]
+    # Buraya uzun listenizi koymaya devam edebilirsiniz
+    return ["XU100.IS", "AKBNK.IS", "KCHOL.IS", "SISE.IS", "ASELS.IS"]
 
 # Test etmek için:
 # hisse_listem = tum_bist_hisselerini_getir()

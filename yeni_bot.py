@@ -2176,7 +2176,7 @@ with tabs[0]:
 
     if goster_formasyon:
         df_form = yapay_zeka_icin_formasyon_bul(df)
-        st.dataframe(df_form)
+        st.dataframe(df, width="stretch")
         yutan_boga = df_form[df_form['Bullish_Engulfing']]
         fig.add_trace(go.Scatter(x=yutan_boga.index, y=yutan_boga['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', color='#00ff00', size=12), name='Yutan Boğa'), row=1, col=1)
 
@@ -2218,7 +2218,7 @@ with tabs[0]:
     
     grafik_alani = st.empty()
     with grafik_alani:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 # --- SEKME 1: AKILLI RADAR ---
 # --- SEKME 1: AKILLI RADAR (Hatalardan Arındırılmış & Tam Optimize) ---
 with tabs[1]:
@@ -2279,7 +2279,7 @@ with tabs[1]:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
                 # -------------------------------------
                 
-                st.dataframe(df_goster, use_container_width=True, hide_index=True)
+                st.dataframe(df_goster, width="stretch", hide_index=True)
                 st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
@@ -2301,7 +2301,7 @@ with tabs[1]:
             if stoch_sonuclari:
                 df_stoch = pd.DataFrame(stoch_sonuclari)
                 taramayi_kaydet(df_stoch, "Stoch Analizi")
-                st.dataframe(df_stoch, use_container_width=True, hide_index=True)
+                st.dataframe(df_stoch, width="stretch", hide_index=True)
                 st.success("✅ Stoch taraması kaydedildi!")
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
@@ -2323,7 +2323,7 @@ with tabs[1]:
             if tilson_sonuclari:
                 df_tilson = pd.DataFrame(tilson_sonuclari)
                 taramayi_kaydet(df_tilson, "Tilson (T3) Analizi")
-                st.dataframe(df_tilson, use_container_width=True, hide_index=True)
+                st.dataframe(df_tilson, width="stretch", hide_index=True)
                 st.success("✅ Tilson T3 taraması kaydedildi!")
             else:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
@@ -2365,7 +2365,7 @@ with tabs[1]:
                 if not df_sniper.empty:
                     taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
-                    st.dataframe(df_sniper, use_container_width=True, hide_index=True)
+                    st.dataframe(df_sniper, width="stretch", hide_index=True)
                     st.balloons()
                 else:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
@@ -2398,7 +2398,7 @@ with tabs[1]:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
             # -----------------------------------------------------------
             
-            st.dataframe(df_goster, use_container_width=True, hide_index=True)
+            st.dataframe(df_goster, width="stretch", hide_index=True)
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:
@@ -2472,7 +2472,7 @@ with tabs[9]:
             fig_imp.update_layout(template="plotly_dark", height=350, margin=dict(l=0, r=0, t=40, b=0),
                                   xaxis_tickformat='.0%', showlegend=False)
             
-            st.plotly_chart(fig_imp, use_container_width=True)
+            st.plotly_chart(fig_imp, width="stretch")
         else:
             st.warning("Öznitelik ağırlıkları hesaplanamadı (Yetersiz veri veya model hatası).")
 

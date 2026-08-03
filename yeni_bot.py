@@ -259,6 +259,12 @@ def tahminleri_degerlendir():
     except Exception as e:
         logging.error(f"tahminleri_degerlendir genel hatası: {e}")
 def veritabani_baslat():
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
+                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
+    conn.commit()
+    conn.close()
     # Veritabanı (SQLite vs.) bağlantı kodlarınız burada olmalı
     pass
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et

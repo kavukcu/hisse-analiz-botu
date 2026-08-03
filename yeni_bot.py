@@ -83,6 +83,7 @@ oturum.headers.update({
 def veritabani_baslat():
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
     conn = sqlite3.connect('hisse_hafiza.db')
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS tahminler
                  (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
@@ -104,36 +105,79 @@ def tahmin_kaydet(sembol, hedef_fiyat):
     conn.close()
 
 def tahminleri_degerlendir():
-    """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar."""
-    conn = sqlite3.connect('hisse_hafiza.db', timeout=10)
-    c = conn.cursor()
-    c.execute("SELECT rowid, tarih, sembol, hedef_fiyat FROM tahminler WHERE durum = 'BEKLİYOR'")
-    bekleyenler = c.fetchall()
-    
-    for row in bekleyenler:
-        rowid, tarih_str, sembol, hedef_fiyat = row
-        kayit_tarihi = datetime.strptime(tarih_str, "%Y-%m-%d")
+    """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar (Optimize Edilmiş Sürüm)."""
+    try:
+        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+        c = conn.cursor()
+        c.execute("SELECT rowid, tarih, sembol, hedef_fiyat FROM tahminler WHERE durum = 'BEKLİYOR'")
+        bekleyenler = c.fetchall()
         
-        # Eğer tahminin üzerinden 5 gün geçmişse kontrol et
-        if (datetime.now() - kayit_tarihi).days >= 5:
+        if not bekleyenler:
+            conn.close()
+            return
+
+        bugun = datetime.now()
+        degerlendirilecekler = []
+
+        # 1. Aşama: Sadece süresi (5 gün) dolmuş tahminleri filtrele
+        for row in bekleyenler:
+            rowid, tarih_str, sembol, hedef_fiyat = row
             try:
-                # Güncel fiyatı çek
-                df = yf.download(sembol, period="1d", progress=False)
-                if not df.empty:
-                    gercek_fiyat = float(df['Close'].iloc[-1])
-                    
-                    # Hedef fiyat ile gerçek fiyat arasındaki sapmayı (hata payını) hesapla
-                    sapma_orani = abs(gercek_fiyat - hedef_fiyat) / gercek_fiyat
-                    
-                    # %5'lik bir yanılma payını başarılı kabul ediyoruz
-                    durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
-                    
-                    c.execute("UPDATE tahminler SET gerceklesme_fiyati = ?, durum = ? WHERE rowid = ?", 
-                              (gercek_fiyat, durum, rowid))
+                kayit_tarihi = datetime.strptime(tarih_str, "%Y-%m-%d")
+                if (bugun - kayit_tarihi).days >= 5:
+                    degerlendirilecekler.append((rowid, sembol, hedef_fiyat))
             except Exception as e:
-                logging.error(f"Tahmin değerlendirme hatası [{sembol}]: {e}")
-    conn.commit()
-    conn.close()
+                logging.error(f"Tarih format hatası [{sembol}]: {e}")
+
+        # Eğer süresi dolmuş tahmin yoksa veritabanını kapatıp çık
+        if not degerlendirilecekler:
+            conn.close()
+            return
+
+        # 2. Aşama: Aranacak benzersiz hisse kodlarını topla
+        sembol_listesi = list(set([item[1] for item in degerlendirilecekler]))
+        
+        # 3. Aşama: Tüm hisselerin fiyatını TEK BİR İSTEKLE indir
+        df_guncel = yf.download(sembol_listesi, period="1d", progress=False)
+
+        if df_guncel.empty:
+            conn.close()
+            return
+
+        # Yfinance MultiIndex kolon yapısını düzelt (Kapanış fiyatlarını al)
+        if "Close" in df_guncel.columns:
+            kapanislar = df_guncel["Close"]
+        else:
+            kapanislar = df_guncel
+
+        # 4. Aşama: Tahminleri değerlendir ve DB'yi güncelle
+        for rowid, sembol, hedef_fiyat in degerlendirilecekler:
+            try:
+                # Fiyatı tablodan çek (Tek hisse mi çoklu hisse mi kontrol et)
+                if isinstance(kapanislar, pd.DataFrame) and sembol in kapanislar.columns:
+                    gercek_fiyat = float(kapanislar[sembol].dropna().iloc[-1])
+                elif isinstance(kapanislar, pd.Series):
+                    gercek_fiyat = float(kapanislar.dropna().iloc[-1])
+                else:
+                    continue # Fiyat bulunamadıysa bu hisseyi atla
+
+                # Sapma oranını hesapla (%5 tolerans)
+                sapma_orani = abs(gercek_fiyat - hedef_fiyat) / gercek_fiyat
+                durum = "BAŞARILI ✅" if sapma_orani <= 0.05 else "BAŞARISIZ ❌"
+
+                # Veritabanında güncelle
+                c.execute(
+                    "UPDATE tahminler SET gerceklesme_fiyati = ?, durum = ? WHERE rowid = ?", 
+                    (gercek_fiyat, durum, rowid)
+                )
+            except Exception as e:
+                logging.error(f"Tahmin kıyaslama hatası [{sembol}]: {e}")
+
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        logging.error(f"tahminleri_degerlendir genel hatası: {e}")
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
 veritabani_baslat()
 def sembol_formatla(hisse_kodu):
@@ -336,7 +380,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                             df_1h.columns = df_1h.columns.droplevel(1)
                         df_1h.index = df_1h.index.tz_localize(None)
                         if end:
-                            df_1h = df_1h[df_1h.index.date <= pd.to_datetime(end).date()]
+                            df_1h = df_1h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
                         
                         df_4h = df_1h.resample('4h').agg({
                             'Open': 'first',

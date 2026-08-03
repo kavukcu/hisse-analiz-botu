@@ -1424,7 +1424,7 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df['Stoch_Diff'] = t_df['Stoch_K'] - t_df['Stoch_D']
         
         t_df['Tilson_T3'] = tilson_t3(t_df['Close'])
-        t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
+        #-t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
         
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()

@@ -796,6 +796,64 @@ def trend_ve_harmonik_bul(df):
 # ==========================================
 # YENİ EKLENEN: FORMASYON TESPİT VE HEDEF HESAPLAMA
 # ==========================================
+def hedef_degiskeni_olustur(df: pd.DataFrame) -> pd.DataFrame:
+    # 5 Gün sonrasının net getirisi
+    df['Future_Return'] = df['Close'].shift(-5) / df['Close'] - 1
+    
+    # 5 Gün içindeki MAKSİMUM düşüş (Drawdown)
+    df['Future_Min'] = df['Low'].rolling(window=5).min().shift(-5)
+    df['Max_Drawdown'] = df['Future_Min'] / df['Close'] - 1
+    
+    # Kural: Getiri %3'ten büyük OLMALI VE aradaki sarkma %1.5'u GEÇMEMELİ
+    # XGBoost ve Random Forest Classifier için hedef belirliyoruz
+    df['Target_Class'] = np.where(
+        (df['Future_Return'] > 0.03) & (df['Max_Drawdown'] > -0.015), 
+        1, 
+        0
+    )
+    
+    return df
+def ozellikleri_zenginlestir(df: pd.DataFrame) -> pd.DataFrame:
+    # 1. ATR (Average True Range) Hesaplaması
+    df['H-L'] = df['High'] - df['Low']
+    df['H-C'] = abs(df['High'] - df['Close'].shift(1))
+    df['L-C'] = abs(df['Low'] - df['Close'].shift(1))
+    df['TR'] = df[['H-L', 'H-C', 'L-C']].max(axis=1)
+    df['ATR'] = df['TR'].rolling(window=14).mean()
+    
+    # 2. Tilson Uzaklığını Normalize Etmek
+    # Sıfıra bölünme hatasını önlemek için küçük bir değer (1e-5) ekliyoruz
+    df['Tilson_Dist_Norm'] = df['Tilson_Dist'] / (df['ATR'] + 1e-5)
+    
+    # 3. Hacim Teyidi: Fiyat ve Hacim Çarpımı (Basit VWAP Yaklaşımı)
+    df['Volume_Trend'] = df['Volume'].rolling(window=5).mean() / df['Volume'].rolling(window=20).mean()
+    
+    # Gereksiz geçici kolonları temizle
+    df.drop(['H-L', 'H-C', 'L-C', 'TR'], axis=1, inplace=True)
+    
+    return df
+from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+from xgboost import XGBClassifier
+
+def modeli_degerlendir(X, y):
+    # n_splits=5 ile veriyi zaman ekseninde 5 parçaya böler, 
+    # her seferinde sadece geçmiş verilerle eğitip GELECEK veride test eder.
+    tscv = TimeSeriesSplit(n_splits=5)
+    
+    # Yeni sınıflandırma modelimiz
+    model = XGBClassifier(
+        n_estimators=100, 
+        learning_rate=0.05, 
+        max_depth=4, 
+        random_state=42
+    )
+    
+    # Doğrulama skorları (Accuracy veya F1 Skoru kullanılabilir)
+    scores = cross_val_score(model, X, y, cv=tscv, scoring='f1')
+    print(f"TimeSeriesSplit F1 Skorları: {scores}")
+    print(f"Ortalama F1 Skoru: {scores.mean():.4f}")
+    
+    return model
 def formasyon_tespit_et_ve_hedefle(df):
     """
     Son güncel verileri analiz ederek tespit edilen formasyonu ve
@@ -1424,7 +1482,7 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df['Stoch_Diff'] = t_df['Stoch_K'] - t_df['Stoch_D']
         
         t_df['Tilson_T3'] = tilson_t3(t_df['Close'])
-        #-t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
+        t_df['Tilson_Dist'] = (t_df['Close'] - t_df['Tilson_T3']) / t_df['Close'].replace(0, 0.0001)
         
         delta = t_df['Close'].diff()
         gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
@@ -1813,83 +1871,77 @@ def rl_ajani_egit(df):
     
     aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
     return aksiyon_metni
-from sklearn.preprocessing import MinMaxScaler
-from keras.models import Sequential
-from keras.layers import LSTM, Dropout, Dense
 import numpy as np
+import pandas as pd
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout, Input
+from sklearn.preprocessing import MinMaxScaler
 
-def lstm_tahmin_yap(df, lookback_days=60):
+def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
     try:
         t_df = df.copy()
-        t_df.dropna(inplace=True)
         
-        # Veri seti lookback süresinden kısaysa hata vermeden çık
-        if len(t_df) <= lookback_days:
-            return None 
-
+        # 1. Yeni Stratejiye Uygun Özellik Listesi (Normalize Edilmiş İndikatörler)
         yapay_zeka_ozellikleri = [
-            'Open', 'High', 'Low', 'Volume', 
-            'Tilson_T3', 'Stoch_K', 'Stoch_D',
-            'SMA_5', 'SMA_8', 'SMA_13',   
-            'EMA_5', 'EMA_8', 'EMA_13'    
+            'Close', 'Volume', 
+            'Tilson_Dist_Norm', 'Volume_Trend',  # Adım 1'de eklediğimiz güçlü özellikler
+            'Stoch_K', 'Stoch_D', 'RSI'
         ]
         
         # Tabloda var olan özellikleri filtrele
         kullanilacak_ozellikler = [col for col in yapay_zeka_ozellikleri if col in t_df.columns]
-        if not kullanilacak_ozellikler:
-            return None
-            
-        X = t_df[kullanilacak_ozellikler].values
-        y = t_df['Close'].values.reshape(-1, 1)
-
-        scaler_X = MinMaxScaler(feature_range=(0, 1))
-        scaler_y = MinMaxScaler(feature_range=(0, 1))
         
-        scaled_X = scaler_X.fit_transform(X)
-        scaled_y = scaler_y.fit_transform(y)
+        # Veri seti yetersizse veya Target_Class (Adım 2) yoksa işlem yapma
+        if len(t_df) <= lookback_days or 'Target_Class' not in t_df.columns:
+            t_df['LSTM_Score'] = 0.5 # Nötr skor atıyoruz
+            return t_df
+
+        X_raw = t_df[kullanilacak_ozellikler].values
+        y_raw = t_df['Target_Class'].values
+
+        # Ölçeklendirme
+        scaler_X = MinMaxScaler(feature_range=(0, 1))
+        scaled_X = scaler_X.fit_transform(X_raw)
         
         X_train, y_train = [], []
         for i in range(lookback_days, len(scaled_X)):
-            X_train.append(scaled_X[i-lookback_days:i, :]) 
-            y_train.append(scaled_y[i, 0]) 
+            X_train.append(scaled_X[i-lookback_days:i, :])
+            y_train.append(y_raw[i])
             
         X_train, y_train = np.array(X_train), np.array(y_train)
         
         if len(X_train) == 0:
-            return None
+            t_df['LSTM_Score'] = 0.5
+            return t_df
 
-        # Model Mimarisi
+        # 2. Sınıflandırma Odaklı LSTM Mimarısi
         model = Sequential([
-            Input(shape=(X_train.shape[1], X_train.shape[2])), # Açıkça Input katmanı eklendi
-            LSTM(50, return_sequences=True), # input_shape buradan kaldırıldı
+            Input(shape=(X_train.shape[1], X_train.shape[2])),
+            LSTM(32, return_sequences=True),
             Dropout(0.2),
-            LSTM(50, return_sequences=False),
+            LSTM(16, return_sequences=False),
             Dropout(0.2),
-            Dense(25),
-            Dense(1)
+            Dense(16, activation='relu'),
+            Dense(1, activation='sigmoid') # 0 ile 1 arasında olasılık skoru üretir
         ])
         
-        model.compile(optimizer='adam', loss='mean_squared_error')
-        model.fit(X_train, y_train, batch_size=32, epochs=10, verbose=0)
+        # Sigmoid çıkışı için Binary Crossentropy kullanıyoruz
+        model.compile(optimizer='adam', loss='binary_crossentropy')
+        model.fit(X_train, y_train, batch_size=32, epochs=8, verbose=0)
         
-        # Gelecek Tahmini
-        # Gelecek Tahmini
-        son_veri = scaled_X[-lookback_days:]
-        X_test = np.reshape(son_veri, (1, son_veri.shape[0], son_veri.shape[1]))
+        # 3. Tüm Veri Seti İçin Tahmin Üretme (XGBoost'a Özellik Olarak Vermek İçin)
+        tahminler = model(X_train, training=False).numpy().flatten()
         
-        # ✅ DÜZELTME 1: predict yerine doğrudan modeli çağırıp numpy dizisine çeviriyoruz (10x hızlı)
-        tahmin_olcekli = model(X_test, training=False).numpy()
-        gercek_tahmin = scaler_y.inverse_transform(tahmin_olcekli)
+        # İlk 'lookback_days' kadar satır diziye giremediği için baş tarafı 0.5 (Nötr) ile dolduruyoruz
+        dolgu = np.full(lookback_days, 0.5)
+        t_df['LSTM_Score'] = np.concatenate([dolgu, tahminler])
         
-        # 💡 NOT: Döngü içinde retracing uyarısı almamak için K.clear_session() satırını kaldırdık/yorum yaptık
-        # K.clear_session() 
-        
-        return float(gercek_tahmin[0][0])
+        return t_df
         
     except Exception as e:
         print(f"LSTM Çalıştırılamadı: {e}")
-        return None
-
+        df['LSTM_Score'] = 0.5
+        return df
 def temel_verileri_temizle(df):
     """
     Temel analiz sütunlarındaki eksik (NaN) veya sonsuz (inf) değerleri temizler.

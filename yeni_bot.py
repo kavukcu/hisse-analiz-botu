@@ -472,7 +472,7 @@ import isyatirimhisse
 @st.cache_data(ttl=600, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
     # 1. Sembolü temizle
-    ticker = ticker.replace("$", "").strip() 
+    ticker = ticker.replace("$", "").strip()
     
     # 2. Hangi piyasa olduğunu tespit et (BIST mi, Kripto mu, ABD mi?)
     is_bist = ".IS" in ticker
@@ -488,6 +488,8 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         tum_kaynaklar.remove(kaynak)
         tum_kaynaklar.insert(0, kaynak)
 
+    fiyat_df = None
+    
     # 4. Kaynakları sırayla dene (Biri çökerse diğeri devreye girer)
     start = optimize_historical_range(start, end, max_days=300)
     for aktif_kaynak in tum_kaynaklar:
@@ -496,21 +498,18 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         if aktif_kaynak == "Yahoo Finance (yfinance)":
             for _ in range(2):
                 try:
-                    # 👇 EKLENEN KISIM BAŞLANGICI 👇
                     if end is not None:
                         yf_end = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
                     else:
                         yf_end = None
-                    # 👆 EKLENEN KISIM BİTİŞİ 👆
 
-                    # Sadece yfinance formatına uygun orijinal ticker string'ini veriyoruz
                     df = yf.download(
-                        ticker, 
-                        start=start, 
-                        end=yf_end,  # <--- BURASI DEĞİŞTİ: end=end yerine end=yf_end oldu
-                        interval=interval, 
-                        progress=False, 
-                        auto_adjust=True, 
+                        ticker,
+                        start=start,
+                        end=yf_end,
+                        interval=interval,
+                        progress=False,
+                        auto_adjust=True,
                         threads=False
                     )
                     
@@ -522,17 +521,19 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                             df = df.dropna(subset=['Close'])
                             df.index = df.index.tz_localize(None)
                             df.index = pd.to_datetime(df.index).normalize()
-                            return downcast_float64_columns(df)
+                            fiyat_df = downcast_float64_columns(df)
+                            break
                 except Exception as e:
                     logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
                 tm.sleep(0.5)
+            if fiyat_df is not None:
+                break
 
         # --- TRADINGVIEW DENEMESİ ---
         elif aktif_kaynak == "TradingView (tvdatafeed)":
             try:
                 tv = get_tv_datafeed()
                 if tv:
-                    # TradingView için sembolü formatla
                     if is_bist:
                         exchange = 'BIST'
                         tv_symbol = ticker.replace(".IS", "")
@@ -552,7 +553,8 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         if start:
                             df = df[df.index.date >= pd.to_datetime(start).date()]
                         if not df.empty:
-                            return downcast_float64_columns(df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
+                            fiyat_df = downcast_float64_columns(df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
+                            break
             except Exception as e:
                 logging.debug(f"TradingView deneme hatası ({ticker}): {e}")
 
@@ -573,11 +575,24 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                     df['Date'] = pd.to_datetime(df['Date'])
                     df.set_index('Date', inplace=True)
                     if not df.empty:
-                        return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+                        fiyat_df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+                        break
             except Exception as e:
                 logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
 
-    # Hiçbir kaynaktan veri gelmezse boş DataFrame döndür
+    # 2. KURAL: HER ZAMAN yfinance ile temel analiz verilerini çek (döngü bittikten sonra)
+    if fiyat_df is not None and not fiyat_df.empty:
+        try:
+            temel_veri = yf.Ticker(ticker).info
+            if isinstance(temel_veri, dict) and temel_veri:
+                # 3. KURAL: Temel analiz verilerini fiyat_df'e yeni sütunlar olarak ekle
+                for key, value in temel_veri.items():
+                    if isinstance(value, (str, int, float, bool)) or value is None:
+                        fiyat_df[key] = value
+        except Exception:
+            pass
+        return fiyat_df
+
     return pd.DataFrame()
 # ==========================================
 # 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU

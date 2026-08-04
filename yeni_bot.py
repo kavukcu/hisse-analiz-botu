@@ -35,7 +35,7 @@ from sklearn.linear_model import Ridge
 from sklearn.ensemble import IsolationForest
 from sklearn.feature_selection import SelectFromModel
 import shap
-import streamlit as st
+
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.models import Sequential
@@ -52,11 +52,15 @@ from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 import numpy as np
-import tensorflow as tf
+import streamlit as st
+
+st.set_page_config(page_title="Borsa Botu", layout="wide")
+st.title("Borsa Botu")
 from keras.models import Sequential
 from keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
 import keras.backend as K
+
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
@@ -716,6 +720,7 @@ def grafik_formasyon_bul(df, window=10, tolerans=0.03):
         return [], []
 
 def yapay_zeka_icin_formasyon_bul(df):
+    import tensorflow as tf
     """
     Mum formasyonlarını yapay zekanın anlayacağı sayısal değerlere (-1, 0, 1) dönüştürür.
     1: Yükseliş Formasyonu (Boğa)

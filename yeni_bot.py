@@ -2408,45 +2408,40 @@ def paralel_tarama(analiz_tipi, mesaj, max_workers=10):
             return []
 
         max_workers = min(max_workers, max(1, len(tarama_listesi)))
-        
-        # SABIT İLERLEME YÖNETİMİ: Döngü öncesinde sadece bir kez tanımla
-        status_text = st.text(f"⏳ {mesaj}")
-        progress_bar = st.progress(0)
 
         sonuclar = []
         toplam = len(tarama_listesi)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_sembol = {
-                executor.submit(
-                    asenkron_analiz_yap,
-                    sembol,
-                    baslangic,
-                    bitis,
-                    analiz_tipi=analiz_tipi,
-                    veri_kaynagi=veri_kaynagi
-                ): sembol
-                for sembol in tarama_listesi
-            }
+        with st.spinner(f"⏳ {mesaj}"):
+            status_text = st.text(f"📊 {mesaj} (0/{toplam}) - 0%")
 
-            tamamlanan = 0
-            for future in concurrent.futures.as_completed(future_to_sembol):
-                sembol = future_to_sembol[future]
-                tamamlanan += 1
-                try:
-                    sonuc = future.result()
-                    if sonuc is not None:
-                        sonuclar.append(sonuc)
-                except Exception as e:
-                    logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
-                
-                # GÜVENLI GÜNCELLEME: Sadece .progress() ve .text() metodlarını çağır
-                ilerleme_yuzde = int((tamamlanan / toplam) * 100)
-                progress_bar.progress(ilerleme_yuzde)
-                status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam}) - {ilerleme_yuzde}%")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_sembol = {
+                    executor.submit(
+                        asenkron_analiz_yap,
+                        sembol,
+                        baslangic,
+                        bitis,
+                        analiz_tipi=analiz_tipi,
+                        veri_kaynagi=veri_kaynagi
+                    ): sembol
+                    for sembol in tarama_listesi
+                }
 
-        # TEMIZ BİTİŞ: Dinamik elemanları silmek yerine doğrudan success yazdır
-        progress_bar.progress(100)
+                tamamlanan = 0
+                for future in concurrent.futures.as_completed(future_to_sembol):
+                    sembol = future_to_sembol[future]
+                    tamamlanan += 1
+                    try:
+                        sonuc = future.result()
+                        if sonuc is not None:
+                            sonuclar.append(sonuc)
+                    except Exception as e:
+                        logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
+
+                    ilerleme_yuzde = int((tamamlanan / toplam) * 100)
+                    status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam}) - {ilerleme_yuzde}%")
+
         st.success("✅ Tarama Tamamlandı!")
         return sonuclar
     except Exception as e:

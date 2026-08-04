@@ -14,36 +14,63 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, timezone
 import requests
+import io
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 })
+# Configure retries and backoff to reduce chance of hitting API rate limits
+import random
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+
+# Retry strategy: handle 429 and common server errors with exponential backoff
+retry_strategy = Retry(
+    total=5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS", "POST"],
+    backoff_factor=1
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
+
+def safe_request(method, url, max_attempts=6, min_delay=0.5, max_delay=2.0, **kwargs):
+    """Make requests using the shared session with exponential backoff and jitter.
+    Respects Retry configured on the session and adds client-side delays to avoid bursts.
+    """
+    attempt = 0
+    while attempt < max_attempts:
+        try:
+            # small random delay before request to avoid simultaneous bursts
+            time.sleep(random.uniform(min_delay, max_delay))
+            resp = session.request(method, url, **kwargs)
+            # If server indicates rate limit, raise to trigger retry logic
+            if resp.status_code == 429:
+                raise requests.exceptions.RetryError(f"429 Too Many Requests for {url}")
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            attempt += 1
+            if attempt >= max_attempts:
+                raise
+            # exponential backoff with jitter
+            backoff = (2 ** (attempt - 1)) + random.uniform(0, 1)
+            time.sleep(backoff)
+
 import concurrent.futures
 import logging
 import os
 import pytz
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
-from sklearn.svm import SVR
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import TimeSeriesSplit
 import sqlite3
 import joblib
-import optuna
-from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
-from sklearn.ensemble import StackingRegressor
-from sklearn.linear_model import Ridge
-from sklearn.ensemble import IsolationForest
-from sklearn.feature_selection import SelectFromModel
-import shap
 
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
 import asyncio
 import aiohttp
 import time
@@ -51,14 +78,8 @@ import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-import numpy as np
-
-
-st.set_page_config(page_title="Borsa Botu", layout="wide")
-st.title("Borsa Botu")
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
-st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
 def get_tv_datafeed():
     """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
@@ -152,6 +173,27 @@ def tum_bist_hisselerini_getir():
   "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", "YESIL.IS", "YGGYO.IS", "YIGIT.IS",
 ]
 
+def veritabani_olustur():
+    """Tüm gerekli SQLite veritabanları oluştur"""
+    # Tahminler ve analiz sonuçları için
+    conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
+                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
+    
+    # Fiyat verileri cache'i için
+    c.execute('''CREATE TABLE IF NOT EXISTS fiyat_cache
+                 (sembol TEXT, tarih TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL, 
+                  veri_tarihi TEXT, PRIMARY KEY (sembol, tarih))''')
+    
+    # Analiz sonuçları cache'i için
+    c.execute('''CREATE TABLE IF NOT EXISTS analiz_cache
+                 (sembol TEXT, tarih TEXT, analiz_tipi TEXT, sonuc TEXT, 
+                  veri_tarihi TEXT, PRIMARY KEY (sembol, tarih, analiz_tipi))''')
+    
+    conn.commit()
+    conn.close()
+
 def tahmin_kaydet(sembol, hedef_fiyat):
     bugun = datetime.now().strftime("%Y-%m-%d")
     with sqlite3.connect('hisse_hafiza.db', timeout=10) as conn:
@@ -161,6 +203,130 @@ def tahmin_kaydet(sembol, hedef_fiyat):
             c.execute("INSERT INTO tahminler (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum) VALUES (?, ?, ?, NULL, 'BEKLİYOR')", 
                       (bugun, sembol, hedef_fiyat))
         conn.commit()
+
+def fiyat_verisi_onayla_ve_kaydet(sembol, df):
+    """Gün içinde çekilen fiyat verilerini veritabanına kaydet (aynı gün değişikliklerini güncelle)"""
+    if df is None or df.empty:
+        return False
+    
+    try:
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+        c = conn.cursor()
+        
+        # Son satırı (en güncel veriyi) al
+        son_veri = df.iloc[-1]
+        
+        # Mevcut kaydı kontrol et ve güncelle (aynı gün içinde)
+        c.execute("SELECT rowid FROM fiyat_cache WHERE sembol=? AND tarih=?", (sembol, bugun))
+        varmi = c.fetchone()
+        
+        if varmi:
+            # Aynı gün değişikliği olmuşsa güncelle
+            c.execute("""UPDATE fiyat_cache 
+                        SET open=?, high=?, low=?, close=?, volume=?, veri_tarihi=?
+                        WHERE sembol=? AND tarih=?""",
+                     (float(son_veri['Open']), float(son_veri['High']), float(son_veri['Low']),
+                      float(son_veri['Close']), float(son_veri['Volume']), datetime.now().isoformat(),
+                      sembol, bugun))
+        else:
+            # Yeni kayıt ekle
+            c.execute("""INSERT INTO fiyat_cache 
+                        (sembol, tarih, open, high, low, close, volume, veri_tarihi)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (sembol, bugun, float(son_veri['Open']), float(son_veri['High']), 
+                      float(son_veri['Low']), float(son_veri['Close']), 
+                      float(son_veri['Volume']), datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logging.error(f"Fiyat cache hatası [{sembol}]: {e}")
+        return False
+
+def fiyat_verisi_cache_den_al(sembol, baslangic, bitis):
+    """Aynı gün içinde çekilen verileri veritabanından al (API çağrısı yapmaz)"""
+    try:
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        
+        # Sadece bugünün verilerini cache'ten al
+        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+        c = conn.cursor()
+        
+        c.execute("""SELECT tarih, open, high, low, close, volume FROM fiyat_cache 
+                    WHERE sembol=? AND tarih=? ORDER BY tarih""", (sembol, bugun))
+        
+        veriler = c.fetchall()
+        conn.close()
+        
+        if not veriler:
+            return None
+        
+        # DataFrame'e dönüştür
+        df = pd.DataFrame(veriler, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        df['Date'] = pd.to_datetime(df['Date'])
+        df.set_index('Date', inplace=True)
+        return df
+    except Exception as e:
+        logging.error(f"Cache okuma hatası [{sembol}]: {e}")
+        return None
+
+def analiz_sonucu_kaydet(sembol, analiz_tipi, sonuc_dict):
+    """Analiz sonuçlarını JSON formatında veritabanına kaydet"""
+    try:
+        import json
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        
+        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+        c = conn.cursor()
+        
+        # Dict'i JSON string'ine dönüştür
+        sonuc_json = json.dumps(sonuc_dict, ensure_ascii=False)
+        
+        # Mevcut kaydı kontrol et
+        c.execute("SELECT rowid FROM analiz_cache WHERE sembol=? AND tarih=? AND analiz_tipi=?", 
+                 (sembol, bugun, analiz_tipi))
+        varmi = c.fetchone()
+        
+        if varmi:
+            c.execute("""UPDATE analiz_cache SET sonuc=?, veri_tarihi=? 
+                        WHERE sembol=? AND tarih=? AND analiz_tipi=?""",
+                     (sonuc_json, datetime.now().isoformat(), sembol, bugun, analiz_tipi))
+        else:
+            c.execute("""INSERT INTO analiz_cache (sembol, tarih, analiz_tipi, sonuc, veri_tarihi)
+                        VALUES (?, ?, ?, ?, ?)""",
+                     (sembol, bugun, analiz_tipi, sonuc_json, datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logging.error(f"Analiz cache yazma hatası [{sembol}]: {e}")
+        return False
+
+def analiz_sonucu_cache_den_al(sembol, analiz_tipi):
+    """Aynı gün içindeki analiz sonuçlarını cache'ten al"""
+    try:
+        import json
+        bugun = datetime.now().strftime("%Y-%m-%d")
+        
+        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
+        c = conn.cursor()
+        
+        c.execute("""SELECT sonuc FROM analiz_cache 
+                    WHERE sembol=? AND tarih=? AND analiz_tipi=?""",
+                 (sembol, bugun, analiz_tipi))
+        
+        sonuc = c.fetchone()
+        conn.close()
+        
+        if sonuc:
+            return json.loads(sonuc[0])
+        return None
+    except Exception as e:
+        logging.error(f"Analiz cache okuma hatası [{sembol}]: {e}")
+        return None
 def tahminleri_degerlendir():
     """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar (Optimize Edilmiş Sürüm)."""
     try:
@@ -532,6 +698,7 @@ def anomali_tespit_et(df):
         return "Veri yetersiz"
         
     # contamination=0.02: Verinin %2'sini "anormal" kabul edecek şekilde eğit
+    from sklearn.ensemble import IsolationForest
     iso_forest = IsolationForest(contamination=0.02, random_state=42)
     features['Anomaly'] = iso_forest.fit_predict(features)
     
@@ -914,6 +1081,7 @@ from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
 def modeli_degerlendir(X, y):
     from xgboost import XGBClassifier
+    from sklearn.model_selection import TimeSeriesSplit, cross_val_score
     # n_splits=5 ile veriyi zaman ekseninde 5 parçaya böler, 
     # her seferinde sadece geçmiş verilerle eğitip GELECEK veride test eder.
     tscv = TimeSeriesSplit(n_splits=5)
@@ -1185,6 +1353,8 @@ def hizli_backtest_yap(sembol, baslangic, bitis):
         logging.error(f"[{sembol}] Backtest Hatası: {str(e)}")
         return None
 def stacking_model_olustur(xgb_model, rf_model, svr_model):
+    from sklearn.ensemble import StackingRegressor
+    from sklearn.linear_model import Ridge
     estimators = [
         ('xgb', xgb_model),
         ('rf', rf_model),
@@ -1215,6 +1385,7 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
+        import shap
         # TreeExplainer kullanıyoruz (Stacking içinde XGBoost'u çekmek gerekebilir)
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(X_train)
@@ -1431,7 +1602,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
-            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
+            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0, 'confidence': 0.0}
             
             # 👇 YENİ EKLENECEK BLOK 👇
             # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
@@ -1466,6 +1637,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             kesin_dip_mi = temp_4h.get('Kesin_Dip_Donusu', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
             dip_durum = "🔥 KESİN DÖNÜŞ ONAYI!" if kesin_dip_mi else "-"
 
+            ai_guven = float(ai_veri.get('confidence', 0.0))
+            guncel_hacim = int(df_g['Volume'].iloc[-1]) if 'Volume' in df_g.columns and not df_g['Volume'].empty else 0
+
             return {
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
@@ -1479,7 +1653,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "🔍 Tespit Edilen Formasyon": formasyon_adi,
                 "🎯 Formasyon Hedefi (%)": formasyon_hedef,
                 "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'), # İçinde gün tahmini de yazacak
-                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
+                "AI Güven": ai_guven,
+                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL",
+                "Hacim": guncel_hacim
             }
 
         elif analiz_tipi == "stoch":
@@ -1514,7 +1690,10 @@ def institutional_decision(df):
 @st.cache_data(ttl=86400) # Her hissenin en iyi ayarını 24 saat hafızada tut
 def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     """Optuna ile hissenin o anki volatilitesine en uygun AI ayarlarını bulur."""
+    import optuna
     from xgboost import XGBRegressor
+    from sklearn.model_selection import TimeSeriesSplit
+    from sklearn.metrics import mean_squared_error
     optuna.logging.set_verbosity(optuna.logging.WARNING) # Konsol kalabalığını önler
     
     def objective(trial):
@@ -1546,6 +1725,12 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
 def ensemble_prediction(df, sembol="Genel"):
     try:
         from xgboost import XGBRegressor
+        from sklearn.feature_selection import SelectFromModel
+        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+        from sklearn.pipeline import Pipeline
+        from sklearn.svm import SVR
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.linear_model import Ridge
         # 🟢 DÜZELTME: Orijinal dataframe'i bozmamak için doğrudan kopyalıyoruz
         t_df = df.copy()
         t_df = borsa_endeks_verisini_ekle(t_df)
@@ -1841,6 +2026,7 @@ def ensemble_prediction(df, sembol="Genel"):
 def gelismis_ai_tahmin(df, gelecek_gun=10, temel_veriler=None, temel_skor=0):
     try:
         from xgboost import XGBRegressor
+        from sklearn.preprocessing import StandardScaler
         df_ml = df.copy()
         
         # --- 1. ADIM: Temel Analiz Verilerini Dahil Etme ---
@@ -1965,8 +2151,6 @@ import pandas as pd
 def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
 
     try:
-        from keras.models import Sequential
-        from keras.layers import LSTM, Dense, Dropout
         from sklearn.preprocessing import MinMaxScaler
         t_df = df.copy()
         
@@ -2053,6 +2237,7 @@ def temel_verileri_temizle(df):
 # ==========================================
 # 4. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
+@st.cache_data(ttl=600, show_spinner=False)
 async def tek_hisse_getir(session, sem, hisse_kodu):
     """
     Tek bir hissenin verisini asenkron olarak çeker.
@@ -2160,7 +2345,18 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔍 Radar Ek Filtreleri")
 sadece_super_sinyal = st.sidebar.checkbox("🌟 Sadece Süper Sinyal Verenler", value=False)
 sadece_spring = st.sidebar.checkbox("🎯 Sadece Wyckoff Spring", value=False)
+min_ai_guveni = st.sidebar.slider("Minimum Yapay Zeka Güveni", min_value=0, max_value=100, value=40, step=5)
+min_hacim = st.sidebar.slider("Minimum Hacim (son gün)", min_value=0, max_value=500000000, value=0, step=100000)
 # --------------------------------------------------------
+
+def filtrele_tablo(df):
+    if df is None or df.empty:
+        return df
+    if 'AI Güven' in df.columns:
+        df = df[df['AI Güven'] >= min_ai_guveni]
+    if 'Hacim' in df.columns:
+        df = df[df['Hacim'] >= min_hacim]
+    return df
 
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
@@ -2386,20 +2582,63 @@ with tabs[1]:
         with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
             f.write(tip_adi)
 
+    def show_download_buttons(df, prefix):
+        if df is None or df.empty:
+            return
+        csv_bytes = df.to_csv(index=False).encode('utf-8-sig')
+        excel_bytes = None
+        try:
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False)
+            excel_bytes = excel_buffer.getvalue()
+        except Exception as e:
+            logging.debug(f"Excel dosyası oluşturulurken hata: {e}")
+
+        col_csv, col_excel = st.columns([1, 1])
+        with col_csv:
+            st.download_button(
+                label="📥 CSV indir",
+                data=csv_bytes,
+                file_name=f"{prefix}.csv",
+                mime="text/csv",
+            )
+        with col_excel:
+            if excel_bytes is not None:
+                st.download_button(
+                    label="📥 Excel indir",
+                    data=excel_bytes,
+                    file_name=f"{prefix}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                st.info("Excel indirmek için openpyxl yüklü olmalıdır.")
+
     # 1. GENEL RADAR
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            progress = st.progress(0)
+            status_text = st.empty()
+            total = max(1, len(tarama_listesi))
+            tamamlanan = 0
+            # Dinamik işçi sayısı: en fazla 32, en az 4 veya hisse sayısına göre
+            workers = min(32, max(4, len(tarama_listesi)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s
                     for s in tarama_listesi
                 }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
+                    tamamlanan += 1
+                    progress.progress(int((tamamlanan / total) * 100))
+                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
                     if sonuc:
                         radar_sonuclari.append(sonuc)
                         
+            progress.progress(100)
+            status_text.text("Tarama tamamlandı.")
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 taramayi_kaydet(df_radar, "Genel Radar Taraması")
@@ -2413,9 +2652,12 @@ with tabs[1]:
                 
                 if locals().get('sadece_spring', False):
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+
+                df_goster = filtrele_tablo(df_goster)
             # -------------------------------------
             
                 st.dataframe(df_goster, width="stretch", hide_index=True)
+                show_download_buttons(df_goster, "genel_radar_sonuc")
                 st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
@@ -2424,20 +2666,31 @@ with tabs[1]:
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
             stoch_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            progress = st.progress(0)
+            status_text = st.empty()
+            total = max(1, len(tarama_listesi))
+            tamamlanan = 0
+            workers = min(32, max(4, len(tarama_listesi)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s 
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s
                     for s in tarama_listesi
                 }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
+                    tamamlanan += 1
+                    progress.progress(int((tamamlanan / total) * 100))
+                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
                     if sonuc:
                         stoch_sonuclari.append(sonuc)
-            
+            progress.progress(100)
+            status_text.text("Tarama tamamlandı.")
             if stoch_sonuclari:
                 df_stoch = pd.DataFrame(stoch_sonuclari)
+                df_stoch = filtrele_tablo(df_stoch)
                 taramayi_kaydet(df_stoch, "Stoch Analizi")
                 st.dataframe(df_stoch, width="stretch", hide_index=True)
+                show_download_buttons(df_stoch, "stoch_analizi_sonuc")
                 st.success("✅ Stoch taraması kaydedildi!")
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
@@ -2446,20 +2699,31 @@ with tabs[1]:
     elif btn_tilson:
         with st.spinner('Tilson T3 trend analizi taranıyor...'):
             tilson_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            progress = st.progress(0)
+            status_text = st.empty()
+            total = max(1, len(tarama_listesi))
+            tamamlanan = 0
+            workers = min(32, max(4, len(tarama_listesi)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s 
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s
                     for s in tarama_listesi
                 }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
+                    tamamlanan += 1
+                    progress.progress(int((tamamlanan / total) * 100))
+                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
                     if sonuc:
                         tilson_sonuclari.append(sonuc)
-            
+            progress.progress(100)
+            status_text.text("Tarama tamamlandı.")
             if tilson_sonuclari:
                 df_tilson = pd.DataFrame(tilson_sonuclari)
+                df_tilson = filtrele_tablo(df_tilson)
                 taramayi_kaydet(df_tilson, "Tilson (T3) Analizi")
                 st.dataframe(df_tilson, width="stretch", hide_index=True)
+                show_download_buttons(df_tilson, "tilson_analizi_sonuc")
                 st.success("✅ Tilson T3 taraması kaydedildi!")
             else:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
@@ -2468,16 +2732,25 @@ with tabs[1]:
     elif btn_nokta_atisi:
         with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
             radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            progress = st.progress(0)
+            status_text = st.empty()
+            total = max(1, len(tarama_listesi))
+            tamamlanan = 0
+            workers = min(32, max(4, len(tarama_listesi)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s
                     for s in tarama_listesi
                 }
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
+                    tamamlanan += 1
+                    progress.progress(int((tamamlanan / total) * 100))
+                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
                     if sonuc:
                         radar_sonuclari.append(sonuc)
-            
+            progress.progress(100)
+            status_text.text("Tarama tamamlandı.")
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 
@@ -2498,10 +2771,13 @@ with tabs[1]:
                 if 'sadece_spring' in locals() and sadece_spring:
                     df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
 
+                df_sniper = filtrele_tablo(df_sniper)
+
                 if not df_sniper.empty:
                     taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
                     st.dataframe(df_sniper, width="stretch", hide_index=True)
+                    show_download_buttons(df_sniper, "nokta_atisi_sniper_sonuc")
                     st.balloons()
                 else:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
@@ -2532,9 +2808,11 @@ with tabs[1]:
             if 'sadece_spring' in locals() and sadece_spring:
                 if '🪤 Spring (Tuzak)' in df_goster.columns:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+            df_goster = filtrele_tablo(df_goster)
             # -----------------------------------------------------------
             
             st.dataframe(df_goster, width="stretch", hide_index=True)
+            show_download_buttons(df_goster, "son_tarama_sonuc")
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:

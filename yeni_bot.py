@@ -2,6 +2,11 @@
 # KÜTÜPHANELER (En üste taşındı ve hızlandırıldı)
 # ==========================================
 import streamlit as st
+
+# Bu komut ilk satırlarda olmalı ki ekran beyaz kalmasın, hemen arayüz yüklensin
+st.set_page_config(
+    page_title="Pro BIST Terminali", layout="wide", initial_sidebar_state="expanded"
+)
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go

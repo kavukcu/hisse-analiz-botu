@@ -1,6 +1,7 @@
 # ==========================================
 # KÜTÜPHANELER (En üste taşındı ve hızlandırıldı)
 # ==========================================
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
@@ -52,7 +53,7 @@ from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
 import numpy as np
-import streamlit as st
+
 
 st.set_page_config(page_title="Borsa Botu", layout="wide")
 st.title("Borsa Botu")

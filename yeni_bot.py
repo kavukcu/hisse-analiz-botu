@@ -2685,8 +2685,9 @@ with tabs[1]:
                     tamamlanan += 1
                     current_hisse = gelecek_sonuclar[future]
                     yuzde = int((tamamlanan / total) * 100)
-                    progress.progress(yuzde)
-                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
+                    if tamamlanan % 5 == 0 or tamamlanan == total:
+                        progress.progress(yuzde)
+                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         radar_sonuclari.append(sonuc)
                         
@@ -2727,8 +2728,9 @@ with tabs[1]:
                     tamamlanan += 1
                     current_hisse = gelecek_sonuclar[future]
                     yuzde = int((tamamlanan / total) * 100)
-                    progress.progress(yuzde)
-                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
+                    if tamamlanan % 5 == 0 or tamamlanan == total:
+                        progress.progress(yuzde)
+                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         stoch_sonuclari.append(sonuc)
             progress.progress(100)
@@ -2760,8 +2762,9 @@ with tabs[1]:
                     tamamlanan += 1
                     current_hisse = gelecek_sonuclar[future]
                     yuzde = int((tamamlanan / total) * 100)
-                    progress.progress(yuzde)
-                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
+                    if tamamlanan % 5 == 0 or tamamlanan == total:
+                        progress.progress(yuzde)
+                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         tilson_sonuclari.append(sonuc)
             progress.progress(100)
@@ -2793,8 +2796,9 @@ with tabs[1]:
                     tamamlanan += 1
                     current_hisse = gelecek_sonuclar[future]
                     yuzde = int((tamamlanan / total) * 100)
-                    progress.progress(yuzde)
-                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
+                    if tamamlanan % 5 == 0 or tamamlanan == total:
+                        progress.progress(yuzde)
+                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         radar_sonuclari.append(sonuc)
             progress.progress(100)

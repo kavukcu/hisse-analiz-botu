@@ -2396,6 +2396,53 @@ def filtrele_al_sat_sinyali(df):
 
     return df[mask].copy()
 
+def paralel_tarama(analiz_tipi, mesaj, max_workers=10):
+    """Listeyi ThreadPoolExecutor ile paralel tarar ve kullanıcıya ilerleme çubuğu gösterir."""
+    try:
+        if not tarama_listesi:
+            return []
+
+        max_workers = min(max_workers, max(1, len(tarama_listesi)))
+        status_text = st.empty()
+        progress_bar = st.progress(0)
+        status_text.info(mesaj)
+
+        sonuclar = []
+        toplam = len(tarama_listesi)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_sembol = {
+                executor.submit(
+                    asenkron_analiz_yap,
+                    sembol,
+                    baslangic,
+                    bitis,
+                    analiz_tipi=analiz_tipi,
+                    veri_kaynagi=veri_kaynagi
+                ): sembol
+                for sembol in tarama_listesi
+            }
+
+            tamamlanan = 0
+            for future in concurrent.futures.as_completed(future_to_sembol):
+                sembol = future_to_sembol[future]
+                tamamlanan += 1
+                try:
+                    sonuc = future.result()
+                    if sonuc is not None:
+                        sonuclar.append(sonuc)
+                except Exception as e:
+                    logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
+                progress_bar.progress(int((tamamlanan / toplam) * 100))
+                status_text.info(f"{mesaj} ({tamamlanan}/{toplam})")
+
+        progress_bar.progress(100)
+        status_text.success("Tarama tamamlandı.")
+        return sonuclar
+    except Exception as e:
+        logging.error(f"paralel_tarama fonksiyonu hatası: {e}")
+        return []
+
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
 # ---------------------------------------------------------
@@ -2668,171 +2715,94 @@ with tabs[1]:
 
     # 1. GENEL RADAR
     if btn_radar:
-        with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
-            radar_sonuclari = []
-            progress = st.progress(0)
-            status_text = st.empty()
-            total = max(1, len(tarama_listesi))
-            tamamlanan = 0
-            workers = min(10, max(2, len(tarama_listesi)))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    tamamlanan += 1
-                    current_hisse = gelecek_sonuclar[future]
-                    yuzde = int((tamamlanan / total) * 100)
-                    if tamamlanan % 5 == 0 or tamamlanan == total:
-                        progress.progress(yuzde)
-                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
-                    if sonuc:
-                        radar_sonuclari.append(sonuc)
-                        
-            progress.progress(100)
-            status_text.success("Tarama Tamamlandı!")
-            if radar_sonuclari:
-                df_radar = pd.DataFrame(radar_sonuclari)
-                df_goster = df_radar.copy()
+        radar_sonuclari = paralel_tarama(
+            "radar",
+            'Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.',
+            min(10, max(2, len(tarama_listesi)))
+        )
+        if radar_sonuclari:
+            df_radar = pd.DataFrame(radar_sonuclari)
+            df_goster = df_radar.copy()
 
-                if locals().get('sadece_super_sinyal', False):
-                    df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+            if locals().get('sadece_super_sinyal', False):
+                df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
 
-                if locals().get('sadece_spring', False):
-                    df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+            if locals().get('sadece_spring', False):
+                df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
 
-                df_goster = filtrele_tablo(df_goster)
-                set_current_scan(df_goster, "Genel Radar Taraması", "genel_radar_sonuc")
-                st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
-            else:
-                st.warning("⚠️ Tarama sonucu bulunamadı.")
+            df_goster = filtrele_tablo(df_goster)
+            set_current_scan(df_goster, "Genel Radar Taraması", "genel_radar_sonuc")
+            st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
+        else:
+            st.warning("⚠️ Tarama sonucu bulunamadı.")
 
     # 2. STOCH ANALİZİ
     elif btn_stoch:
-        with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
-            stoch_sonuclari = []
-            progress = st.progress(0)
-            status_text = st.empty()
-            total = max(1, len(tarama_listesi))
-            tamamlanan = 0
-            workers = min(32, max(4, len(tarama_listesi)))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    tamamlanan += 1
-                    current_hisse = gelecek_sonuclar[future]
-                    yuzde = int((tamamlanan / total) * 100)
-                    if tamamlanan % 5 == 0 or tamamlanan == total:
-                        progress.progress(yuzde)
-                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
-                    if sonuc:
-                        stoch_sonuclari.append(sonuc)
-            progress.progress(100)
-            status_text.success("Tarama Tamamlandı!")
-            if stoch_sonuclari:
-                df_stoch = pd.DataFrame(stoch_sonuclari)
-                df_stoch = filtrele_tablo(df_stoch)
-                set_current_scan(df_stoch, "Stoch Analizi", "stoch_analizi_sonuc")
-                st.success("✅ Stoch taraması kaydedildi!")
-            else:
-                st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
+        stoch_sonuclari = paralel_tarama(
+            "stoch",
+            'Özel Stoch Analizi paralel taranıyor...',
+            min(32, max(4, len(tarama_listesi)))
+        )
+        if stoch_sonuclari:
+            df_stoch = pd.DataFrame(stoch_sonuclari)
+            df_stoch = filtrele_tablo(df_stoch)
+            set_current_scan(df_stoch, "Stoch Analizi", "stoch_analizi_sonuc")
+            st.success("✅ Stoch taraması kaydedildi!")
+        else:
+            st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
     # 3. TİLSON ANALİZİ
     elif btn_tilson:
-        with st.spinner('Tilson T3 trend analizi taranıyor...'):
-            tilson_sonuclari = []
-            progress = st.progress(0)
-            status_text = st.empty()
-            total = max(1, len(tarama_listesi))
-            tamamlanan = 0
-            workers = min(32, max(4, len(tarama_listesi)))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    tamamlanan += 1
-                    current_hisse = gelecek_sonuclar[future]
-                    yuzde = int((tamamlanan / total) * 100)
-                    if tamamlanan % 5 == 0 or tamamlanan == total:
-                        progress.progress(yuzde)
-                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
-                    if sonuc:
-                        tilson_sonuclari.append(sonuc)
-            progress.progress(100)
-            status_text.success("Tarama Tamamlandı!")
-            if tilson_sonuclari:
-                df_tilson = pd.DataFrame(tilson_sonuclari)
-                df_tilson = filtrele_tablo(df_tilson)
-                set_current_scan(df_tilson, "Tilson (T3) Analizi", "tilson_analizi_sonuc")
-                st.success("✅ Tilson T3 taraması kaydedildi!")
-            else:
-                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
+        tilson_sonuclari = paralel_tarama(
+            "tilson",
+            'Tilson T3 trend analizi taranıyor...',
+            min(32, max(4, len(tarama_listesi)))
+        )
+        if tilson_sonuclari:
+            df_tilson = pd.DataFrame(tilson_sonuclari)
+            df_tilson = filtrele_tablo(df_tilson)
+            set_current_scan(df_tilson, "Tilson (T3) Analizi", "tilson_analizi_sonuc")
+            st.success("✅ Tilson T3 taraması kaydedildi!")
+        else:
+            st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     # 4. NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
-        with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
-            radar_sonuclari = []
-            progress = st.progress(0)
-            status_text = st.empty()
-            total = max(1, len(tarama_listesi))
-            tamamlanan = 0
-            workers = min(32, max(4, len(tarama_listesi)))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    tamamlanan += 1
-                    current_hisse = gelecek_sonuclar[future]
-                    yuzde = int((tamamlanan / total) * 100)
-                    if tamamlanan % 5 == 0 or tamamlanan == total:
-                        progress.progress(yuzde)
-                        status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
-                    if sonuc:
-                        radar_sonuclari.append(sonuc)
-            progress.progress(100)
-            status_text.success("Tarama Tamamlandı!")
-            if radar_sonuclari:
-                df_radar = pd.DataFrame(radar_sonuclari)
-                df_radar = downcast_float64_columns(df_radar)
-                # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
-                df_sniper = df_radar[
-                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
-                    (
-                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
-                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
-                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
-                    )
-                ]
-                
-                # Ekstra Kenar Çubuğu Filtresi İşletilmesi
-                if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
-                    df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
-                if 'sadece_spring' in locals() and sadece_spring:
-                    df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
+        radar_sonuclari = paralel_tarama(
+            "radar",
+            'Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...',
+            min(32, max(4, len(tarama_listesi)))
+        )
+        if radar_sonuclari:
+            df_radar = pd.DataFrame(radar_sonuclari)
+            df_radar = downcast_float64_columns(df_radar)
+            # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
+            df_sniper = df_radar[
+                (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
+                (
+                    (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
+                    (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
+                    (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+                )
+            ]
+            
+            # Ekstra Kenar Çubuğu Filtresi İşletilmesi
+            if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
+                df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+            if 'sadece_spring' in locals() and sadece_spring:
+                df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
 
-                df_sniper = filtrele_tablo(df_sniper)
+            df_sniper = filtrele_tablo(df_sniper)
 
-                if not df_sniper.empty:
-                    set_current_scan(df_sniper, "Nokta Atışı (Sniper)", "nokta_atisi_sniper_sonuc")
-                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
-                    st.balloons()
-                else:
-                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
+            if not df_sniper.empty:
+                set_current_scan(df_sniper, "Nokta Atışı (Sniper)", "nokta_atisi_sniper_sonuc")
+                st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
+                st.balloons()
             else:
-                st.warning("⚠️ Tarama yapılamadı.")
+                st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
+        else:
+            st.warning("⚠️ Tarama yapılamadı.")
 
     # 5. EN SON TARAMAYI GETİR
     elif btn_son_tarama:

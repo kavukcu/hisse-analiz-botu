@@ -2397,15 +2397,21 @@ def filtrele_al_sat_sinyali(df):
     return df[mask].copy()
 
 def paralel_tarama(analiz_tipi, mesaj, max_workers=10):
-    """Listeyi ThreadPoolExecutor ile paralel tarar ve kullanıcıya ilerleme çubuğu gösterir."""
+    """Listeyi ThreadPoolExecutor ile paralel tarar ve kullanıcıya ilerleme çubuğu gösterir.
+    
+    Streamlit Cloud uyumlu: st.empty() yerine sabit progress_bar ve status_text kullanır.
+    Thread'lerden gelen sonuçları sadece .progress() ve .text() ile günceller.
+    Hiçbir zaman elemanları silmeye (.empty()) veya yeniden yaratmaya çalışmaz.
+    """
     try:
         if not tarama_listesi:
             return []
 
         max_workers = min(max_workers, max(1, len(tarama_listesi)))
-        status_text = st.empty()
+        
+        # SABIT İLERLEME YÖNETİMİ: Döngü öncesinde sadece bir kez tanımla
+        status_text = st.text(f"⏳ {mesaj}")
         progress_bar = st.progress(0)
-        status_text.info(mesaj)
 
         sonuclar = []
         toplam = len(tarama_listesi)
@@ -2433,14 +2439,19 @@ def paralel_tarama(analiz_tipi, mesaj, max_workers=10):
                         sonuclar.append(sonuc)
                 except Exception as e:
                     logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
-                progress_bar.progress(int((tamamlanan / toplam) * 100))
-                status_text.info(f"{mesaj} ({tamamlanan}/{toplam})")
+                
+                # GÜVENLI GÜNCELLEME: Sadece .progress() ve .text() metodlarını çağır
+                ilerleme_yuzde = int((tamamlanan / toplam) * 100)
+                progress_bar.progress(ilerleme_yuzde)
+                status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam}) - {ilerleme_yuzde}%")
 
+        # TEMIZ BİTİŞ: Dinamik elemanları silmek yerine doğrudan success yazdır
         progress_bar.progress(100)
-        status_text.success("Tarama tamamlandı.")
+        st.success("✅ Tarama Tamamlandı!")
         return sonuclar
     except Exception as e:
         logging.error(f"paralel_tarama fonksiyonu hatası: {e}")
+        st.error(f"⚠️ Tarama sırasında hata oluştu: {e}")
         return []
 
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")

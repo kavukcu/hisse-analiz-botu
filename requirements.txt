@@ -19,7 +19,7 @@ yfinance
 pandas
 numpy
 taipy
-tensorflow==2.19.0
+tensorflow
 keras==3.11.0
 shap>=0.48.0
 

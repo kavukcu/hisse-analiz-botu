@@ -29,7 +29,6 @@ from sklearn.svm import SVR
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
-from xgboost import XGBRegressor
 import sqlite3
 import joblib
 import optuna
@@ -44,12 +43,7 @@ import shap
 
 import matplotlib.pyplot as plt
 import numpy as np
-from keras.models import Sequential
-from keras.layers import LSTM, Dropout, Dense, Input
 from sklearn.preprocessing import MinMaxScaler
-import gymnasium as gym
-import gym_anytrading
-from stable_baselines3 import A2C
 import asyncio
 import aiohttp
 import time
@@ -62,10 +56,6 @@ import numpy as np
 
 st.set_page_config(page_title="Borsa Botu", layout="wide")
 st.title("Borsa Botu")
-from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout
-from sklearn.preprocessing import MinMaxScaler
-import keras.backend as K
 
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
@@ -286,7 +276,7 @@ import pandas as pd
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
     # 1. Sembolü temizle
     ticker = ticker.replace("$", "").strip() 
@@ -398,6 +388,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
 # ==========================================
 # 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
 # ==========================================
+@st.cache_data(ttl=600, show_spinner=False)
 def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf
     import pandas as pd
@@ -475,6 +466,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     return pd.DataFrame()
 import yfinance as yf
 
+@st.cache_data(ttl=600, show_spinner=False)
 def borsa_endeks_verisini_ekle(t_df):
     try:
         # BIST100 verisini çek (Son 1 yıllık günlük veri yeterli olacaktır)
@@ -522,7 +514,7 @@ def tilson_t3(close, period=5, vfactor=0.7):
     
     return c1*ema6 + c2*ema5 + c3*ema4 + c4*ema3
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def sirket_bilgisi_getir(ticker):
     try: 
         return yf.Ticker(ticker, session=oturum).info
@@ -726,7 +718,6 @@ def grafik_formasyon_bul(df, window=10, tolerans=0.03):
         return [], []
 
 def yapay_zeka_icin_formasyon_bul(df):
-    import tensorflow as tf
     """
     Mum formasyonlarını yapay zekanın anlayacağı sayısal değerlere (-1, 0, 1) dönüştürür.
     1: Yükseliş Formasyonu (Boğa)
@@ -920,9 +911,9 @@ def ozellikleri_zenginlestir(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
-from xgboost import XGBClassifier
 
 def modeli_degerlendir(X, y):
+    from xgboost import XGBClassifier
     # n_splits=5 ile veriyi zaman ekseninde 5 parçaya böler, 
     # her seferinde sadece geçmiş verilerle eğitip GELECEK veride test eder.
     tscv = TimeSeriesSplit(n_splits=5)
@@ -1248,6 +1239,7 @@ def python_istatistik_analizi(df):
     except:
         return {'Yıllık Volatilite': "% 0.00", 'Sharpe Oranı': "0.00", 'Günlük VaR (%95)': "% 0.00"}
 
+@st.cache_data(ttl=600, show_spinner=False)
 def haber_duygu_analizi(ticker):
     try:
         news_data = yf.Ticker(ticker, session=oturum).news
@@ -1522,6 +1514,7 @@ def institutional_decision(df):
 @st.cache_data(ttl=86400) # Her hissenin en iyi ayarını 24 saat hafızada tut
 def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     """Optuna ile hissenin o anki volatilitesine en uygun AI ayarlarını bulur."""
+    from xgboost import XGBRegressor
     optuna.logging.set_verbosity(optuna.logging.WARNING) # Konsol kalabalığını önler
     
     def objective(trial):
@@ -1552,6 +1545,7 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
     try:
+        from xgboost import XGBRegressor
         # 🟢 DÜZELTME: Orijinal dataframe'i bozmamak için doğrudan kopyalıyoruz
         t_df = df.copy()
         t_df = borsa_endeks_verisini_ekle(t_df)
@@ -1846,6 +1840,7 @@ def ensemble_prediction(df, sembol="Genel"):
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10, temel_veriler=None, temel_skor=0):
     try:
+        from xgboost import XGBRegressor
         df_ml = df.copy()
         
         # --- 1. ADIM: Temel Analiz Verilerini Dahil Etme ---
@@ -1939,6 +1934,9 @@ def rl_ajani_egit(df):
     Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.
     Veride 'Open', 'High', 'Low', 'Close', 'Volume' sütunları olmalıdır.
     """
+    import gymnasium as gym
+    import gym_anytrading
+    from stable_baselines3 import A2C
     # Veri setini RL çevresine (environment) yükle
     window_size = 30
     start_index = window_size
@@ -1963,12 +1961,13 @@ def rl_ajani_egit(df):
     return aksiyon_metni
 import numpy as np
 import pandas as pd
-from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout, Input
-from sklearn.preprocessing import MinMaxScaler
 
 def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
+
     try:
+        from keras.models import Sequential
+        from keras.layers import LSTM, Dense, Dropout
+        from sklearn.preprocessing import MinMaxScaler
         t_df = df.copy()
         
         # 1. Yeni Stratejiye Uygun Özellik Listesi (Normalize Edilmiş İndikatörler)
@@ -2004,15 +2003,18 @@ def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
             t_df['LSTM_Score'] = 0.5
             return t_df
 
-        # 2. Sınıflandırma Odaklı LSTM Mimarısi
-        model = Sequential([
-            Input(shape=(X_train.shape[1], X_train.shape[2])),
-            LSTM(32, return_sequences=True),
-            Dropout(0.2),
-            LSTM(16, return_sequences=False),
-            Dropout(0.2),
-            Dense(16, activation='relu'),
-            Dense(1, activation='sigmoid') # 0 ile 1 arasında olasılık skoru üretir
+        # --- TENSORFLOW LAZY IMPORT ---
+        import tensorflow as tf
+
+        # 2. Sınıflandırma Odaklı LSTM Mimarisi
+        model = tf.keras.models.Sequential([
+            tf.keras.layers.Input(shape=(X_train.shape[1], X_train.shape[2])),
+            tf.keras.layers.LSTM(32, return_sequences=True),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.LSTM(16, return_sequences=False),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(16, activation='relu'),
+            tf.keras.layers.Dense(1, activation='sigmoid') # 0 ile 1 arasında olasılık skoru üretir
         ])
         
         # Sigmoid çıkışı için Binary Crossentropy kullanıyoruz

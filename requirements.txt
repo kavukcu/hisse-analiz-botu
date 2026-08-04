@@ -14,7 +14,11 @@ xgboost>=3.0.0
 lightgbm>=4.6.0
 catboost>=1.2.8
 optuna>=4.5.0
-
+streamlit
+yfinance
+pandas
+numpy
+taipy
 tensorflow==2.19.0
 keras==3.11.0
 shap>=0.48.0

@@ -468,14 +468,24 @@ import yfinance as yf
 def borsa_endeks_verisini_ekle(t_df):
     try:
         # BIST100 verisini çek (Son 1 yıllık günlük veri yeterli olacaktır)
-        xu100 = yf.download("XU100.IS", period="1y", interval="1d", progress=False)
+        xu100 = yf.download("XU100.IS", period="1y", interval="1d", progress=False, auto_adjust=True)
         
+        # yfinance son sürümlerinde gelen MultiIndex kolon yapısını temizle
+        if isinstance(xu100.columns, pd.MultiIndex):
+            xu100.columns = xu100.columns.droplevel(1)
+            
         # BIST100'ün günlük getirisini hesapla
         xu100['XU100_Return'] = xu100['Close'].pct_change()
         xu100['XU100_Trend'] = np.where(xu100['Close'] > xu100['Close'].rolling(20).mean(), 1, -1)
         
-        # Sadece ihtiyacımız olan sütunları al ve tarih indeksini hisse tablosuyla eşleştir
+        # Sadece ihtiyacımız olan sütunları al
         xu100 = xu100[['XU100_Return', 'XU100_Trend']]
+        
+        # t_df kolonlarının da tek seviyeli (MultiIndex olmayan) olduğundan emin olalım
+        if isinstance(t_df.columns, pd.MultiIndex):
+            t_df.columns = t_df.columns.droplevel(1)
+            
+        # Güvenli bir şekilde birleştirme yap
         t_df = t_df.merge(xu100, left_index=True, right_index=True, how='left')
         
         # Boşlukları doldur (Eğer endeks kapalıysa, bir önceki günün verisini kullan)

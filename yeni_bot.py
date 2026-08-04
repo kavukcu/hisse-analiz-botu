@@ -35,6 +35,15 @@ adapter = HTTPAdapter(max_retries=retry_strategy)
 session.mount("https://", adapter)
 session.mount("http://", adapter)
 
+def downcast_float64_columns(df):
+    """Otomatik olarak float64 sütunlarını float32 tipine indirger."""
+    if isinstance(df, pd.DataFrame):
+        float_cols = df.select_dtypes(include=['float64']).columns
+        if len(float_cols) > 0:
+            df[float_cols] = df[float_cols].astype('float32')
+    return df
+
+
 def safe_request(method, url, max_attempts=6, min_delay=0.5, max_delay=2.0, **kwargs):
     """Make requests using the shared session with exponential backoff and jitter.
     Respects Retry configured on the session and adds client-side delays to avoid bursts.
@@ -62,6 +71,7 @@ import concurrent.futures
 import logging
 import os
 import pytz
+import gc
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
 import sqlite3
@@ -426,6 +436,23 @@ def sembol_formatla(hisse_kodu):
     
     return formatlar
 
+
+def optimize_historical_range(start, end, max_days=300):
+    """Analiz için sadece gerekli kadar geçmiş veriyi indirir."""
+    if end is None:
+        end_dt = datetime.now()
+    else:
+        end_dt = pd.to_datetime(end)
+
+    if start is None:
+        start_dt = end_dt - timedelta(days=max_days)
+    else:
+        start_dt = pd.to_datetime(start)
+        if (end_dt - start_dt).days > max_days:
+            start_dt = end_dt - timedelta(days=max_days)
+
+    return start_dt.strftime('%Y-%m-%d')
+
 # Örnek Kullanım:
 semboller = sembol_formatla("THYAO.IS")
 print(f"Yahoo için: {semboller['yfinance']}")
@@ -462,6 +489,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         tum_kaynaklar.insert(0, kaynak)
 
     # 4. Kaynakları sırayla dene (Biri çökerse diğeri devreye girer)
+    start = optimize_historical_range(start, end, max_days=300)
     for aktif_kaynak in tum_kaynaklar:
         
         # --- YAHOO FINANCE DENEMESİ ---
@@ -483,7 +511,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         interval=interval, 
                         progress=False, 
                         auto_adjust=True, 
-                        threads=True
+                        threads=False
                     )
                     
                     if df is not None and not df.empty:
@@ -494,7 +522,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                             df = df.dropna(subset=['Close'])
                             df.index = df.index.tz_localize(None)
                             df.index = pd.to_datetime(df.index).normalize()
-                            return df
+                            return downcast_float64_columns(df)
                 except Exception as e:
                     logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
                 tm.sleep(0.5)
@@ -524,7 +552,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         if start:
                             df = df[df.index.date >= pd.to_datetime(start).date()]
                         if not df.empty:
-                            return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+                            return downcast_float64_columns(df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
             except Exception as e:
                 logging.debug(f"TradingView deneme hatası ({ticker}): {e}")
 
@@ -585,14 +613,14 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                     exchange = 'NASDAQ'
                     tv_symbol = ticker
                     
-                df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=1000)
+                df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=350)
                 if df_4h is not None and not df_4h.empty:
                     df_4h = df_4h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
                     df_4h.index = df_4h.index.tz_localize(None)
                     if end:
                         df_4h = df_4h[df_4h.index.date <= pd.to_datetime(end).date()]
                     if not df_4h.empty:
-                        return df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+                        return downcast_float64_columns(df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
             except Exception as e:
                 logging.debug(f"TV 4H deneme hatası ({ticker}): {e}")
 
@@ -607,7 +635,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                     s_str = start
 
                 for _ in range(2):
-                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False)
+                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False, threads=False)
                     if not df_1h.empty:
                         if isinstance(df_1h.columns, pd.MultiIndex):
                             df_1h.columns = df_1h.columns.droplevel(1)
@@ -624,7 +652,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                         }).dropna()
                         
                         if not df_4h.empty:
-                            return df_4h
+                            return downcast_float64_columns(df_4h)
                     time.sleep(1.5)
             except Exception as e:
                 logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
@@ -2149,75 +2177,52 @@ import numpy as np
 import pandas as pd
 
 def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
-
+    """
+    Hafif bir sınıflayıcıyla LSTM yerine benzer bir 'score' üretir.
+    Bellek tüketimini azaltmak için TensorFlow tamamen kaldırıldı.
+    Scikit-learn'in HistGradientBoostingClassifier kullanılır (hafif, CPU verimli).
+    """
     try:
         from sklearn.preprocessing import MinMaxScaler
+        from sklearn.ensemble import HistGradientBoostingClassifier
+
         t_df = df.copy()
-        
-        # 1. Yeni Stratejiye Uygun Özellik Listesi (Normalize Edilmiş İndikatörler)
-        yapay_zeka_ozellikleri = [
-            'Close', 'Volume', 
-            'Tilson_Dist_Norm', 'Volume_Trend',  # Adım 1'de eklediğimiz güçlü özellikler
-            'Stoch_K', 'Stoch_D', 'RSI'
-        ]
-        
-        # Tabloda var olan özellikleri filtrele
-        kullanilacak_ozellikler = [col for col in yapay_zeka_ozellikleri if col in t_df.columns]
-        
-        # Veri seti yetersizse veya Target_Class (Adım 2) yoksa işlem yapma
-        if len(t_df) <= lookback_days or 'Target_Class' not in t_df.columns:
-            t_df['LSTM_Score'] = 0.5 # Nötr skor atıyoruz
-            return t_df
 
-        X_raw = t_df[kullanilacak_ozellikler].values
-        y_raw = t_df['Target_Class'].values
+        features = ['Close', 'Volume', 'Tilson_Dist_Norm', 'Volume_Trend', 'Stoch_K', 'Stoch_D', 'RSI']
+        kullanilacak = [c for c in features if c in t_df.columns]
 
-        # Ölçeklendirme
-        scaler_X = MinMaxScaler(feature_range=(0, 1))
-        scaled_X = scaler_X.fit_transform(X_raw)
-        
-        X_train, y_train = [], []
-        for i in range(lookback_days, len(scaled_X)):
-            X_train.append(scaled_X[i-lookback_days:i, :])
-            y_train.append(y_raw[i])
-            
-        X_train, y_train = np.array(X_train), np.array(y_train)
-        
-        if len(X_train) == 0:
+        if len(t_df) <= lookback_days or 'Target_Class' not in t_df.columns or len(kullanilacak) == 0:
             t_df['LSTM_Score'] = 0.5
             return t_df
 
-        # --- TENSORFLOW LAZY IMPORT ---
-        import tensorflow as tf
+        X = t_df[kullanilacak].fillna(0).values
+        y = t_df['Target_Class'].fillna(0).astype(int).values
 
-        # 2. Sınıflandırma Odaklı LSTM Mimarisi
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.Input(shape=(X_train.shape[1], X_train.shape[2])),
-            tf.keras.layers.LSTM(32, return_sequences=True),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.LSTM(16, return_sequences=False),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(16, activation='relu'),
-            tf.keras.layers.Dense(1, activation='sigmoid') # 0 ile 1 arasında olasılık skoru üretir
-        ])
-        
-        # Sigmoid çıkışı için Binary Crossentropy kullanıyoruz
-        model.compile(optimizer='adam', loss='binary_crossentropy')
-        model.fit(X_train, y_train, batch_size=32, epochs=8, verbose=0)
-        
-        # 3. Tüm Veri Seti İçin Tahmin Üretme (XGBoost'a Özellik Olarak Vermek İçin)
-        tahminler = model(X_train, training=False).numpy().flatten()
-        
-        # İlk 'lookback_days' kadar satır diziye giremediği için baş tarafı 0.5 (Nötr) ile dolduruyoruz
-        dolgu = np.full(lookback_days, 0.5)
-        t_df['LSTM_Score'] = np.concatenate([dolgu, tahminler])
-        
+        scaler = MinMaxScaler()
+        Xs = scaler.fit_transform(X)
+
+        # Eğer veri azsa doğrudan nötr skor döndür
+        if len(Xs) < 60:
+            t_df['LSTM_Score'] = 0.5
+            return t_df
+
+        # Basit sınıflayıcı (hafif, tek iş parçacığı)
+        clf = HistGradientBoostingClassifier(max_iter=100, learning_rate=0.1, random_state=42)
+        clf.fit(Xs, y)
+
+        probs = clf.predict_proba(Xs)[:, 1]
+        # Normalize et ve DataFrame'e ekle
+        t_df['LSTM_Score'] = probs
+
+        # Zorunlu GC
+        gc.collect()
         return t_df
-        
     except Exception as e:
-        print(f"LSTM Çalıştırılamadı: {e}")
-        df['LSTM_Score'] = 0.5
-        return df
+        print(f"Light classifier çalıştırılamadı: {e}")
+        t_df = df.copy()
+        t_df['LSTM_Score'] = 0.5
+        gc.collect()
+        return t_df
 def temel_verileri_temizle(df):
     """
     Temel analiz sütunlarındaki eksik (NaN) veya sonsuz (inf) değerleri temizler.
@@ -2357,6 +2362,24 @@ def filtrele_tablo(df):
     if 'Hacim' in df.columns:
         df = df[df['Hacim'] >= min_hacim]
     return df
+
+
+def filtrele_al_sat_sinyali(df):
+    if df is None or df.empty:
+        return df
+    sinyal_kolonlar = [
+        c for c in df.columns if isinstance(c, str) and any(k in c for k in [
+            'AL/SAT', 'Karar', 'Sinyal', 'Durum', 'signal'
+        ])
+    ]
+    if not sinyal_kolonlar:
+        sinyal_kolonlar = [c for c in df.columns if df[c].dtype == object]
+
+    mask = pd.Series(False, index=df.index)
+    for col in sinyal_kolonlar:
+        mask |= df[col].astype(str).str.contains(r"\b(AL|SAT)\b", case=False, na=False)
+
+    return df[mask].copy()
 
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
@@ -2558,6 +2581,12 @@ with tabs[1]:
         st.session_state.son_tarama_df = None
     if 'son_tarama_tipi' not in st.session_state:
         st.session_state.son_tarama_tipi = None
+    if 'current_df' not in st.session_state:
+        st.session_state.current_df = None
+    if 'current_scan_prefix' not in st.session_state:
+        st.session_state.current_scan_prefix = None
+    if 'current_scan_tipi' not in st.session_state:
+        st.session_state.current_scan_tipi = None
 
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
@@ -2581,6 +2610,14 @@ with tabs[1]:
         df.to_pickle("son_tarama.pkl")
         with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
             f.write(tip_adi)
+
+    def set_current_scan(df, tip_adi, prefix):
+        if df is None:
+            return
+        st.session_state.current_df = df.copy()
+        st.session_state.current_scan_prefix = prefix
+        st.session_state.current_scan_tipi = tip_adi
+        taramayi_kaydet(df, tip_adi)
 
     def show_download_buttons(df, prefix):
         if df is None or df.empty:
@@ -2622,8 +2659,7 @@ with tabs[1]:
             status_text = st.empty()
             total = max(1, len(tarama_listesi))
             tamamlanan = 0
-            # Dinamik işçi sayısı: en fazla 32, en az 4 veya hisse sayısına göre
-            workers = min(32, max(4, len(tarama_listesi)))
+            workers = min(10, max(2, len(tarama_listesi)))
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
                 gelecek_sonuclar = {
                     executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s
@@ -2632,32 +2668,27 @@ with tabs[1]:
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     tamamlanan += 1
-                    progress.progress(int((tamamlanan / total) * 100))
-                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
+                    current_hisse = gelecek_sonuclar[future]
+                    yuzde = int((tamamlanan / total) * 100)
+                    progress.progress(yuzde)
+                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         radar_sonuclari.append(sonuc)
                         
             progress.progress(100)
-            status_text.text("Tarama tamamlandı.")
+            status_text.success("Tarama Tamamlandı!")
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
-                taramayi_kaydet(df_radar, "Genel Radar Taraması")
-            
-            # --- GÜNCELLENMİŞ FİLTRELEME BLOĞU ---
                 df_goster = df_radar.copy()
-            
-            # locals().get() kullanımı Pylance'ın hata vermesini engeller
+
                 if locals().get('sadece_super_sinyal', False):
                     df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
-                
+
                 if locals().get('sadece_spring', False):
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
 
                 df_goster = filtrele_tablo(df_goster)
-            # -------------------------------------
-            
-                st.dataframe(df_goster, width="stretch", hide_index=True)
-                show_download_buttons(df_goster, "genel_radar_sonuc")
+                set_current_scan(df_goster, "Genel Radar Taraması", "genel_radar_sonuc")
                 st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
                 st.warning("⚠️ Tarama sonucu bulunamadı.")
@@ -2679,18 +2710,18 @@ with tabs[1]:
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     tamamlanan += 1
-                    progress.progress(int((tamamlanan / total) * 100))
-                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
+                    current_hisse = gelecek_sonuclar[future]
+                    yuzde = int((tamamlanan / total) * 100)
+                    progress.progress(yuzde)
+                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         stoch_sonuclari.append(sonuc)
             progress.progress(100)
-            status_text.text("Tarama tamamlandı.")
+            status_text.success("Tarama Tamamlandı!")
             if stoch_sonuclari:
                 df_stoch = pd.DataFrame(stoch_sonuclari)
                 df_stoch = filtrele_tablo(df_stoch)
-                taramayi_kaydet(df_stoch, "Stoch Analizi")
-                st.dataframe(df_stoch, width="stretch", hide_index=True)
-                show_download_buttons(df_stoch, "stoch_analizi_sonuc")
+                set_current_scan(df_stoch, "Stoch Analizi", "stoch_analizi_sonuc")
                 st.success("✅ Stoch taraması kaydedildi!")
             else:
                 st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
@@ -2712,18 +2743,18 @@ with tabs[1]:
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     tamamlanan += 1
-                    progress.progress(int((tamamlanan / total) * 100))
-                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
+                    current_hisse = gelecek_sonuclar[future]
+                    yuzde = int((tamamlanan / total) * 100)
+                    progress.progress(yuzde)
+                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         tilson_sonuclari.append(sonuc)
             progress.progress(100)
-            status_text.text("Tarama tamamlandı.")
+            status_text.success("Tarama Tamamlandı!")
             if tilson_sonuclari:
                 df_tilson = pd.DataFrame(tilson_sonuclari)
                 df_tilson = filtrele_tablo(df_tilson)
-                taramayi_kaydet(df_tilson, "Tilson (T3) Analizi")
-                st.dataframe(df_tilson, width="stretch", hide_index=True)
-                show_download_buttons(df_tilson, "tilson_analizi_sonuc")
+                set_current_scan(df_tilson, "Tilson (T3) Analizi", "tilson_analizi_sonuc")
                 st.success("✅ Tilson T3 taraması kaydedildi!")
             else:
                 st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
@@ -2745,15 +2776,17 @@ with tabs[1]:
                 for future in concurrent.futures.as_completed(gelecek_sonuclar):
                     sonuc = future.result()
                     tamamlanan += 1
-                    progress.progress(int((tamamlanan / total) * 100))
-                    status_text.text(f"{tamamlanan}/{total} hisse tarandı ({int((tamamlanan / total) * 100)}%)")
+                    current_hisse = gelecek_sonuclar[future]
+                    yuzde = int((tamamlanan / total) * 100)
+                    progress.progress(yuzde)
+                    status_text.markdown(f"Taranıyor: **{current_hisse}** - % {yuzde}")
                     if sonuc:
                         radar_sonuclari.append(sonuc)
             progress.progress(100)
-            status_text.text("Tarama tamamlandı.")
+            status_text.success("Tarama Tamamlandı!")
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
-                
+                df_radar = downcast_float64_columns(df_radar)
                 # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
                 df_sniper = df_radar[
                     (df_radar['Günlük T3'] == '🚀 BOĞA') & 
@@ -2774,10 +2807,8 @@ with tabs[1]:
                 df_sniper = filtrele_tablo(df_sniper)
 
                 if not df_sniper.empty:
-                    taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
+                    set_current_scan(df_sniper, "Nokta Atışı (Sniper)", "nokta_atisi_sniper_sonuc")
                     st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
-                    st.dataframe(df_sniper, width="stretch", hide_index=True)
-                    show_download_buttons(df_sniper, "nokta_atisi_sniper_sonuc")
                     st.balloons()
                 else:
                     st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
@@ -2800,7 +2831,6 @@ with tabs[1]:
         if st.session_state.son_tarama_df is not None:
             st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
             
-            # --- YENİ EKLENEN FİLTRELEME BLOĞU (Kurtarılan Tablo İçin) ---
             df_goster = st.session_state.son_tarama_df.copy()
             if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
                 if '📈 Pozitif Uyuşmazlık' in df_goster.columns:
@@ -2809,10 +2839,10 @@ with tabs[1]:
                 if '🪤 Spring (Tuzak)' in df_goster.columns:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
             df_goster = filtrele_tablo(df_goster)
-            # -----------------------------------------------------------
-            
-            st.dataframe(df_goster, width="stretch", hide_index=True)
-            show_download_buttons(df_goster, "son_tarama_sonuc")
+
+            st.session_state.current_df = df_goster.copy()
+            st.session_state.current_scan_prefix = "son_tarama_sonuc"
+            st.session_state.current_scan_tipi = st.session_state.son_tarama_tipi
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:

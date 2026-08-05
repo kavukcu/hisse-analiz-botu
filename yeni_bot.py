@@ -1466,10 +1466,28 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
     try:
         # 1. Günlük Veriyi Çek
         df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
-        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20: 
+        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20:
             return None
-            
+
         df_g = df_gunluk.copy()
+
+        # Hızlı Ön-Filtre (fail-fast): temel hacim / dip yakınlığı kontrolleri
+        try:
+            min_hacim_global = globals().get('min_hacim', 0)
+            vol_last = float(df_g['Volume'].iloc[-1]) if 'Volume' in df_g.columns else 0.0
+            vol_sma20 = float(df_g['Volume'].rolling(20).mean().iloc[-1]) if 'Volume' in df_g.columns else 0.0
+            close_last = float(df_g['Close'].iloc[-1])
+            low_20 = float(df_g['Low'].rolling(20).min().iloc[-1])
+            destegine_uzaklik = (close_last - low_20) / max(close_last, 1e-9)
+
+            # Eğer günlük veride temel dip/likidite kriterleri sağlanmıyorsa (ör. hacim ve desteğe uzaklık),
+            # gereksiz alt hesaplamaları yapmadan erken dönüş yap (radar tipinde).
+            if analiz_tipi == "radar":
+                if (vol_last < max(min_hacim_global, vol_sma20 * 0.8)) and (destegine_uzaklik > 0.03):
+                    return None
+        except Exception:
+            # Ön filtre hata verirse devam et (daha güvenli davranış)
+            pass
         
         # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
         try:
@@ -2431,48 +2449,85 @@ def paralel_tarama(analiz_tipi, mesaj, max_workers=20):
         sonuclar = []
         toplam = len(tarama_listesi)
 
-        # Küçük batch'ler halinde çalıştır: Streamlit arayüzünü ve CPU'yu korur
-        batch_size = max_workers * 2
+        # Hız Optimizasyonu (Ön Filtreleme):
+        # 1) Tüm günlük verileri asenkron olarak paralel çek
+        # 2) Pandas/Numpy ile vektörel, hafif kontroller uygula (hacim, 20g altına yakınlık vb.)
+        # 3) Sadece aday olan hisseler için ağır analizleri paralel çalıştır
 
+        # 1) Asenkron toplu günlük veri çekimi (API çağrıları paralel)
         with st.spinner(f"⏳ {mesaj}"):
             status_text = st.text(f"📊 {mesaj} (0/{toplam}) - 0%")
+            try:
+                tum_gunluk_veri = asyncio.run(tum_piyasayi_tara_async(tarama_listesi))
+            except Exception as e:
+                logging.warning(f"Toplu günlük veri çekimi başarısız: {e}")
+                tum_gunluk_veri = {}
 
+            # 2) Vektörel ön filtreleme (hafif hesaplamalar)
+            adaylar = []
+            min_hacim_global = globals().get('min_hacim', 0)
+
+            for sembol, df_sym in tum_gunluk_veri.items():
+                try:
+                    if df_sym is None or df_sym.empty or len(df_sym) < 20:
+                        continue
+
+                    # Vektörel hesaplamalar: son hacim, 20g hacim ort., 20g dip uzaklığı
+                    vol_last = float(df_sym['Volume'].iloc[-1]) if 'Volume' in df_sym.columns else 0.0
+                    vol_sma20 = float(df_sym['Volume'].rolling(20).mean().iloc[-1]) if 'Volume' in df_sym.columns else 0.0
+                    close_last = float(df_sym['Close'].iloc[-1])
+                    low_20 = float(df_sym['Low'].rolling(20).min().iloc[-1])
+                    # Desteğe yakınlık oranı (fiyat - 20g dip) / fiyat
+                    destegine_uzaklik = (close_last - low_20) / max(close_last, 1e-9)
+
+                    # Basit, vektörel erken elenme kuralları (fail-fast):
+                    # - Eğer son hacim hem global min hacminin altında hem de 20g ortalamanın altında ise atla
+                    # - Eğer hisse 20g dipten çok uzaksa (>%3), dip-likidite koşulu büyük ihtimalle yok -> atla
+                    if (vol_last < max(min_hacim_global, vol_sma20 * 0.8)) and (destegine_uzaklik > 0.03):
+                        continue
+
+                    # Eğer geçtiyse aday listesine ekle (ağır analiz yapılacak)
+                    adaylar.append(sembol)
+                except Exception:
+                    continue
+
+            # Eğer aday yoksa hızlıca dön
+            if not adaylar:
+                st.info("🔎 Ön filtreleme sonucunda Sniper adayı bulunamadı.")
+                return []
+
+            # 3) Adaylar için ağır analizleri paralel çalıştır
             tamamlanan = 0
-            for i in range(0, toplam, batch_size):
-                batch = tarama_listesi[i:i+batch_size]
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(
-                            asenkron_analiz_yap,
-                            sembol,
-                            baslangic,
-                            bitis,
-                            analiz_tipi=analiz_tipi,
-                            veri_kaynagi=veri_kaynagi
-                        ): sembol
-                        for sembol in batch
-                    }
+            toplam_aday = len(adaylar)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        asenkron_analiz_yap,
+                        sembol,
+                        baslangic,
+                        bitis,
+                        analiz_tipi=analiz_tipi,
+                        veri_kaynagi=veri_kaynagi
+                    ): sembol
+                    for sembol in adaylar
+                }
 
-                    for future in concurrent.futures.as_completed(futures):
-                        sembol = futures[future]
-                        try:
-                            sonuc = future.result()
-                            if sonuc is not None:
-                                sonuclar.append(sonuc)
-                        except Exception as e:
-                            logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
+                for future in concurrent.futures.as_completed(futures):
+                    sembol = futures[future]
+                    try:
+                        sonuc = future.result()
+                        if sonuc is not None:
+                            sonuclar.append(sonuc)
+                    except Exception as e:
+                        logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
 
-                        tamamlanan += 1
-                        # Sadece gerektiğinde arayüz güncelle (oran atlamasını önle)
-                        if tamamlanan % 1 == 0 or tamamlanan == toplam:
-                            ilerleme_yuzde = int((tamamlanan / toplam) * 100)
-                            status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam}) - {ilerleme_yuzde}%")
+                    tamamlanan += 1
+                    if tamamlanan % 1 == 0 or tamamlanan == toplam_aday:
+                        ilerleme_yuzde = int((tamamlanan / toplam_aday) * 100)
+                        status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam_aday}) - {ilerleme_yuzde}%")
 
-                # Küçük bekleme, API ban riskini azaltır ve CPU kullanımını dengeler
-                time.sleep(0.05)
-
-        st.success("✅ Tarama Tamamlandı!")
-        return sonuclar
+            st.success("✅ Tarama Tamamlandı!")
+            return sonuclar
     except Exception as e:
         logging.error(f"paralel_tarama fonksiyonu hatası: {e}")
         st.error(f"⚠️ Tarama sırasında hata oluştu: {e}")

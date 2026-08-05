@@ -510,7 +510,8 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         interval=interval,
                         progress=False,
                         auto_adjust=True,
-                        threads=False
+                        threads=False,
+                        timeout=3
                     )
                     
                     if df is not None and not df.empty:
@@ -525,7 +526,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                             break
                 except Exception as e:
                     logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
-                tm.sleep(0.5)
+                tm.sleep(0.1)
             if fiyat_df is not None:
                 break
 
@@ -580,17 +581,9 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
             except Exception as e:
                 logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
 
-    # 2. KURAL: HER ZAMAN yfinance ile temel analiz verilerini çek (döngü bittikten sonra)
+    # OPTIMIZATION: Temel veri çekimi paralel tarama sırasında KALDIRILIYOR
+    # Sadece teknik şartları sağlayan hisselerin (final liste) sonunda ayrı bir loop'ta çekilecek
     if fiyat_df is not None and not fiyat_df.empty:
-        try:
-            temel_veri = yf.Ticker(ticker).info
-            if isinstance(temel_veri, dict) and temel_veri:
-                # 3. KURAL: Temel analiz verilerini fiyat_df'e yeni sütunlar olarak ekle
-                for key, value in temel_veri.items():
-                    if isinstance(value, (str, int, float, bool)) or value is None:
-                        fiyat_df[key] = value
-        except Exception:
-            pass
         return fiyat_df
 
     return pd.DataFrame()
@@ -650,7 +643,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                     s_str = start
 
                 for _ in range(2):
-                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False, threads=False)
+                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False, threads=False, timeout=3)
                     if not df_1h.empty:
                         if isinstance(df_1h.columns, pd.MultiIndex):
                             df_1h.columns = df_1h.columns.droplevel(1)
@@ -668,7 +661,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                         
                         if not df_4h.empty:
                             return downcast_float64_columns(df_4h)
-                    time.sleep(1.5)
+                    time.sleep(0.1)
             except Exception as e:
                 logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
 
@@ -1589,12 +1582,21 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "🎯 AI Hedef": "-"
             }
 
-        # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ ---
-        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
-        
-        h4_fiyat, h4_tilson = g_fiyat, g_tilson
-        h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
-        h4_boga, h4_stoch_al = g_boga, g_stoch_al
+        # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ (FUNNEL OPTİMİZASYON) ---
+        # KURAL 2: Günlük şartları sağlamıyorsa 4S verisi çekme (Huni Filtrelemesi)
+        if not umut_var_mi and analiz_tipi == "radar":
+            # Günlük şartlar sağlanmıyorsa 4S verisi çekmeden pas geç
+            df_4h = pd.DataFrame()
+            h4_fiyat, h4_tilson = g_fiyat, g_tilson
+            h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
+            h4_boga, h4_stoch_al = g_boga, g_stoch_al
+        else:
+            # Günlük şartları sağladığında 4S verisi çek
+            df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
+            
+            h4_fiyat, h4_tilson = g_fiyat, g_tilson
+            h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
+            h4_boga, h4_stoch_al = g_boga, g_stoch_al
 
         if not df_4h.empty and len(df_4h) >= 20:
             try:
@@ -2396,12 +2398,13 @@ def filtrele_al_sat_sinyali(df):
 
     return df[mask].copy()
 
-def paralel_tarama(analiz_tipi, mesaj, max_workers=10):
+def paralel_tarama(analiz_tipi, mesaj, max_workers=20):
     """Listeyi ThreadPoolExecutor ile paralel tarar ve kullanıcıya ilerleme çubuğu gösterir.
     
     Streamlit Cloud uyumlu: st.empty() yerine sabit progress_bar ve status_text kullanır.
     Thread'lerden gelen sonuçları sadece .progress() ve .text() ile günceller.
     Hiçbir zaman elemanları silmeye (.empty()) veya yeniden yaratmaya çalışmaz.
+    Optimizasyon: Günlük veri şartlarını kontrol ettikten sonra 4S verisi çekiliyor (funnel).
     """
     try:
         if not tarama_listesi:

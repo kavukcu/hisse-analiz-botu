@@ -21,6 +21,7 @@ session.headers.update({
 })
 # Configure retries and backoff to reduce chance of hitting API rate limits
 import random
+from functools import partial
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 
@@ -73,6 +74,22 @@ import os
 import pytz
 import gc
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+print = partial(print, flush=True)
+
+async def run_blocking_with_timeout(func, *args, timeout=10, **kwargs):
+    """Run a synchronous blocking function in a thread with asyncio timeout."""
+    return await asyncio.wait_for(asyncio.to_thread(func, *args, **kwargs), timeout=timeout)
+
+
+def sync_run_blocking_with_timeout(func, *args, timeout=10, **kwargs):
+    """Run a blocking function from sync code while applying a timeout."""
+    try:
+        return asyncio.run(run_blocking_with_timeout(func, *args, timeout=timeout, **kwargs))
+    except RuntimeError:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+            return future.result(timeout=timeout)
+
 # Yapay Zeka Kütüphaneleri
 import sqlite3
 import joblib
@@ -492,27 +509,41 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
     
     # 4. Kaynakları sırayla dene (Biri çökerse diğeri devreye girer)
     start = optimize_historical_range(start, end, max_days=300)
+    print(f"[VERI_YUKLE] Başlıyor: {ticker} kaynak={kaynak} interval={interval} start={start} end={end}")
+
+    def _download_yf(ticker, start, yf_end, interval):
+        return yf.download(
+            ticker,
+            start=start,
+            end=yf_end,
+            interval=interval,
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+            timeout=3
+        )
+
     for aktif_kaynak in tum_kaynaklar:
         
         # --- YAHOO FINANCE DENEMESİ ---
         if aktif_kaynak == "Yahoo Finance (yfinance)":
-            for _ in range(2):
+            for deneme in range(2):
                 try:
                     if end is not None:
                         yf_end = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
                     else:
                         yf_end = None
+                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance denemesi {deneme + 1}/2 başlıyor")
 
-                    df = yf.download(
+                    df = run_blocking_with_timeout(
+                        _download_yf,
                         ticker,
-                        start=start,
-                        end=yf_end,
-                        interval=interval,
-                        progress=False,
-                        auto_adjust=True,
-                        threads=False,
-                        timeout=3
+                        start,
+                        yf_end,
+                        interval,
+                        timeout=10
                     )
+                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance denemesi {deneme + 1}/2 tamamlandı")
                     
                     if df is not None and not df.empty:
                         if isinstance(df.columns, pd.MultiIndex):
@@ -523,9 +554,13 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                             df.index = df.index.tz_localize(None)
                             df.index = pd.to_datetime(df.index).normalize()
                             fiyat_df = downcast_float64_columns(df)
+                            print(f"[VERI_YUKLE] {ticker} Yahoo Finance verisi bulundu ve hazır")
                             break
+                except asyncio.TimeoutError:
+                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance zaman aşımı (10s)")
                 except Exception as e:
                     logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
+                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance hatası: {e}")
                 tm.sleep(0.1)
             if fiyat_df is not None:
                 break
@@ -533,6 +568,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         # --- TRADINGVIEW DENEMESİ ---
         elif aktif_kaynak == "TradingView (tvdatafeed)":
             try:
+                print(f"[VERI_YUKLE] {ticker} TradingView veri çekme başlıyor")
                 tv = get_tv_datafeed()
                 if tv:
                     if is_bist:
@@ -545,7 +581,15 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         exchange = 'NASDAQ'
                         tv_symbol = ticker
                         
-                    df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
+                    df = run_blocking_with_timeout(
+                        tv.get_hist,
+                        symbol=tv_symbol,
+                        exchange=exchange,
+                        interval=Interval.in_daily,
+                        n_bars=5000,
+                        timeout=10
+                    )
+                    print(f"[VERI_YUKLE] {ticker} TradingView veri çekme tamamlandı")
                     if df is not None and not df.empty:
                         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
                         df.index = df.index.tz_localize(None)
@@ -556,17 +600,28 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         if not df.empty:
                             fiyat_df = downcast_float64_columns(df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
                             break
+            except asyncio.TimeoutError:
+                print(f"[VERI_YUKLE] {ticker} TradingView zaman aşımı (10s)")
             except Exception as e:
                 logging.debug(f"TradingView deneme hatası ({ticker}): {e}")
+                print(f"[VERI_YUKLE] {ticker} TradingView hatası: {e}")
 
         # --- İŞ YATIRIM DENEMESİ (Sadece BIST) ---
         elif aktif_kaynak == "İş Yatırım (Sadece BIST)" and is_bist:
             try:
+                print(f"[VERI_YUKLE] {ticker} İş Yatırım veri çekme başlıyor")
                 sembol = ticker.replace(".IS", "")
                 start_str = pd.to_datetime(start).strftime('%d-%m-%Y') if start else None
                 end_str = pd.to_datetime(end).strftime('%d-%m-%Y') if end else pd.Timestamp.today().strftime('%d-%m-%Y')
                 
-                df = isyatirimhisse.fetch_data(symbol=sembol, start_date=start_str, end_date=end_str)
+                df = run_blocking_with_timeout(
+                    isyatirimhisse.fetch_data,
+                    symbol=sembol,
+                    start_date=start_str,
+                    end_date=end_str,
+                    timeout=10
+                )
+                print(f"[VERI_YUKLE] {ticker} İş Yatırım veri çekme tamamlandı")
                 if df is not None and not df.empty:
                     df = df.rename(columns={
                         'TARIH': 'Date', 'ACILIS_FIYATI': 'Open', 
@@ -578,8 +633,11 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                     if not df.empty:
                         fiyat_df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
                         break
+            except asyncio.TimeoutError:
+                print(f"[VERI_YUKLE] {ticker} İş Yatırım zaman aşımı (10s)")
             except Exception as e:
                 logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
+                print(f"[VERI_YUKLE] {ticker} İş Yatırım hatası: {e}")
 
     # OPTIMIZATION: Temel veri çekimi paralel tarama sırasında KALDIRILIYOR
     # Sadece teknik şartları sağlayan hisselerin (final liste) sonunda ayrı bir loop'ta çekilecek

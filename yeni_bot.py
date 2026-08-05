@@ -1,12 +1,6 @@
 # ==========================================
 # KÜTÜPHANELER (En üste taşındı ve hızlandırıldı)
 # ==========================================
-import streamlit as st
-
-# Bu komut ilk satırlarda olmalı ki ekran beyaz kalmasın, hemen arayüz yüklensin
-st.set_page_config(
-    page_title="Pro BIST Terminali", layout="wide", initial_sidebar_state="expanded"
-)
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,99 +8,56 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta, timezone
 import requests
-import io
 session = requests.Session()
 session.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 })
-# Configure retries and backoff to reduce chance of hitting API rate limits
-import random
-from functools import partial
-from urllib3.util.retry import Retry
-from requests.adapters import HTTPAdapter
-
-# Retry strategy: handle 429 and common server errors with exponential backoff
-retry_strategy = Retry(
-    total=5,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["HEAD", "GET", "OPTIONS", "POST"],
-    backoff_factor=1
-)
-adapter = HTTPAdapter(max_retries=retry_strategy)
-session.mount("https://", adapter)
-session.mount("http://", adapter)
-
-def downcast_float64_columns(df):
-    """Otomatik olarak float64 sütunlarını float32 tipine indirger."""
-    if isinstance(df, pd.DataFrame):
-        float_cols = df.select_dtypes(include=['float64']).columns
-        if len(float_cols) > 0:
-            df[float_cols] = df[float_cols].astype('float32')
-    return df
-
-
-def safe_request(method, url, max_attempts=6, min_delay=0.5, max_delay=2.0, **kwargs):
-    """Make requests using the shared session with exponential backoff and jitter.
-    Respects Retry configured on the session and adds client-side delays to avoid bursts.
-    """
-    attempt = 0
-    while attempt < max_attempts:
-        try:
-            # small random delay before request to avoid simultaneous bursts
-            time.sleep(random.uniform(min_delay, max_delay))
-            resp = session.request(method, url, **kwargs)
-            # If server indicates rate limit, raise to trigger retry logic
-            if resp.status_code == 429:
-                raise requests.exceptions.RetryError(f"429 Too Many Requests for {url}")
-            resp.raise_for_status()
-            return resp
-        except Exception as e:
-            attempt += 1
-            if attempt >= max_attempts:
-                raise
-            # exponential backoff with jitter
-            backoff = (2 ** (attempt - 1)) + random.uniform(0, 1)
-            time.sleep(backoff)
-
 import concurrent.futures
 import logging
 import os
 import pytz
-import gc
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
-print = partial(print, flush=True)
-
-async def run_blocking_with_timeout(func, *args, timeout=10, **kwargs):
-    """Run a synchronous blocking function in a thread with asyncio timeout."""
-    return await asyncio.wait_for(asyncio.to_thread(func, *args, **kwargs), timeout=timeout)
-
-
-def sync_run_blocking_with_timeout(func, *args, timeout=10, **kwargs):
-    """Run a blocking function from sync code while applying a timeout."""
-    try:
-        return asyncio.run(run_blocking_with_timeout(func, *args, timeout=timeout, **kwargs))
-    except RuntimeError:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func, *args, **kwargs)
-            return future.result(timeout=timeout)
-
 # Yapay Zeka Kütüphaneleri
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
+from sklearn.svm import SVR
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import TimeSeriesSplit
+from xgboost import XGBRegressor
 import sqlite3
 import joblib
+import optuna
+from sklearn.metrics import mean_squared_error
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
-
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import IsolationForest
+from sklearn.feature_selection import SelectFromModel
+import shap
+import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
+from keras.models import Sequential
+from keras.layers import LSTM, Dropout, Dense, Input
+from sklearn.preprocessing import MinMaxScaler
+import gymnasium as gym
+import gym_anytrading
+from stable_baselines3 import A2C
 import asyncio
 import aiohttp
-import time
 import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-
+import numpy as np
+import tensorflow as tf
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout
+from sklearn.preprocessing import MinMaxScaler
+import keras.backend as K
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
+st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
 def get_tv_datafeed():
     """TradingView bağlantısını bir kez kurar ve hafızada (cache) tutar."""
@@ -128,96 +79,99 @@ oturum.headers.update({
 })
 # ==========================================
 # VERİTABANI VE HAFIZA YÖNETİMİ
-# =========================================
-
+# ==========================================
 def tum_bist_hisselerini_getir():
     """BIST hisselerini sabit listeden hızlıca getirir. API engellerine takılmaz."""
-    return ["A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS",
-  "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AHSGY.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS",
-  "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSUE.IS", "AKYHO.IS",
-  "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS",
-  "ALTNY.IS", "ALVES.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS",
-  "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARTMS.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS",
-  "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "AVGYO.IS", "AVHOL.IS",
-  "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYGAZ.IS", "AZTEK.IS",
-  "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS",
-  "BEGYO.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIGTK.IS", "BIMAS.IS", "BINHO.IS",
-  "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS",
-  "BORLS.IS", "BORSK.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS",
-  "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BULGS.IS", "BURCE.IS",
-  "BURVA.IS", "BVSAN.IS", "BYDNR.IS", "CANTE.IS", "CASA.IS", "CATES.IS", "CCOLA.IS", "CELHA.IS",
-  "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CGCAM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS",
-  "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGI.IS",
-  "DAPGM.IS", "DARDL.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGGYO.IS",
-  "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMRGD.IS", "DNISI.IS", "DOAS.IS", "DOCO.IS", "DOFER.IS",
-  "DOFRB.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DSTKF.IS", "DUNYH.IS", "DURDO.IS", "DURKN.IS",
-  "DYOBY.IS", "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECOGR.IS", "ECZYT.IS", "EDATA.IS", "EDIP.IS",
-  "EFOR.IS", "EGEEN.IS", "EGEGY.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKDMR.IS", "EKGYO.IS",
-  "EKIM.IS", "EKIZ.IS", "EKOS.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "EMPAE.IS", "ENERY.IS",
-  "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", "ENTRA.IS", "EPLAS.IS", "ERBOS.IS", "EREGL.IS", "ERSU.IS",
-  "ESCAR.IS", "ESCOM.IS", "ESEN.IS", "ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUPWR.IS", "EUREN.IS",
-  "EUYO.IS", "EYGYO.IS", "FADE.IS", "FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS", "FORMT.IS",
-  "FORTE.IS", "FRIGO.IS", "FROTO.IS", "FZLGY.IS", "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS",
-  "GENIL.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLCVY.IS", "GLRYH.IS",
-  "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS",
-  "GSDDE.IS", "GSDHO.IS", "GSRAY.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", "HALKB.IS", "HATEK.IS",
-  "HATSN.IS", "HDFGS.IS", "HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HOROZ.IS", "HRKET.IS",
-  "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS", "ICBCT.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS",
-  "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS",
-  "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS",
-  "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "IZENR.IS",
-  "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS", "KAPLM.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS",
-  "KATMR.IS", "KAYSE.IS", "KBORU.IS", "KCAER.IS", "KCHOL.IS", "KENT.IS", "KERVN.IS", "KFEIN.IS",
-  "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS", "KLNMA.IS", "KLRHO.IS", "KLSER.IS",
-  "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KOCMT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS",
-  "KORDS.IS", "KOTON.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS",
-  "KRSTL.IS", "KRTEK.IS", "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", "KUVVA.IS",
-  "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS", "LILAK.IS", "LINK.IS", "LKMNH.IS",
-  "LOGO.IS", "LRSHO.IS", "LUKSK.IS", "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS",
-  "MANAS.IS", "MARBL.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEGMT.IS",
-  "MEKAG.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "MGROS.IS", "MHRGY.IS",
-  "MIATK.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MOGAN.IS", "MPARK.IS", "MRGYO.IS",
-  "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS",
-  "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "OBASE.IS", "OBAMS.IS", "ODAS.IS", "ODINE.IS",
-  "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", "OSTIM.IS", "OTKAR.IS",
-  "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS",
-  "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PATEK.IS", "PCILT.IS", "PEKGY.IS",
-  "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS",
-  "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS",
-  "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QNBFK.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS",
-  "REEDR.IS", "RGYAS.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS",
-  "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS",
-  "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS",
-  "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SKYLP.IS", "SKYMD.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS",
-  "SNICA.IS", "SNPAM.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS", "SUMAS.IS", "SUNTK.IS",
-  "SURGY.IS", "SUWEN.IS", "SVGYO.IS", "TABGD.IS", "TARKM.IS", "TATEN.IS", "TATGD.IS", "TAVHL.IS",
-  "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS", "TEZOL.IS", "TGSAS.IS", "THYAO.IS",
-  "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS", "TNZTP.IS", "TOASO.IS", "TRCAS.IS",
-  "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", "TTRAK.IS", "TUCLK.IS",
-  "TUKAS.IS", "TUPRS.IS", "TUREX.IS", "TURGG.IS", "TURSG.IS", "UFUK.IS", "ULAS.IS", "ULUFA.IS",
-  "ULUSE.IS", "ULUUN.IS", "UMPAS.IS", "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS",
-  "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKGYO.IS", "VKING.IS", "VRGYO.IS",
-  "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", "YESIL.IS", "YGGYO.IS", "YIGIT.IS",
-]
+    return ["XU100.IS", "A1CAP.IS", "A1YEN.IS", "AAGYO.IS", "ACSEL.IS", "ADBNK.IS", "ADEL.IS",
+ "ADESE.IS", "ADGYO.IS", "ADLVY.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS",
+ "AHGAZ.IS", "AHSGY.IS", "AKBNK.IS", "AKCNS.IS", "AKCVR.IS", "AKDFA.IS", "AKENR.IS", "AKFGY.IS", "AKFIS.IS", "AKFK.IS",
+ "AKFYE.IS", "AKGRT.IS", "AKHAN.IS", "AKMEN.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSFA.IS", "AKSGY.IS",
+ "AKSUE.IS", "AKTIF.IS", "AKTVK.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALBTN.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS",
+ "ALGYO.IS", "ALJF.IS", "ALKA.IS", "ALKIM.IS", "ALKLC.IS", "ALNUS.IS", "ALTNY.IS", "ALVES.IS", "ANC.IS",
+ "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARFYE.IS", "ARMGD.IS",
+ "ARSAN.IS", "ARSVY.IS", "ARTMS.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATA.IS", "ATAGY.IS",
+ "ATAKP.IS", "ATATP.IS", "ATATR.IS", "ATAVK.IS", "ATAYM.IS", "ATEKS.IS", "ATLAS.IS", "ATLFA.IS", "ATSYH.IS", "AVGYO.IS",
+ "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS",
+ "BAGFS.IS", "BAHKM.IS", "BAKAB.IS", "BALAT.IS", "BALSU.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS",
+ "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BESLR.IS", "BESTE.IS", "BETAE.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS",
+ "BIGEN.IS", "BIGTK.IS", "BIMAS.IS", "BINBN.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BLKOM.IS",
+ "BLSMD.IS", "BLUME.IS", "BMSCH.IS", "BMSTL.IS", "BNPPI.IS", "BNTAS.IS", "BOBET.IS", "BORLS.IS", "BORSK.IS",
+ "BOSSA.IS", "BRGAN.IS", "BRGFK.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKT.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS",
+ "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BULGS.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS",
+ "BYDNR.IS", "CAGFA.IS", "CANTE.IS", "CASA.IS", "CATES.IS", "CCOLA.IS", "CELHA.IS", "CEMAS.IS", "CEMTS.IS",
+ "CEMZY.IS", "CEOEM.IS", "CGCAM.IS", "CIMSA.IS", "CLEBI.IS", "CLKMT.IS", "CMBTN.IS", "CMENT.IS", "CMSAN.IS", "CONSE.IS",
+ "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGI.IS", "DAPGM.IS", "DARDL.IS",
+ "DCTTR.IS", "DENFA.IS", "DENGE.IS", "DENVA.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DFKTR.IS",
+ "DGATE.IS", "DGGYO.IS", "DGNMO.IS", "DGRVK.IS", "DIMES.IS", "DIRIT.IS", "DITAS.IS", "DKVRL.IS", "DMD.IS", "DMLKT.IS",
+ "DMRGD.IS", "DMSAS.IS", "DNFIN.IS", "DNISI.IS", "DNYVA.IS", "DNZEN.IS", "DOAS.IS", "DOCO.IS", "DOFER.IS", "DOFRB.IS",
+ "DOGUB.IS", "DOGVY.IS", "DOHOL.IS", "DOKTA.IS", "DRPHN.IS", "DSTKF.IS", "DSYAT.IS", "DUNYH.IS", "DURDO.IS", "DURKN.IS",
+ "DVRLK.IS", "DYBNK.IS", "DYOBY.IS", "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECOGR.IS", "ECZIP.IS", "ECZYT.IS",
+ "EDATA.IS", "EDIP.IS", "EFOR.IS", "EGEEN.IS", "EGEGY.IS", "EGEPO.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKDMR.IS",
+ "EKER.IS", "EKGYO.IS", "EKIM.IS", "EKIZ.IS", "EKOFA.IS", "EKOS.IS", "EKSUN.IS", "EKTVK.IS", "ELITE.IS", "EMIRV.IS",
+ "EMKEL.IS", "EMNIS.IS", "EMPAE.IS", "EMVAR.IS", "ENDAE.IS", "ENERY.IS", "ENJSA.IS", "ENKAI.IS", "ENPRA.IS", "ENSRI.IS",
+ "ENTRA.IS", "EPLAS.IS", "ERBOS.IS", "ERCB.IS", "EREGL.IS", "ERGLI.IS", "ERSU.IS", "ESCAR.IS", "ESCOM.IS", "ESEN.IS",
+ "ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUKYO.IS", "EUPWR.IS", "EUREN.IS", "EUYO.IS", "EXIMB.IS", "EYGYO.IS",
+ "FADE.IS", "FAIRF.IS", "FBBNK.IS", "FENER.IS", "FIGOF.IS", "FKPET.IS", "FLAP.IS", "FMIZP.IS",
+ "FONET.IS", "FORMT.IS", "FORTE.IS", "FRIGO.IS", "FRMPL.IS", "FROTO.IS", "FZLGY.IS", "GARAN.IS", "GARFA.IS",
+ "GARFL.IS", "GATEG.IS", "GEDIK.IS", "GEDZA.IS", "GENIL.IS", "GENKM.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GGBVK.IS",
+ "GIPTA.IS", "GLBMD.IS", "GLCVY.IS", "GLRMK.IS", "GLRYH.IS", "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLDA.IS",
+ "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRM.IS", "GRNYO.IS", "GRSEL.IS", "GRTHO.IS", "GRYAT.IS", "GSDDE.IS", "GSDHO.IS",
+ "GSIPD.IS", "GSRAY.IS", "GUBRF.IS", "GUNDG.IS", "GWIND.IS", "GYVAR.IS", "GZNMI.IS", "HALKB.IS", "HALKF.IS",
+ "HALKI.IS", "HATEK.IS", "HATSN.IS", "HAYVK.IS", "HDFFL.IS", "HDFGS.IS", "HDFVK.IS", "HDFYB.IS", "HEDEF.IS", "HEKTS.IS",
+ "HKTM.IS", "HLGYO.IS", "HLVKS.IS", "HOROZ.IS", "HRKET.IS", "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS",
+ "HUZFA.IS", "ICBCT.IS", "ICUGS.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS",
+ "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS", "INGRM.IS", "INTEK.IS",
+ "INTEM.IS", "INVAZ.IS", "INVEO.IS", "INVES.IS", "ISATR.IS", "ISBIR.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFAK.IS",
+ "ISFIN.IS", "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISTFK.IS", "ISTVY.IS", "ISVEA.IS",
+ "ISYAT.IS", "IYF.IS", "IZENR.IS", "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS",
+ "KAPLM.IS", "KARCL.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS", "KATMR.IS", "KATVK.IS", "KAYSE.IS", "KBORU.IS", "KCAER.IS",
+ "KCHOL.IS", "KENT.IS", "KERVN.IS", "KFEIN.IS", "KFILO.IS", "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS",
+ "KLNMA.IS", "KLRHO.IS", "KLSER.IS", "KLSYN.IS", "KLVKS.IS", "KLYPV.IS", "KMPUR.IS", "KNFRT.IS", "KNTFA.IS",
+ "KOCFN.IS", "KOCMT.IS", "KOD.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS", "KORDS.IS", "KORTS.IS", "KOTON.IS",
+ "KPTGY.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS", "KRSTL.IS", "KRTEK.IS", "KRVGD.IS",
+ "KSFIN.IS", "KSTUR.IS", "KTEST.IS", "KTKVK.IS", "KTLEV.IS", "KTSKR.IS", "KTSVK.IS", "KUTPO.IS", "KUVVA.IS", "KUYAS.IS",
+ "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS", "LILAK.IS", "LINK.IS", "LKMNH.IS", "LMKDC.IS", "LOGO.IS",
+ "LRSHO.IS", "LUKSK.IS", "LXGYO.IS", "LYDHO.IS", "LYDYE.IS", "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS",
+ "MAKTK.IS", "MANAS.IS", "MARBL.IS", "MARKA.IS", "MARMR.IS", "MARTI.IS", "MASFN.IS", "MAVI.IS", "MBFTR.IS", "MCARD.IS",
+ "MDASM.IS", "MDIAZ.IS", "MEDTR.IS", "MEGAP.IS", "MEGMT.IS", "MEKAG.IS", "MEKMD.IS", "MEPET.IS", "MERCN.IS",
+ "MERIT.IS", "MERKO.IS", "METEN.IS", "METRO.IS", "MEYSU.IS", "MGROS.IS", "MHRGY.IS", "MIATK.IS", "MILKS.IS", "MINTF.IS",
+ "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MNGFA.IS", "MOBTL.IS", "MOGAN.IS", "MOPAS.IS", "MPARK.IS", "MRBAS.IS", "MRBKF.IS",
+ "MRGYO.IS", "MRMAG.IS", "MRSHL.IS", "MSGYO.IS", "MSYBN.IS", "MTRKS.IS", "MTRYO.IS",
+ "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NETCD.IS", "NIBAS.IS", "NRBNK.IS", "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS",
+ "NUHCM.IS", "NURVK.IS", "OBAMS.IS", "OBASE.IS", "ODAS.IS", "ODINE.IS", "OFSYM.IS",
+ "ONCSM.IS", "ONRYT.IS", "OPET.IS", "ORCAY.IS", "ORFIN.IS", "ORGE.IS", "ORMA.IS", "ORZAX.IS", "OSMEN.IS", "OSTIM.IS",
+ "OSVKS.IS", "OTKAR.IS", "OTOSR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZATD.IS",
+ "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS", "OZYSR.IS", "PAGYO.IS", "PAHOL.IS", "PAMEL.IS", "PAPIL.IS",
+ "PARSN.IS", "PASEU.IS", "PATEK.IS", "PBTR.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS",
+ "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS",
+ "PRDGS.IS", "PRFFK.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QNBFF.IS",
+ "QNBFK.IS", "QNBTR.IS", "QNBVK.IS", "QUAGR.IS", "QUFIN.IS", "QYATB.IS", "QYHOL.IS", "RALYH.IS", "RAYSG.IS",
+ "REEDR.IS", "RGYAS.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RUZYE.IS", "RYGYO.IS", "RYSAS.IS",
+ "SAFKR.IS", "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARAE.IS", "SARKY.IS", "SARTN.IS", "SASA.IS",
+ "SAYAS.IS", "SDTTR.IS", "SEGMN.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SERNT.IS",
+ "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SKYLP.IS", "SKYMD.IS", "SMART.IS", "SMRFA.IS",
+ "SMRTG.IS", "SMRVA.IS", "SNGYO.IS", "SNICA.IS", "SNPAM.IS", "SODSN.IS", "SOHOE.IS", "SOKE.IS", "SOKM.IS", "SONME.IS",
+ "SRVGY.IS", "SSAAT.IS", "SUMAS.IS", "SUNTK.IS", "SURGY.IS", "SUWEN.IS", "SVGYO.IS", "TABGD.IS",
+"TAMFA.IS", "TARFN.IS", "TARKM.IS", "TATEN.IS", "TATGD.IS", "TAVHL.IS", "TBORG.IS", "TCELL.IS", "TCKRC.IS",
+ "TCRYT.IS", "TDGYO.IS", "TEBFA.IS", "TEHOL.IS", "TEKTU.IS", "TERA.IS", "TEVKS.IS", "TEZOL.IS", "TFNVK.IS",
+ "TGSAS.IS", "THYAO.IS", "TIMUR.IS", "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS",
+ "TMSN.IS", "TNZTP.IS", "TOASO.IS", "TRALT.IS", "TRBNK.IS", "TRCAS.IS", "TRENJ.IS", "TRFFA.IS", "TRGYO.IS",
+ "TRHOL.IS", "TRILC.IS", "TRKFN.IS", "TRKNT.IS", "TRMEN.IS", "TRMET.IS", "TRYKI.IS", "TSGYO.IS", "TSKB.IS",
+ "TSPOR.IS", "TTKOM.IS", "TTRAK.IS", "TUCLK.IS", "TUKAS.IS", "TUPRS.IS", "TUREX.IS", "TURGG.IS", "TURSG.IS", "TV8TV.IS",
+ "UCAYM.IS", "UFUK.IS", "ULAS.IS", "ULKER.IS", "ULUFA.IS", "ULUSE.IS", "ULUUN.IS",
+ "UMPAS.IS", "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFA.IS", "VAKFN.IS", "VAKKO.IS", "VAKVK.IS", "VANGD.IS",
+ "VBTYZ.IS", "VDFAS.IS", "VDFLO.IS", "VERTU.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKFYO.IS", "VKGYO.IS", "VKING.IS",
+ "VRGYO.IS", "VSNMD.IS", "YAPRK.IS", "YATAS.IS", "YATVK.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS",
+ "YESIL.IS", "YGGYO.IS", "YIGIT.IS", "YKBNK.IS", "YKFIN.IS", "YKFKT.IS", "YKSLN.IS", "YKYAT.IS",
+ "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "YYLGD.IS", "ZEDUR.IS", "ZERGY.IS", "ZGYO.IS", "ZKBVK.IS", "ZKBVR.IS",
+ "ZOREN.IS", "ZRGYO.IS"
+    ]
 
-def veritabani_olustur():
-    """Tüm gerekli SQLite veritabanları oluştur"""
-    # Tahminler ve analiz sonuçları için
+    """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
     conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS tahminler
                  (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
-    
-    # Fiyat verileri cache'i için
-    c.execute('''CREATE TABLE IF NOT EXISTS fiyat_cache
-                 (sembol TEXT, tarih TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL, 
-                  veri_tarihi TEXT, PRIMARY KEY (sembol, tarih))''')
-    
-    # Analiz sonuçları cache'i için
-    c.execute('''CREATE TABLE IF NOT EXISTS analiz_cache
-                 (sembol TEXT, tarih TEXT, analiz_tipi TEXT, sonuc TEXT, 
-                  veri_tarihi TEXT, PRIMARY KEY (sembol, tarih, analiz_tipi))''')
-    
     conn.commit()
     conn.close()
 
@@ -230,130 +184,6 @@ def tahmin_kaydet(sembol, hedef_fiyat):
             c.execute("INSERT INTO tahminler (tarih, sembol, hedef_fiyat, gerceklesme_fiyati, durum) VALUES (?, ?, ?, NULL, 'BEKLİYOR')", 
                       (bugun, sembol, hedef_fiyat))
         conn.commit()
-
-def fiyat_verisi_onayla_ve_kaydet(sembol, df):
-    """Gün içinde çekilen fiyat verilerini veritabanına kaydet (aynı gün değişikliklerini güncelle)"""
-    if df is None or df.empty:
-        return False
-    
-    try:
-        bugun = datetime.now().strftime("%Y-%m-%d")
-        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
-        c = conn.cursor()
-        
-        # Son satırı (en güncel veriyi) al
-        son_veri = df.iloc[-1]
-        
-        # Mevcut kaydı kontrol et ve güncelle (aynı gün içinde)
-        c.execute("SELECT rowid FROM fiyat_cache WHERE sembol=? AND tarih=?", (sembol, bugun))
-        varmi = c.fetchone()
-        
-        if varmi:
-            # Aynı gün değişikliği olmuşsa güncelle
-            c.execute("""UPDATE fiyat_cache 
-                        SET open=?, high=?, low=?, close=?, volume=?, veri_tarihi=?
-                        WHERE sembol=? AND tarih=?""",
-                     (float(son_veri['Open']), float(son_veri['High']), float(son_veri['Low']),
-                      float(son_veri['Close']), float(son_veri['Volume']), datetime.now().isoformat(),
-                      sembol, bugun))
-        else:
-            # Yeni kayıt ekle
-            c.execute("""INSERT INTO fiyat_cache 
-                        (sembol, tarih, open, high, low, close, volume, veri_tarihi)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                     (sembol, bugun, float(son_veri['Open']), float(son_veri['High']), 
-                      float(son_veri['Low']), float(son_veri['Close']), 
-                      float(son_veri['Volume']), datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logging.error(f"Fiyat cache hatası [{sembol}]: {e}")
-        return False
-
-def fiyat_verisi_cache_den_al(sembol, baslangic, bitis):
-    """Aynı gün içinde çekilen verileri veritabanından al (API çağrısı yapmaz)"""
-    try:
-        bugun = datetime.now().strftime("%Y-%m-%d")
-        
-        # Sadece bugünün verilerini cache'ten al
-        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
-        c = conn.cursor()
-        
-        c.execute("""SELECT tarih, open, high, low, close, volume FROM fiyat_cache 
-                    WHERE sembol=? AND tarih=? ORDER BY tarih""", (sembol, bugun))
-        
-        veriler = c.fetchall()
-        conn.close()
-        
-        if not veriler:
-            return None
-        
-        # DataFrame'e dönüştür
-        df = pd.DataFrame(veriler, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df['Date'] = pd.to_datetime(df['Date'])
-        df.set_index('Date', inplace=True)
-        return df
-    except Exception as e:
-        logging.error(f"Cache okuma hatası [{sembol}]: {e}")
-        return None
-
-def analiz_sonucu_kaydet(sembol, analiz_tipi, sonuc_dict):
-    """Analiz sonuçlarını JSON formatında veritabanına kaydet"""
-    try:
-        import json
-        bugun = datetime.now().strftime("%Y-%m-%d")
-        
-        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
-        c = conn.cursor()
-        
-        # Dict'i JSON string'ine dönüştür
-        sonuc_json = json.dumps(sonuc_dict, ensure_ascii=False)
-        
-        # Mevcut kaydı kontrol et
-        c.execute("SELECT rowid FROM analiz_cache WHERE sembol=? AND tarih=? AND analiz_tipi=?", 
-                 (sembol, bugun, analiz_tipi))
-        varmi = c.fetchone()
-        
-        if varmi:
-            c.execute("""UPDATE analiz_cache SET sonuc=?, veri_tarihi=? 
-                        WHERE sembol=? AND tarih=? AND analiz_tipi=?""",
-                     (sonuc_json, datetime.now().isoformat(), sembol, bugun, analiz_tipi))
-        else:
-            c.execute("""INSERT INTO analiz_cache (sembol, tarih, analiz_tipi, sonuc, veri_tarihi)
-                        VALUES (?, ?, ?, ?, ?)""",
-                     (sembol, bugun, analiz_tipi, sonuc_json, datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logging.error(f"Analiz cache yazma hatası [{sembol}]: {e}")
-        return False
-
-def analiz_sonucu_cache_den_al(sembol, analiz_tipi):
-    """Aynı gün içindeki analiz sonuçlarını cache'ten al"""
-    try:
-        import json
-        bugun = datetime.now().strftime("%Y-%m-%d")
-        
-        conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
-        c = conn.cursor()
-        
-        c.execute("""SELECT sonuc FROM analiz_cache 
-                    WHERE sembol=? AND tarih=? AND analiz_tipi=?""",
-                 (sembol, bugun, analiz_tipi))
-        
-        sonuc = c.fetchone()
-        conn.close()
-        
-        if sonuc:
-            return json.loads(sonuc[0])
-        return None
-    except Exception as e:
-        logging.error(f"Analiz cache okuma hatası [{sembol}]: {e}")
-        return None
 def tahminleri_degerlendir():
     """5 gün öncesinin tahminlerini bugünün gerçek fiyatlarıyla kıyaslar (Optimize Edilmiş Sürüm)."""
     try:
@@ -429,12 +259,6 @@ def tahminleri_degerlendir():
     except Exception as e:
         logging.error(f"tahminleri_degerlendir genel hatası: {e}")
 def veritabani_baslat():
-    conn = sqlite3.connect('hisse_hafiza.db', timeout=10, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS tahminler
-                 (tarih TEXT, sembol TEXT, hedef_fiyat REAL, gerceklesme_fiyati REAL, durum TEXT)''')
-    conn.commit()
-    conn.close()
     # Veritabanı (SQLite vs.) bağlantı kodlarınız burada olmalı
     pass
 # Uygulama açıldığında veritabanını hazırla ve eski tahminleri kontrol et
@@ -453,23 +277,6 @@ def sembol_formatla(hisse_kodu):
     
     return formatlar
 
-
-def optimize_historical_range(start, end, max_days=300):
-    """Analiz için sadece gerekli kadar geçmiş veriyi indirir."""
-    if end is None:
-        end_dt = datetime.now()
-    else:
-        end_dt = pd.to_datetime(end)
-
-    if start is None:
-        start_dt = end_dt - timedelta(days=max_days)
-    else:
-        start_dt = pd.to_datetime(start)
-        if (end_dt - start_dt).days > max_days:
-            start_dt = end_dt - timedelta(days=max_days)
-
-    return start_dt.strftime('%Y-%m-%d')
-
 # Örnek Kullanım:
 semboller = sembol_formatla("THYAO.IS")
 print(f"Yahoo için: {semboller['yfinance']}")
@@ -486,10 +293,10 @@ import pandas as pd
 from tvDatafeed import TvDatafeed, Interval
 import isyatirimhisse
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinance)"):
     # 1. Sembolü temizle
-    ticker = ticker.replace("$", "").strip()
+    ticker = ticker.replace("$", "").strip() 
     
     # 2. Hangi piyasa olduğunu tespit et (BIST mi, Kripto mu, ABD mi?)
     is_bist = ".IS" in ticker
@@ -505,45 +312,30 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
         tum_kaynaklar.remove(kaynak)
         tum_kaynaklar.insert(0, kaynak)
 
-    fiyat_df = None
-    
     # 4. Kaynakları sırayla dene (Biri çökerse diğeri devreye girer)
-    start = optimize_historical_range(start, end, max_days=300)
-    print(f"[VERI_YUKLE] Başlıyor: {ticker} kaynak={kaynak} interval={interval} start={start} end={end}")
-
-    def _download_yf(ticker, start, yf_end, interval):
-        return yf.download(
-            ticker,
-            start=start,
-            end=yf_end,
-            interval=interval,
-            progress=False,
-            auto_adjust=True,
-            threads=False,
-            timeout=3
-        )
-
     for aktif_kaynak in tum_kaynaklar:
         
         # --- YAHOO FINANCE DENEMESİ ---
         if aktif_kaynak == "Yahoo Finance (yfinance)":
-            for deneme in range(2):
+            for _ in range(2):
                 try:
+                    # 👇 EKLENEN KISIM BAŞLANGICI 👇
                     if end is not None:
                         yf_end = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
                     else:
                         yf_end = None
-                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance denemesi {deneme + 1}/2 başlıyor")
+                    # 👆 EKLENEN KISIM BİTİŞİ 👆
 
-                    df = run_blocking_with_timeout(
-                        _download_yf,
-                        ticker,
-                        start,
-                        yf_end,
-                        interval,
-                        timeout=10
+                    # Sadece yfinance formatına uygun orijinal ticker string'ini veriyoruz
+                    df = yf.download(
+                        ticker, 
+                        start=start, 
+                        end=yf_end,  # <--- BURASI DEĞİŞTİ: end=end yerine end=yf_end oldu
+                        interval=interval, 
+                        progress=False, 
+                        auto_adjust=True, 
+                        threads=True
                     )
-                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance denemesi {deneme + 1}/2 tamamlandı")
                     
                     if df is not None and not df.empty:
                         if isinstance(df.columns, pd.MultiIndex):
@@ -553,24 +345,17 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                             df = df.dropna(subset=['Close'])
                             df.index = df.index.tz_localize(None)
                             df.index = pd.to_datetime(df.index).normalize()
-                            fiyat_df = downcast_float64_columns(df)
-                            print(f"[VERI_YUKLE] {ticker} Yahoo Finance verisi bulundu ve hazır")
-                            break
-                except asyncio.TimeoutError:
-                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance zaman aşımı (10s)")
+                            return df
                 except Exception as e:
                     logging.debug(f"Yahoo deneme hatası ({ticker}): {e}")
-                    print(f"[VERI_YUKLE] {ticker} Yahoo Finance hatası: {e}")
-                tm.sleep(0.1)
-            if fiyat_df is not None:
-                break
+                tm.sleep(0.5)
 
         # --- TRADINGVIEW DENEMESİ ---
         elif aktif_kaynak == "TradingView (tvdatafeed)":
             try:
-                print(f"[VERI_YUKLE] {ticker} TradingView veri çekme başlıyor")
                 tv = get_tv_datafeed()
                 if tv:
+                    # TradingView için sembolü formatla
                     if is_bist:
                         exchange = 'BIST'
                         tv_symbol = ticker.replace(".IS", "")
@@ -581,15 +366,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         exchange = 'NASDAQ'
                         tv_symbol = ticker
                         
-                    df = run_blocking_with_timeout(
-                        tv.get_hist,
-                        symbol=tv_symbol,
-                        exchange=exchange,
-                        interval=Interval.in_daily,
-                        n_bars=5000,
-                        timeout=10
-                    )
-                    print(f"[VERI_YUKLE] {ticker} TradingView veri çekme tamamlandı")
+                    df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_daily, n_bars=5000)
                     if df is not None and not df.empty:
                         df = df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
                         df.index = df.index.tz_localize(None)
@@ -598,30 +375,18 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                         if start:
                             df = df[df.index.date >= pd.to_datetime(start).date()]
                         if not df.empty:
-                            fiyat_df = downcast_float64_columns(df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
-                            break
-            except asyncio.TimeoutError:
-                print(f"[VERI_YUKLE] {ticker} TradingView zaman aşımı (10s)")
+                            return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
             except Exception as e:
                 logging.debug(f"TradingView deneme hatası ({ticker}): {e}")
-                print(f"[VERI_YUKLE] {ticker} TradingView hatası: {e}")
 
         # --- İŞ YATIRIM DENEMESİ (Sadece BIST) ---
         elif aktif_kaynak == "İş Yatırım (Sadece BIST)" and is_bist:
             try:
-                print(f"[VERI_YUKLE] {ticker} İş Yatırım veri çekme başlıyor")
                 sembol = ticker.replace(".IS", "")
                 start_str = pd.to_datetime(start).strftime('%d-%m-%Y') if start else None
                 end_str = pd.to_datetime(end).strftime('%d-%m-%Y') if end else pd.Timestamp.today().strftime('%d-%m-%Y')
                 
-                df = run_blocking_with_timeout(
-                    isyatirimhisse.fetch_data,
-                    symbol=sembol,
-                    start_date=start_str,
-                    end_date=end_str,
-                    timeout=10
-                )
-                print(f"[VERI_YUKLE] {ticker} İş Yatırım veri çekme tamamlandı")
+                df = isyatirimhisse.fetch_data(symbol=sembol, start_date=start_str, end_date=end_str)
                 if df is not None and not df.empty:
                     df = df.rename(columns={
                         'TARIH': 'Date', 'ACILIS_FIYATI': 'Open', 
@@ -631,24 +396,15 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
                     df['Date'] = pd.to_datetime(df['Date'])
                     df.set_index('Date', inplace=True)
                     if not df.empty:
-                        fiyat_df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-                        break
-            except asyncio.TimeoutError:
-                print(f"[VERI_YUKLE] {ticker} İş Yatırım zaman aşımı (10s)")
+                        return df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
             except Exception as e:
                 logging.debug(f"İş Yatırım deneme hatası ({ticker}): {e}")
-                print(f"[VERI_YUKLE] {ticker} İş Yatırım hatası: {e}")
 
-    # OPTIMIZATION: Temel veri çekimi paralel tarama sırasında KALDIRILIYOR
-    # Sadece teknik şartları sağlayan hisselerin (final liste) sonunda ayrı bir loop'ta çekilecek
-    if fiyat_df is not None and not fiyat_df.empty:
-        return fiyat_df
-
+    # Hiçbir kaynaktan veri gelmezse boş DataFrame döndür
     return pd.DataFrame()
 # ==========================================
 # 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
 # ==========================================
-@st.cache_data(ttl=600, show_spinner=False)
 def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf
     import pandas as pd
@@ -679,14 +435,14 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                     exchange = 'NASDAQ'
                     tv_symbol = ticker
                     
-                df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=350)
+                df_4h = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=Interval.in_4_hour, n_bars=1000)
                 if df_4h is not None and not df_4h.empty:
                     df_4h = df_4h.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
                     df_4h.index = df_4h.index.tz_localize(None)
                     if end:
                         df_4h = df_4h[df_4h.index.date <= pd.to_datetime(end).date()]
                     if not df_4h.empty:
-                        return downcast_float64_columns(df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna())
+                        return df_4h[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
             except Exception as e:
                 logging.debug(f"TV 4H deneme hatası ({ticker}): {e}")
 
@@ -701,7 +457,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                     s_str = start
 
                 for _ in range(2):
-                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False, threads=False, timeout=3)
+                    df_1h = yf.download(ticker, start=s_str, interval="1h", progress=False)
                     if not df_1h.empty:
                         if isinstance(df_1h.columns, pd.MultiIndex):
                             df_1h.columns = df_1h.columns.droplevel(1)
@@ -718,36 +474,25 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                         }).dropna()
                         
                         if not df_4h.empty:
-                            return downcast_float64_columns(df_4h)
-                    time.sleep(0.2)
+                            return df_4h
+                    time.sleep(0.5)
             except Exception as e:
                 logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
 
     return pd.DataFrame()
 import yfinance as yf
 
-@st.cache_data(ttl=600, show_spinner=False)
 def borsa_endeks_verisini_ekle(t_df):
     try:
         # BIST100 verisini çek (Son 1 yıllık günlük veri yeterli olacaktır)
-        xu100 = yf.download("XU100.IS", period="1y", interval="1d", progress=False, auto_adjust=True)
+        xu100 = yf.download("XU100.IS", period="1y", interval="1d", progress=False)
         
-        # yfinance son sürümlerinde gelen MultiIndex kolon yapısını temizle
-        if isinstance(xu100.columns, pd.MultiIndex):
-            xu100.columns = xu100.columns.droplevel(1)
-            
         # BIST100'ün günlük getirisini hesapla
         xu100['XU100_Return'] = xu100['Close'].pct_change()
         xu100['XU100_Trend'] = np.where(xu100['Close'] > xu100['Close'].rolling(20).mean(), 1, -1)
         
-        # Sadece ihtiyacımız olan sütunları al
+        # Sadece ihtiyacımız olan sütunları al ve tarih indeksini hisse tablosuyla eşleştir
         xu100 = xu100[['XU100_Return', 'XU100_Trend']]
-        
-        # t_df kolonlarının da tek seviyeli (MultiIndex olmayan) olduğundan emin olalım
-        if isinstance(t_df.columns, pd.MultiIndex):
-            t_df.columns = t_df.columns.droplevel(1)
-            
-        # Güvenli bir şekilde birleştirme yap
         t_df = t_df.merge(xu100, left_index=True, right_index=True, how='left')
         
         # Boşlukları doldur (Eğer endeks kapalıysa, bir önceki günün verisini kullan)
@@ -774,7 +519,7 @@ def tilson_t3(close, period=5, vfactor=0.7):
     
     return c1*ema6 + c2*ema5 + c3*ema4 + c4*ema3
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def sirket_bilgisi_getir(ticker):
     try: 
         return yf.Ticker(ticker, session=oturum).info
@@ -792,7 +537,6 @@ def anomali_tespit_et(df):
         return "Veri yetersiz"
         
     # contamination=0.02: Verinin %2'sini "anormal" kabul edecek şekilde eğit
-    from sklearn.ensemble import IsolationForest
     iso_forest = IsolationForest(contamination=0.02, random_state=42)
     features['Anomaly'] = iso_forest.fit_predict(features)
     
@@ -1172,10 +916,9 @@ def ozellikleri_zenginlestir(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
+from xgboost import XGBClassifier
 
 def modeli_degerlendir(X, y):
-    from xgboost import XGBClassifier
-    from sklearn.model_selection import TimeSeriesSplit, cross_val_score
     # n_splits=5 ile veriyi zaman ekseninde 5 parçaya böler, 
     # her seferinde sadece geçmiş verilerle eğitip GELECEK veride test eder.
     tscv = TimeSeriesSplit(n_splits=5)
@@ -1447,8 +1190,6 @@ def hizli_backtest_yap(sembol, baslangic, bitis):
         logging.error(f"[{sembol}] Backtest Hatası: {str(e)}")
         return None
 def stacking_model_olustur(xgb_model, rf_model, svr_model):
-    from sklearn.ensemble import StackingRegressor
-    from sklearn.linear_model import Ridge
     estimators = [
         ('xgb', xgb_model),
         ('rf', rf_model),
@@ -1479,7 +1220,6 @@ def shap_aciklamasi_goster(model, X_train, hisse_adi):
     st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
     
     try:
-        import shap
         # TreeExplainer kullanıyoruz (Stacking içinde XGBoost'u çekmek gerekebilir)
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(X_train)
@@ -1504,7 +1244,6 @@ def python_istatistik_analizi(df):
     except:
         return {'Yıllık Volatilite': "% 0.00", 'Sharpe Oranı': "0.00", 'Günlük VaR (%95)': "% 0.00"}
 
-@st.cache_data(ttl=600, show_spinner=False)
 def haber_duygu_analizi(ticker):
     try:
         news_data = yf.Ticker(ticker, session=oturum).news
@@ -1524,28 +1263,10 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
     try:
         # 1. Günlük Veriyi Çek
         df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
-        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20:
+        if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20: 
             return None
-
+            
         df_g = df_gunluk.copy()
-
-        # Hızlı Ön-Filtre (fail-fast): temel hacim / dip yakınlığı kontrolleri
-        try:
-            min_hacim_global = globals().get('min_hacim', 0)
-            vol_last = float(df_g['Volume'].iloc[-1]) if 'Volume' in df_g.columns else 0.0
-            vol_sma20 = float(df_g['Volume'].rolling(20).mean().iloc[-1]) if 'Volume' in df_g.columns else 0.0
-            close_last = float(df_g['Close'].iloc[-1])
-            low_20 = float(df_g['Low'].rolling(20).min().iloc[-1])
-            destegine_uzaklik = (close_last - low_20) / max(close_last, 1e-9)
-
-            # Eğer günlük veride temel dip/likidite kriterleri sağlanmıyorsa (ör. hacim ve desteğe uzaklık),
-            # gereksiz alt hesaplamaları yapmadan erken dönüş yap (radar tipinde).
-            if analiz_tipi == "radar":
-                if (vol_last < max(min_hacim_global, vol_sma20 * 0.8)) and (destegine_uzaklik > 0.03):
-                    return None
-        except Exception:
-            # Ön filtre hata verirse devam et (daha güvenli davranış)
-            pass
         
         # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
         try:
@@ -1557,29 +1278,13 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 auto_adjust=True
             )
 
-            # Eğer veri boşsa veya Close sütunu yoksa bu hisseyi atla
-            if guncel_df is None or guncel_df.empty or "Close" not in guncel_df.columns:
-                # fallback olarak günlük veriden al, eğer orası da yoksa raise ile except'e düşür
-                if "Close" in df_g.columns and not df_g["Close"].dropna().empty:
-                    guncel_fiyat = float(df_g["Close"].dropna().values[-1])
-                else:
-                    return None
+            if not guncel_df.empty:
+                guncel_fiyat = float(guncel_df["Close"].iloc[-1])
             else:
-                # FutureWarning önlemek için .values[-1] kullan
-                if guncel_df["Close"].dropna().empty:
-                    if "Close" in df_g.columns and not df_g["Close"].dropna().empty:
-                        guncel_fiyat = float(df_g["Close"].dropna().values[-1])
-                    else:
-                        return None
-                else:
-                    guncel_fiyat = float(guncel_df["Close"].dropna().values[-1])
+                guncel_fiyat = float(df_g["Close"].iloc[-1])
 
-        except Exception:
-            # Hata durumunda günlük veriden al; yoksa atla
-            if "Close" in df_g.columns and not df_g["Close"].dropna().empty:
-                guncel_fiyat = float(df_g["Close"].dropna().values[-1])
-            else:
-                return None
+        except:
+            guncel_fiyat = float(df_g["Close"].iloc[-1])
 
 
 # --------------------------------------------------
@@ -1674,21 +1379,12 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "🎯 AI Hedef": "-"
             }
 
-        # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ (FUNNEL OPTİMİZASYON) ---
-        # KURAL 2: Günlük şartları sağlamıyorsa 4S verisi çekme (Huni Filtrelemesi)
-        if not umut_var_mi and analiz_tipi == "radar":
-            # Günlük şartlar sağlanmıyorsa 4S verisi çekmeden pas geç
-            df_4h = pd.DataFrame()
-            h4_fiyat, h4_tilson = g_fiyat, g_tilson
-            h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
-            h4_boga, h4_stoch_al = g_boga, g_stoch_al
-        else:
-            # Günlük şartları sağladığında 4S verisi çek
-            df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
-            
-            h4_fiyat, h4_tilson = g_fiyat, g_tilson
-            h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
-            h4_boga, h4_stoch_al = g_boga, g_stoch_al
+        # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ ---
+        df_4h = veri_4saatlik_getir(sembol, baslangic, bitis, kaynak=veri_kaynagi)
+        
+        h4_fiyat, h4_tilson = g_fiyat, g_tilson
+        h4_stoch_k, h4_stoch_d = g_stoch_k, g_stoch_d
+        h4_boga, h4_stoch_al = g_boga, g_stoch_al
 
         if not df_4h.empty and len(df_4h) >= 20:
             try:
@@ -1739,7 +1435,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
-            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0, 'confidence': 0.0}
+            ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
             
             # 👇 YENİ EKLENECEK BLOK 👇
             # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
@@ -1774,9 +1470,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             kesin_dip_mi = temp_4h.get('Kesin_Dip_Donusu', pd.Series([False])).iloc[-1] if not temp_4h.empty else False
             dip_durum = "🔥 KESİN DÖNÜŞ ONAYI!" if kesin_dip_mi else "-"
 
-            ai_guven = float(ai_veri.get('confidence', 0.0))
-            guncel_hacim = int(df_g['Volume'].iloc[-1]) if 'Volume' in df_g.columns and not df_g['Volume'].empty else 0
-
             return {
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
@@ -1790,9 +1483,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "🔍 Tespit Edilen Formasyon": formasyon_adi,
                 "🎯 Formasyon Hedefi (%)": formasyon_hedef,
                 "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'), # İçinde gün tahmini de yazacak
-                "AI Güven": ai_guven,
-                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL",
-                "Hacim": guncel_hacim
+                "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL"
             }
 
         elif analiz_tipi == "stoch":
@@ -1827,10 +1518,6 @@ def institutional_decision(df):
 @st.cache_data(ttl=86400) # Her hissenin en iyi ayarını 24 saat hafızada tut
 def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
     """Optuna ile hissenin o anki volatilitesine en uygun AI ayarlarını bulur."""
-    import optuna
-    from xgboost import XGBRegressor
-    from sklearn.model_selection import TimeSeriesSplit
-    from sklearn.metrics import mean_squared_error
     optuna.logging.set_verbosity(optuna.logging.WARNING) # Konsol kalabalığını önler
     
     def objective(trial):
@@ -1861,13 +1548,6 @@ def en_iyi_xgb_parametrelerini_bul(sembol, X_matrisi, y_vektoru):
 @st.cache_data(ttl=3600, show_spinner=False)
 def ensemble_prediction(df, sembol="Genel"):
     try:
-        from xgboost import XGBRegressor
-        from sklearn.feature_selection import SelectFromModel
-        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
-        from sklearn.pipeline import Pipeline
-        from sklearn.svm import SVR
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.linear_model import Ridge
         # 🟢 DÜZELTME: Orijinal dataframe'i bozmamak için doğrudan kopyalıyoruz
         t_df = df.copy()
         t_df = borsa_endeks_verisini_ekle(t_df)
@@ -2162,8 +1842,6 @@ def ensemble_prediction(df, sembol="Genel"):
 @st.cache_data(ttl=3600, show_spinner=False)
 def gelismis_ai_tahmin(df, gelecek_gun=10, temel_veriler=None, temel_skor=0):
     try:
-        from xgboost import XGBRegressor
-        from sklearn.preprocessing import StandardScaler
         df_ml = df.copy()
         
         # --- 1. ADIM: Temel Analiz Verilerini Dahil Etme ---
@@ -2257,9 +1935,6 @@ def rl_ajani_egit(df):
     Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.
     Veride 'Open', 'High', 'Low', 'Close', 'Volume' sütunları olmalıdır.
     """
-    import gymnasium as gym
-    import gym_anytrading
-    from stable_baselines3 import A2C
     # Veri setini RL çevresine (environment) yükle
     window_size = 30
     start_index = window_size
@@ -2284,54 +1959,75 @@ def rl_ajani_egit(df):
     return aksiyon_metni
 import numpy as np
 import pandas as pd
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Dropout, Input
+from sklearn.preprocessing import MinMaxScaler
 
 def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
-    """
-    Hafif bir sınıflayıcıyla LSTM yerine benzer bir 'score' üretir.
-    Bellek tüketimini azaltmak için TensorFlow tamamen kaldırıldı.
-    Scikit-learn'in HistGradientBoostingClassifier kullanılır (hafif, CPU verimli).
-    """
     try:
-        from sklearn.preprocessing import MinMaxScaler
-        from sklearn.ensemble import HistGradientBoostingClassifier
-
         t_df = df.copy()
+        
+        # 1. Yeni Stratejiye Uygun Özellik Listesi (Normalize Edilmiş İndikatörler)
+        yapay_zeka_ozellikleri = [
+            'Close', 'Volume', 
+            'Tilson_Dist_Norm', 'Volume_Trend',  # Adım 1'de eklediğimiz güçlü özellikler
+            'Stoch_K', 'Stoch_D', 'RSI'
+        ]
+        
+        # Tabloda var olan özellikleri filtrele
+        kullanilacak_ozellikler = [col for col in yapay_zeka_ozellikleri if col in t_df.columns]
+        
+        # Veri seti yetersizse veya Target_Class (Adım 2) yoksa işlem yapma
+        if len(t_df) <= lookback_days or 'Target_Class' not in t_df.columns:
+            t_df['LSTM_Score'] = 0.5 # Nötr skor atıyoruz
+            return t_df
 
-        features = ['Close', 'Volume', 'Tilson_Dist_Norm', 'Volume_Trend', 'Stoch_K', 'Stoch_D', 'RSI']
-        kullanilacak = [c for c in features if c in t_df.columns]
+        X_raw = t_df[kullanilacak_ozellikler].values
+        y_raw = t_df['Target_Class'].values
 
-        if len(t_df) <= lookback_days or 'Target_Class' not in t_df.columns or len(kullanilacak) == 0:
+        # Ölçeklendirme
+        scaler_X = MinMaxScaler(feature_range=(0, 1))
+        scaled_X = scaler_X.fit_transform(X_raw)
+        
+        X_train, y_train = [], []
+        for i in range(lookback_days, len(scaled_X)):
+            X_train.append(scaled_X[i-lookback_days:i, :])
+            y_train.append(y_raw[i])
+            
+        X_train, y_train = np.array(X_train), np.array(y_train)
+        
+        if len(X_train) == 0:
             t_df['LSTM_Score'] = 0.5
             return t_df
 
-        X = t_df[kullanilacak].fillna(0).values
-        y = t_df['Target_Class'].fillna(0).astype(int).values
-
-        scaler = MinMaxScaler()
-        Xs = scaler.fit_transform(X)
-
-        # Eğer veri azsa doğrudan nötr skor döndür
-        if len(Xs) < 60:
-            t_df['LSTM_Score'] = 0.5
-            return t_df
-
-        # Basit sınıflayıcı (hafif, tek iş parçacığı)
-        clf = HistGradientBoostingClassifier(max_iter=100, learning_rate=0.1, random_state=42)
-        clf.fit(Xs, y)
-
-        probs = clf.predict_proba(Xs)[:, 1]
-        # Normalize et ve DataFrame'e ekle
-        t_df['LSTM_Score'] = probs
-
-        # Zorunlu GC
-        gc.collect()
+        # 2. Sınıflandırma Odaklı LSTM Mimarısi
+        model = Sequential([
+            Input(shape=(X_train.shape[1], X_train.shape[2])),
+            LSTM(32, return_sequences=True),
+            Dropout(0.2),
+            LSTM(16, return_sequences=False),
+            Dropout(0.2),
+            Dense(16, activation='relu'),
+            Dense(1, activation='sigmoid') # 0 ile 1 arasında olasılık skoru üretir
+        ])
+        
+        # Sigmoid çıkışı için Binary Crossentropy kullanıyoruz
+        model.compile(optimizer='adam', loss='binary_crossentropy')
+        model.fit(X_train, y_train, batch_size=32, epochs=8, verbose=0)
+        
+        # 3. Tüm Veri Seti İçin Tahmin Üretme (XGBoost'a Özellik Olarak Vermek İçin)
+        tahminler = model(X_train, training=False).numpy().flatten()
+        
+        # İlk 'lookback_days' kadar satır diziye giremediği için baş tarafı 0.5 (Nötr) ile dolduruyoruz
+        dolgu = np.full(lookback_days, 0.5)
+        t_df['LSTM_Score'] = np.concatenate([dolgu, tahminler])
+        
         return t_df
+        
     except Exception as e:
-        print(f"Light classifier çalıştırılamadı: {e}")
-        t_df = df.copy()
-        t_df['LSTM_Score'] = 0.5
-        gc.collect()
-        return t_df
+        print(f"LSTM Çalıştırılamadı: {e}")
+        df['LSTM_Score'] = 0.5
+        return df
 def temel_verileri_temizle(df):
     """
     Temel analiz sütunlarındaki eksik (NaN) veya sonsuz (inf) değerleri temizler.
@@ -2351,7 +2047,6 @@ def temel_verileri_temizle(df):
 # ==========================================
 # 4. YAN MENÜ (SIDEBAR) & VERİ ÇEKME
 # ==========================================
-@st.cache_data(ttl=600, show_spinner=False)
 async def tek_hisse_getir(session, sem, hisse_kodu):
     """
     Tek bir hissenin verisini asenkron olarak çeker.
@@ -2459,137 +2154,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔍 Radar Ek Filtreleri")
 sadece_super_sinyal = st.sidebar.checkbox("🌟 Sadece Süper Sinyal Verenler", value=False)
 sadece_spring = st.sidebar.checkbox("🎯 Sadece Wyckoff Spring", value=False)
-min_ai_guveni = st.sidebar.slider("Minimum Yapay Zeka Güveni", min_value=0, max_value=100, value=40, step=5)
-min_hacim = st.sidebar.slider("Minimum Hacim (son gün)", min_value=0, max_value=500000000, value=0, step=100000)
 # --------------------------------------------------------
-
-def filtrele_tablo(df):
-    if df is None or df.empty:
-        return df
-    if 'AI Güven' in df.columns:
-        df = df[df['AI Güven'] >= min_ai_guveni]
-    if 'Hacim' in df.columns:
-        df = df[df['Hacim'] >= min_hacim]
-    return df
-
-
-def filtrele_al_sat_sinyali(df):
-    if df is None or df.empty:
-        return df
-    sinyal_kolonlar = [
-        c for c in df.columns if isinstance(c, str) and any(k in c for k in [
-            'AL/SAT', 'Karar', 'Sinyal', 'Durum', 'signal'
-        ])
-    ]
-    if not sinyal_kolonlar:
-        sinyal_kolonlar = [c for c in df.columns if df[c].dtype == object]
-
-    mask = pd.Series(False, index=df.index)
-    for col in sinyal_kolonlar:
-        mask |= df[col].astype(str).str.contains(r"\b(AL|SAT)\b", case=False, na=False)
-
-    return df[mask].copy()
-
-def paralel_tarama(analiz_tipi, mesaj, max_workers=20):
-    """Listeyi ThreadPoolExecutor ile paralel tarar ve kullanıcıya ilerleme çubuğu gösterir.
-    
-    Streamlit Cloud uyumlu: st.empty() yerine sabit progress_bar ve status_text kullanır.
-    Thread'lerden gelen sonuçları sadece .progress() ve .text() ile günceller.
-    Hiçbir zaman elemanları silmeye (.empty()) veya yeniden yaratmaya çalışmaz.
-    Optimizasyon: Günlük veri şartlarını kontrol ettikten sonra 4S verisi çekiliyor (funnel).
-    """
-    try:
-        if not tarama_listesi:
-            return []
-
-        max_workers = max(1, min(10, int(max_workers)))
-
-        sonuclar = []
-        toplam = len(tarama_listesi)
-
-        # Hız Optimizasyonu (Ön Filtreleme):
-        # 1) Tüm günlük verileri asenkron olarak paralel çek
-        # 2) Pandas/Numpy ile vektörel, hafif kontroller uygula (hacim, 20g altına yakınlık vb.)
-        # 3) Sadece aday olan hisseler için ağır analizleri paralel çalıştır
-
-        # 1) Asenkron toplu günlük veri çekimi (API çağrıları paralel)
-        with st.spinner(f"⏳ {mesaj}"):
-            status_text = st.text(f"📊 {mesaj} (0/{toplam}) - 0%")
-            try:
-                tum_gunluk_veri = asyncio.run(tum_piyasayi_tara_async(tarama_listesi))
-            except Exception as e:
-                logging.warning(f"Toplu günlük veri çekimi başarısız: {e}")
-                tum_gunluk_veri = {}
-
-            # 2) Vektörel ön filtreleme (hafif hesaplamalar)
-            adaylar = []
-            min_hacim_global = globals().get('min_hacim', 0)
-
-            for sembol, df_sym in tum_gunluk_veri.items():
-                try:
-                    if df_sym is None or df_sym.empty or len(df_sym) < 20:
-                        continue
-
-                    # Vektörel hesaplamalar: son hacim, 20g hacim ort., 20g dip uzaklığı
-                    vol_last = float(df_sym['Volume'].iloc[-1]) if 'Volume' in df_sym.columns else 0.0
-                    vol_sma20 = float(df_sym['Volume'].rolling(20).mean().iloc[-1]) if 'Volume' in df_sym.columns else 0.0
-                    close_last = float(df_sym['Close'].iloc[-1])
-                    low_20 = float(df_sym['Low'].rolling(20).min().iloc[-1])
-                    # Desteğe yakınlık oranı (fiyat - 20g dip) / fiyat
-                    destegine_uzaklik = (close_last - low_20) / max(close_last, 1e-9)
-
-                    # Basit, vektörel erken elenme kuralları (fail-fast):
-                    # - Eğer son hacim hem global min hacminin altında hem de 20g ortalamanın altında ise atla
-                    # - Eğer hisse 20g dipten çok uzaksa (>%3), dip-likidite koşulu büyük ihtimalle yok -> atla
-                    if (vol_last < max(min_hacim_global, vol_sma20 * 0.8)) and (destegine_uzaklik > 0.03):
-                        continue
-
-                    # Eğer geçtiyse aday listesine ekle (ağır analiz yapılacak)
-                    adaylar.append(sembol)
-                except Exception:
-                    continue
-
-            # Eğer aday yoksa hızlıca dön
-            if not adaylar:
-                st.info("🔎 Ön filtreleme sonucunda Sniper adayı bulunamadı.")
-                return []
-
-            # 3) Adaylar için ağır analizleri paralel çalıştır
-            tamamlanan = 0
-            toplam_aday = len(adaylar)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {
-                    executor.submit(
-                        asenkron_analiz_yap,
-                        sembol,
-                        baslangic,
-                        bitis,
-                        analiz_tipi=analiz_tipi,
-                        veri_kaynagi=veri_kaynagi
-                    ): sembol
-                    for sembol in adaylar
-                }
-
-                for future in concurrent.futures.as_completed(futures):
-                    sembol = futures[future]
-                    try:
-                        sonuc = future.result()
-                        if sonuc is not None:
-                            sonuclar.append(sonuc)
-                    except Exception as e:
-                        logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
-
-                    tamamlanan += 1
-                    if tamamlanan % 1 == 0 or tamamlanan == toplam_aday:
-                        ilerleme_yuzde = int((tamamlanan / toplam_aday) * 100)
-                        status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam_aday}) - {ilerleme_yuzde}%")
-
-            st.success("✅ Tarama Tamamlandı!")
-            return sonuclar
-    except Exception as e:
-        logging.error(f"paralel_tarama fonksiyonu hatası: {e}")
-        st.error(f"⚠️ Tarama sırasında hata oluştu: {e}")
-        return []
 
 st.title("👁️ Pro Küresel Yatırım Terminali v100 (SMC, Fibo, XGBoost & Quant)")
 
@@ -2791,12 +2356,6 @@ with tabs[1]:
         st.session_state.son_tarama_df = None
     if 'son_tarama_tipi' not in st.session_state:
         st.session_state.son_tarama_tipi = None
-    if 'current_df' not in st.session_state:
-        st.session_state.current_df = None
-    if 'current_scan_prefix' not in st.session_state:
-        st.session_state.current_scan_prefix = None
-    if 'current_scan_tipi' not in st.session_state:
-        st.session_state.current_scan_tipi = None
 
     st.markdown("### 🌊 Hızlı Piyasa Taraması ve Yapay Zeka Önerileri")
     st.write(f"Şu anki tarama listesi: **{', '.join(tarama_listesi)}**")
@@ -2821,136 +2380,127 @@ with tabs[1]:
         with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
             f.write(tip_adi)
 
-    def set_current_scan(df, tip_adi, prefix):
-        if df is None:
-            return
-        st.session_state.current_df = df.copy()
-        st.session_state.current_scan_prefix = prefix
-        st.session_state.current_scan_tipi = tip_adi
-        taramayi_kaydet(df, tip_adi)
-
-    def show_download_buttons(df, prefix):
-        if df is None or df.empty:
-            return
-        csv_bytes = df.to_csv(index=False).encode('utf-8-sig')
-        excel_bytes = None
-        try:
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False)
-            excel_bytes = excel_buffer.getvalue()
-        except Exception as e:
-            logging.debug(f"Excel dosyası oluşturulurken hata: {e}")
-
-        col_csv, col_excel = st.columns([1, 1])
-        with col_csv:
-            st.download_button(
-                label="📥 CSV indir",
-                data=csv_bytes,
-                file_name=f"{prefix}.csv",
-                mime="text/csv",
-            )
-        with col_excel:
-            if excel_bytes is not None:
-                st.download_button(
-                    label="📥 Excel indir",
-                    data=excel_bytes,
-                    file_name=f"{prefix}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            else:
-                st.info("Excel indirmek için openpyxl yüklü olmalıdır.")
-
     # 1. GENEL RADAR
     if btn_radar:
-        radar_sonuclari = paralel_tarama(
-            "radar",
-            'Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.',
-            min(10, max(2, len(tarama_listesi)))
-        )
-        if radar_sonuclari:
-            df_radar = pd.DataFrame(radar_sonuclari)
-            df_goster = df_radar.copy()
-
-            if locals().get('sadece_super_sinyal', False):
-                df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
-
-            if locals().get('sadece_spring', False):
-                df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
-
-            df_goster = filtrele_tablo(df_goster)
-            set_current_scan(df_goster, "Genel Radar Taraması", "genel_radar_sonuc")
-            st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
-        else:
-            st.warning("⚠️ Tarama sonucu bulunamadı.")
+        with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
+            radar_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
+                    for s in tarama_listesi
+                }
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        radar_sonuclari.append(sonuc)
+                        
+            if radar_sonuclari:
+                df_radar = pd.DataFrame(radar_sonuclari)
+                taramayi_kaydet(df_radar, "Genel Radar Taraması")
+            
+            # --- GÜNCELLENMİŞ FİLTRELEME BLOĞU ---
+                df_goster = df_radar.copy()
+            
+            # locals().get() kullanımı Pylance'ın hata vermesini engeller
+                if locals().get('sadece_super_sinyal', False):
+                    df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+                
+                if locals().get('sadece_spring', False):
+                    df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+            # -------------------------------------
+            
+                st.dataframe(df_goster, width="stretch", hide_index=True)
+                st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
+            else:
+                st.warning("⚠️ Tarama sonucu bulunamadı.")
 
     # 2. STOCH ANALİZİ
     elif btn_stoch:
-        stoch_sonuclari = paralel_tarama(
-            "stoch",
-            'Özel Stoch Analizi paralel taranıyor...',
-            min(32, max(4, len(tarama_listesi)))
-        )
-        if stoch_sonuclari:
-            df_stoch = pd.DataFrame(stoch_sonuclari)
-            df_stoch = filtrele_tablo(df_stoch)
-            set_current_scan(df_stoch, "Stoch Analizi", "stoch_analizi_sonuc")
-            st.success("✅ Stoch taraması kaydedildi!")
-        else:
-            st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
+        with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
+            stoch_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s 
+                    for s in tarama_listesi
+                }
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        stoch_sonuclari.append(sonuc)
+            
+            if stoch_sonuclari:
+                df_stoch = pd.DataFrame(stoch_sonuclari)
+                taramayi_kaydet(df_stoch, "Stoch Analizi")
+                st.dataframe(df_stoch, width="stretch", hide_index=True)
+                st.success("✅ Stoch taraması kaydedildi!")
+            else:
+                st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
 
     # 3. TİLSON ANALİZİ
     elif btn_tilson:
-        tilson_sonuclari = paralel_tarama(
-            "tilson",
-            'Tilson T3 trend analizi taranıyor...',
-            min(32, max(4, len(tarama_listesi)))
-        )
-        if tilson_sonuclari:
-            df_tilson = pd.DataFrame(tilson_sonuclari)
-            df_tilson = filtrele_tablo(df_tilson)
-            set_current_scan(df_tilson, "Tilson (T3) Analizi", "tilson_analizi_sonuc")
-            st.success("✅ Tilson T3 taraması kaydedildi!")
-        else:
-            st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
+        with st.spinner('Tilson T3 trend analizi taranıyor...'):
+            tilson_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s 
+                    for s in tarama_listesi
+                }
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        tilson_sonuclari.append(sonuc)
+            
+            if tilson_sonuclari:
+                df_tilson = pd.DataFrame(tilson_sonuclari)
+                taramayi_kaydet(df_tilson, "Tilson (T3) Analizi")
+                st.dataframe(df_tilson, width="stretch", hide_index=True)
+                st.success("✅ Tilson T3 taraması kaydedildi!")
+            else:
+                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
 
     # 4. NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
-        radar_sonuclari = paralel_tarama(
-            "radar",
-            'Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...',
-            min(32, max(4, len(tarama_listesi)))
-        )
-        if radar_sonuclari:
-            df_radar = pd.DataFrame(radar_sonuclari)
-            df_radar = downcast_float64_columns(df_radar)
-            # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
-            df_sniper = df_radar[
-                (df_radar['Günlük T3'] == '🚀 BOĞA') & 
-                (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
-                (
-                    (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
-                    (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
-                    (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
-                )
-            ]
+        with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
+            radar_sonuclari = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
+                    for s in tarama_listesi
+                }
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sonuc = future.result()
+                    if sonuc:
+                        radar_sonuclari.append(sonuc)
             
-            # Ekstra Kenar Çubuğu Filtresi İşletilmesi
-            if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
-                df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
-            if 'sadece_spring' in locals() and sadece_spring:
-                df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
+            if radar_sonuclari:
+                df_radar = pd.DataFrame(radar_sonuclari)
+                
+                # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
+                df_sniper = df_radar[
+                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
+                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
+                    (
+                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
+                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
+                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+                    )
+                ]
+                
+                # Ekstra Kenar Çubuğu Filtresi İşletilmesi
+                if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
+                    df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+                if 'sadece_spring' in locals() and sadece_spring:
+                    df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
 
-            df_sniper = filtrele_tablo(df_sniper)
-
-            if not df_sniper.empty:
-                set_current_scan(df_sniper, "Nokta Atışı (Sniper)", "nokta_atisi_sniper_sonuc")
-                st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
-                st.balloons()
+                if not df_sniper.empty:
+                    taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
+                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
+                    st.dataframe(df_sniper, width="stretch", hide_index=True)
+                    st.balloons()
+                else:
+                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
             else:
-                st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
-        else:
-            st.warning("⚠️ Tarama yapılamadı.")
+                st.warning("⚠️ Tarama yapılamadı.")
 
     # 5. EN SON TARAMAYI GETİR
     elif btn_son_tarama:
@@ -2968,6 +2518,7 @@ with tabs[1]:
         if st.session_state.son_tarama_df is not None:
             st.info(f"💾 Kurtarılan Tablo: **{st.session_state.son_tarama_tipi}**")
             
+            # --- YENİ EKLENEN FİLTRELEME BLOĞU (Kurtarılan Tablo İçin) ---
             df_goster = st.session_state.son_tarama_df.copy()
             if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
                 if '📈 Pozitif Uyuşmazlık' in df_goster.columns:
@@ -2975,11 +2526,9 @@ with tabs[1]:
             if 'sadece_spring' in locals() and sadece_spring:
                 if '🪤 Spring (Tuzak)' in df_goster.columns:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
-            df_goster = filtrele_tablo(df_goster)
-
-            st.session_state.current_df = df_goster.copy()
-            st.session_state.current_scan_prefix = "son_tarama_sonuc"
-            st.session_state.current_scan_tipi = st.session_state.son_tarama_tipi
+            # -----------------------------------------------------------
+            
+            st.dataframe(df_goster, width="stretch", hide_index=True)
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:
@@ -3087,3 +2636,4 @@ with tabs[10]:
             st.info("Henüz kaydedilmiş tahmin yok. Radar veya AI analizi çalıştırıldığında veriler buraya akacaktır.")
     except Exception as e:
         st.error(f"Veritabanı erişim hatası: {e}")
+

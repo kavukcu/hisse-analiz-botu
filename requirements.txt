@@ -19,7 +19,6 @@ yfinance
 pandas
 numpy
 taipy
-pip install
 keras==3.11.0
 shap>=0.48.0
 isyatirimhisse

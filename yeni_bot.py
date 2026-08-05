@@ -2426,40 +2426,50 @@ def paralel_tarama(analiz_tipi, mesaj, max_workers=20):
         if not tarama_listesi:
             return []
 
-        max_workers = min(max_workers, max(1, len(tarama_listesi)))
+        max_workers = max(1, min(10, int(max_workers)))
 
         sonuclar = []
         toplam = len(tarama_listesi)
 
+        # Küçük batch'ler halinde çalıştır: Streamlit arayüzünü ve CPU'yu korur
+        batch_size = max_workers * 2
+
         with st.spinner(f"⏳ {mesaj}"):
             status_text = st.text(f"📊 {mesaj} (0/{toplam}) - 0%")
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                future_to_sembol = {
-                    executor.submit(
-                        asenkron_analiz_yap,
-                        sembol,
-                        baslangic,
-                        bitis,
-                        analiz_tipi=analiz_tipi,
-                        veri_kaynagi=veri_kaynagi
-                    ): sembol
-                    for sembol in tarama_listesi
-                }
+            tamamlanan = 0
+            for i in range(0, toplam, batch_size):
+                batch = tarama_listesi[i:i+batch_size]
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            asenkron_analiz_yap,
+                            sembol,
+                            baslangic,
+                            bitis,
+                            analiz_tipi=analiz_tipi,
+                            veri_kaynagi=veri_kaynagi
+                        ): sembol
+                        for sembol in batch
+                    }
 
-                tamamlanan = 0
-                for future in concurrent.futures.as_completed(future_to_sembol):
-                    sembol = future_to_sembol[future]
-                    tamamlanan += 1
-                    try:
-                        sonuc = future.result()
-                        if sonuc is not None:
-                            sonuclar.append(sonuc)
-                    except Exception as e:
-                        logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
+                    for future in concurrent.futures.as_completed(futures):
+                        sembol = futures[future]
+                        try:
+                            sonuc = future.result()
+                            if sonuc is not None:
+                                sonuclar.append(sonuc)
+                        except Exception as e:
+                            logging.warning(f"Paralel tarama hatası [{sembol}]: {e}")
 
-                    ilerleme_yuzde = int((tamamlanan / toplam) * 100)
-                    status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam}) - {ilerleme_yuzde}%")
+                        tamamlanan += 1
+                        # Sadece gerektiğinde arayüz güncelle (oran atlamasını önle)
+                        if tamamlanan % 1 == 0 or tamamlanan == toplam:
+                            ilerleme_yuzde = int((tamamlanan / toplam) * 100)
+                            status_text.text(f"📊 {mesaj} ({tamamlanan}/{toplam}) - {ilerleme_yuzde}%")
+
+                # Küçük bekleme, API ban riskini azaltır ve CPU kullanımını dengeler
+                time.sleep(0.05)
 
         st.success("✅ Tarama Tamamlandı!")
         return sonuclar

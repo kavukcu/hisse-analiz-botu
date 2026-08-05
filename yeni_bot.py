@@ -661,7 +661,7 @@ def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
                         
                         if not df_4h.empty:
                             return downcast_float64_columns(df_4h)
-                    time.sleep(0.1)
+                    time.sleep(0.2)
             except Exception as e:
                 logging.debug(f"Yahoo 4H resample deneme hatası ({ticker}): {e}")
 
@@ -1481,13 +1481,29 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 auto_adjust=True
             )
 
-            if not guncel_df.empty:
-                guncel_fiyat = float(guncel_df["Close"].iloc[-1])
+            # Eğer veri boşsa veya Close sütunu yoksa bu hisseyi atla
+            if guncel_df is None or guncel_df.empty or "Close" not in guncel_df.columns:
+                # fallback olarak günlük veriden al, eğer orası da yoksa raise ile except'e düşür
+                if "Close" in df_g.columns and not df_g["Close"].dropna().empty:
+                    guncel_fiyat = float(df_g["Close"].dropna().values[-1])
+                else:
+                    return None
             else:
-                guncel_fiyat = float(df_g["Close"].iloc[-1])
+                # FutureWarning önlemek için .values[-1] kullan
+                if guncel_df["Close"].dropna().empty:
+                    if "Close" in df_g.columns and not df_g["Close"].dropna().empty:
+                        guncel_fiyat = float(df_g["Close"].dropna().values[-1])
+                    else:
+                        return None
+                else:
+                    guncel_fiyat = float(guncel_df["Close"].dropna().values[-1])
 
-        except:
-            guncel_fiyat = float(df_g["Close"].iloc[-1])
+        except Exception:
+            # Hata durumunda günlük veriden al; yoksa atla
+            if "Close" in df_g.columns and not df_g["Close"].dropna().empty:
+                guncel_fiyat = float(df_g["Close"].dropna().values[-1])
+            else:
+                return None
 
 
 # --------------------------------------------------
@@ -2418,7 +2434,7 @@ def paralel_tarama(analiz_tipi, mesaj, max_workers=20):
         with st.spinner(f"⏳ {mesaj}"):
             status_text = st.text(f"📊 {mesaj} (0/{toplam}) - 0%")
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 future_to_sembol = {
                     executor.submit(
                         asenkron_analiz_yap,

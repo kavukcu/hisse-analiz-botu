@@ -34,24 +34,27 @@ from sklearn.ensemble import StackingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import IsolationForest
 from sklearn.feature_selection import SelectFromModel
-import shap
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-import gymnasium as gym
-import gym_anytrading
-from stable_baselines3 import A2C
 import asyncio
 import aiohttp
 import pandas as pd
-from pypfopt import expected_returns, risk_models
-from pypfopt.efficient_frontier import EfficientFrontier
-from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dropout, Dense, Input
-import tensorflow.keras.backend as K
+
+# --- TENSORFLOW / KERAS (OPSİYONEL) ---
+# Bu kütüphane sadece LSTM tahmin özelliği için kullanılıyor. Streamlit Cloud'da
+# kurulamazsa veya sürüm uyuşmazlığı olursa TÜM uygulamanın çökmesini engellemek için
+# import hatası burada yakalanıp bayrağa çevriliyor; ilgili fonksiyon bu bayrağı kontrol eder.
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import LSTM, Dropout, Dense, Input
+    import tensorflow.keras.backend as K
+    TENSORFLOW_AVAILABLE = True
+except Exception as _tf_err:
+    TENSORFLOW_AVAILABLE = False
+    logging.warning(f"TensorFlow/Keras yüklenemedi, LSTM özelliği devre dışı: {_tf_err}")
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
@@ -1209,23 +1212,6 @@ def monte_carlo_simulasyonu(df, gun_sayisi=30, sim_sayisi=100):
         rastgele_getiriler = np.random.normal(ortalama_getiri, volatilite, gun_sayisi)
         simulasyonlar[:, i] = son_fiyat * (1 + rastgele_getiriler).cumprod()
     return simulasyonlar
-def shap_aciklamasi_goster(model, X_train, hisse_adi):
-    """
-    Ağaç bazlı (XGBoost, Random Forest) modeller için feature önem grafiğini çizer.
-    """
-    st.subheader(f"{hisse_adi} - Yapay Zeka Karar Gerekçeleri (SHAP)")
-    
-    try:
-        # TreeExplainer kullanıyoruz (Stacking içinde XGBoost'u çekmek gerekebilir)
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_train)
-        
-        # Streamlit'te plt figürü göstermek
-        fig, ax = plt.subplots()
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
-        st.pyplot(fig)
-    except Exception as e:
-        st.warning(f"SHAP grafiği oluşturulurken hata: {e}")
 def python_istatistik_analizi(df):
     try:
         getiriler = df['Close'].pct_change().dropna()
@@ -1928,34 +1914,11 @@ def gelismis_ai_tahmin(df, gelecek_gun=10, temel_veriler=None, temel_skor=0):
     except Exception:
         son_fiyat = float(df['Close'].iloc[-1]) if not df.empty else 0.0
         return [pd.Timestamp.now() + timedelta(days=i) for i in range(1, gelecek_gun + 1)], [son_fiyat] * gelecek_gun
-def rl_ajani_egit(df):
-    """
-    Verilen hisse verisi üzerinde bir RL ajanı eğitir ve strateji üretir.
-    Veride 'Open', 'High', 'Low', 'Close', 'Volume' sütunları olmalıdır.
-    """
-    # Veri setini RL çevresine (environment) yükle
-    window_size = 30
-    start_index = window_size
-    end_index = len(df)
-    
-    env = gym.make('stocks-v0', 
-                   df=df, 
-                   frame_bound=(start_index, end_index), 
-                   window_size=window_size)
-    
-    # Advantage Actor-Critic (A2C) algoritmasını seçiyoruz (Finans için idealdir)
-    model = A2C('MlpPolicy', env, verbose=0)
-    
-    # Ajanı eğit (10.000 adım boyunca sanal al-sat yapar)
-    model.learn(total_timesteps=10000)
-    
-    # Son durumu test et ve ajanın güncel önerisini al (Al=1, Sat=0)
-    obs = env.reset()[0] # Gymnasium güncel yapısında observation ilk elemandır
-    action, _states = model.predict(obs, deterministic=True)
-    
-    aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
-    return aksiyon_metni
 def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
+    if not TENSORFLOW_AVAILABLE:
+        t_df = df.copy()
+        t_df['LSTM_Score'] = 0.5  # TensorFlow yok, nötr skor ile devam
+        return t_df
     try:
         t_df = df.copy()
         
@@ -2089,38 +2052,6 @@ async def tum_piyasayi_tara_async(hisse_listesi):
         # Başarılı çekilen verileri bir sözlükte topla
         basarili_veriler = {hisse: df for hisse, df in sonuclar if df is not None}
         return basarili_veriler
-@st.cache_data(ttl=86400, show_spinner=False)
-def optimize_portfoy_olustur(fiyat_df, toplam_butce=100000):
-    """
-    fiyat_df: Sütunlarında hisse isimleri, satırlarında ise son 1 yıllık 
-    'Günlük Kapanış (Close)' fiyatları olan bir DataFrame olmalıdır.
-    """
-    try:
-        # 1. Beklenen Getiri (Mu) ve Risk (Kovaryans Matrisi - S) Hesaplanması
-        mu = expected_returns.mean_historical_return(fiyat_df)
-        S = risk_models.sample_cov(fiyat_df)
-        
-        # 2. Etkin Sınır (Efficient Frontier) Optimizasyonu
-        ef = EfficientFrontier(mu, S)
-        
-        # Maksimum Sharpe oranına göre (Risk/Getiri dengesi en iyi olan) ağırlıkları bul
-        agirliklar = ef.max_sharpe() 
-        temiz_agirliklar = ef.clean_weights() # Çok küçük oranları (örn %0.001) sıfırlar
-        
-        # 3. Gerçek Bütçeye Göre Hisse Adedi Dağılımı
-        son_fiyatlar = get_latest_prices(fiyat_df)
-        da = DiscreteAllocation(temiz_agirliklar, son_fiyatlar, total_portfolio_value=toplam_butce)
-        
-        # Hangi hisseden tam sayı olarak kaç LOT alınacağını hesaplar
-        lot_dagilimi, kalan_nakit = da.lp_portfolio()
-        
-        # Portföyün beklenen yıllık getiri ve risk oranlarını (volatilite) al
-        beklenen_getiri, volatilite, sharpe = ef.portfolio_performance(verbose=False)
-        
-        return lot_dagilimi, kalan_nakit, beklenen_getiri, sharpe
-        
-    except Exception as e:
-        return None, None, None, f"Optimizasyon Hatası: {e}"
 st.sidebar.header("🌍 Küresel Piyasa Ayarları")
 veri_kaynagi = st.sidebar.selectbox(
     "Veri Çekilecek Kaynak:", 

@@ -2222,20 +2222,41 @@ with tabs[1]:
         with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
             f.write(tip_adi)
 
+    # Yardımcı Fonksiyon: İlerleme çubuklu paralel tarama
+    def paralel_tara(sembol_listesi, analiz_tipi, max_workers=8):
+        sonuclar = []
+        toplam = len(sembol_listesi)
+        ilerleme_cubugu = st.progress(0, text=f"Taranıyor... 0/{toplam} hisse")
+        tamamlanan = 0
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            gelecek_sonuclar = {
+                executor.submit(asenkron_analiz_yap, s, baslangic, bitis, analiz_tipi): s
+                for s in sembol_listesi
+            }
+            for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                sembol = gelecek_sonuclar[future]
+                tamamlanan += 1
+                try:
+                    sonuc = future.result()
+                    if sonuc:
+                        sonuclar.append(sonuc)
+                except Exception as e:
+                    logging.error(f"[{sembol}] Tarama hatası: {e}")
+
+                yuzde = int((tamamlanan / toplam) * 100) if toplam else 100
+                ilerleme_cubugu.progress(
+                    yuzde, text=f"Taranıyor... {tamamlanan}/{toplam} hisse ({sembol})"
+                )
+
+        ilerleme_cubugu.empty()
+        return sonuclar
+
     # 1. GENEL RADAR
     if btn_radar:
         with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
-            radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    if sonuc:
-                        radar_sonuclari.append(sonuc)
-                        
+            radar_sonuclari = paralel_tara(tarama_listesi, "radar", max_workers=8)
+
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)
                 taramayi_kaydet(df_radar, "Genel Radar Taraması")
@@ -2259,16 +2280,7 @@ with tabs[1]:
     # 2. STOCH ANALİZİ
     elif btn_stoch:
         with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
-            stoch_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "stoch"): s 
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    if sonuc:
-                        stoch_sonuclari.append(sonuc)
+            stoch_sonuclari = paralel_tara(tarama_listesi, "stoch", max_workers=10)
             
             if stoch_sonuclari:
                 df_stoch = pd.DataFrame(stoch_sonuclari)
@@ -2281,16 +2293,7 @@ with tabs[1]:
     # 3. TİLSON ANALİZİ
     elif btn_tilson:
         with st.spinner('Tilson T3 trend analizi taranıyor...'):
-            tilson_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "tilson"): s 
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    if sonuc:
-                        tilson_sonuclari.append(sonuc)
+            tilson_sonuclari = paralel_tara(tarama_listesi, "tilson", max_workers=10)
             
             if tilson_sonuclari:
                 df_tilson = pd.DataFrame(tilson_sonuclari)
@@ -2303,16 +2306,7 @@ with tabs[1]:
     # 4. NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
         with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
-            radar_sonuclari = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-                gelecek_sonuclar = {
-                    executor.submit(asenkron_analiz_yap, s, baslangic, bitis, "radar"): s 
-                    for s in tarama_listesi
-                }
-                for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                    sonuc = future.result()
-                    if sonuc:
-                        radar_sonuclari.append(sonuc)
+            radar_sonuclari = paralel_tara(tarama_listesi, "radar", max_workers=8)
             
             if radar_sonuclari:
                 df_radar = pd.DataFrame(radar_sonuclari)

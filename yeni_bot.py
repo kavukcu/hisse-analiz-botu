@@ -38,8 +38,6 @@ import shap
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
-from keras.models import Sequential
-from keras.layers import LSTM, Dropout, Dense, Input
 from sklearn.preprocessing import MinMaxScaler
 import gymnasium as gym
 import gym_anytrading
@@ -50,12 +48,10 @@ import pandas as pd
 from pypfopt import expected_returns, risk_models
 from pypfopt.efficient_frontier import EfficientFrontier
 from pypfopt.discrete_allocation import DiscreteAllocation, get_latest_prices
-import numpy as np
 import tensorflow as tf
-from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout
-from sklearn.preprocessing import MinMaxScaler
-import keras.backend as K
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dropout, Dense, Input
+import tensorflow.keras.backend as K
 # --- TRADINGVIEW BAĞLANTISINI HAFIZADA TUTAN BLOK ---
 st.set_page_config(layout="wide", page_title="God Mode Terminal v100")
 @st.cache_resource(show_spinner=False)
@@ -1959,12 +1955,6 @@ def rl_ajani_egit(df):
     
     aksiyon_metni = "AL" if action == 1 else "SAT / BEKLE"
     return aksiyon_metni
-import numpy as np
-import pandas as pd
-from keras.models import Sequential
-from keras.layers import LSTM, Dense, Dropout, Input
-from sklearn.preprocessing import MinMaxScaler
-
 def lstm_tahmin_yap(df: pd.DataFrame, lookback_days: int = 30) -> pd.DataFrame:
     try:
         t_df = df.copy()

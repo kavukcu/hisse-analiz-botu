@@ -83,71 +83,6 @@ def tum_bist_hisselerini_getir():
     """BIST hisselerini sabit listeden hızlıca getirir. API engellerine takılmaz."""
     return ["A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS",
   "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AHSGY.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS",
-  "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSUE.IS", "AKYHO.IS",
-  "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS",
-  "ALTNY.IS", "ALVES.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS",
-  "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARTMS.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS",
-  "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "AVGYO.IS", "AVHOL.IS",
-  "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYGAZ.IS", "AZTEK.IS",
-  "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS",
-  "BEGYO.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIGTK.IS", "BIMAS.IS", "BINHO.IS",
-  "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS",
-  "BORLS.IS", "BORSK.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS",
-  "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BULGS.IS", "BURCE.IS",
-  "BURVA.IS", "BVSAN.IS", "BYDNR.IS", "CANTE.IS", "CASA.IS", "CATES.IS", "CCOLA.IS", "CELHA.IS",
-  "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CGCAM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS",
-  "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGI.IS",
-  "DAPGM.IS", "DARDL.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGGYO.IS",
-  "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMRGD.IS", "DNISI.IS", "DOAS.IS", "DOCO.IS", "DOFER.IS",
-  "DOFRB.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DSTKF.IS", "DUNYH.IS", "DURDO.IS", "DURKN.IS",
-  "DYOBY.IS", "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECOGR.IS", "ECZYT.IS", "EDATA.IS", "EDIP.IS",
-  "EFOR.IS", "EGEEN.IS", "EGEGY.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKDMR.IS", "EKGYO.IS",
-  "EKIM.IS", "EKIZ.IS", "EKOS.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "EMPAE.IS", "ENERY.IS",
-  "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", "ENTRA.IS", "EPLAS.IS", "ERBOS.IS", "EREGL.IS", "ERSU.IS",
-  "ESCAR.IS", "ESCOM.IS", "ESEN.IS", "ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUPWR.IS", "EUREN.IS",
-  "EUYO.IS", "EYGYO.IS", "FADE.IS", "FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS", "FORMT.IS",
-  "FORTE.IS", "FRIGO.IS", "FROTO.IS", "FZLGY.IS", "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS",
-  "GENIL.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLCVY.IS", "GLRYH.IS",
-  "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS",
-  "GSDDE.IS", "GSDHO.IS", "GSRAY.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", "HALKB.IS", "HATEK.IS",
-  "HATSN.IS", "HDFGS.IS", "HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HOROZ.IS", "HRKET.IS",
-  "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS", "ICBCT.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS",
-  "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS",
-  "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS",
-  "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "IZENR.IS",
-  "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS", "KAPLM.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS",
-  "KATMR.IS", "KAYSE.IS", "KBORU.IS", "KCAER.IS", "KCHOL.IS", "KENT.IS", "KERVN.IS", "KFEIN.IS",
-  "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS", "KLNMA.IS", "KLRHO.IS", "KLSER.IS",
-  "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KOCMT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS",
-  "KORDS.IS", "KOTON.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS",
-  "KRSTL.IS", "KRTEK.IS", "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", "KUVVA.IS",
-  "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS", "LILAK.IS", "LINK.IS", "LKMNH.IS",
-  "LOGO.IS", "LRSHO.IS", "LUKSK.IS", "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS",
-  "MANAS.IS", "MARBL.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEGMT.IS",
-  "MEKAG.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "MGROS.IS", "MHRGY.IS",
-  "MIATK.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MOGAN.IS", "MPARK.IS", "MRGYO.IS",
-  "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS",
-  "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "OBASE.IS", "OBAMS.IS", "ODAS.IS", "ODINE.IS",
-  "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", "OSTIM.IS", "OTKAR.IS",
-  "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS",
-  "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PATEK.IS", "PCILT.IS", "PEKGY.IS",
-  "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS",
-  "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS",
-  "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QNBFK.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS",
-  "REEDR.IS", "RGYAS.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS",
-  "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS",
-  "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS",
-  "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SKYLP.IS", "SKYMD.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS",
-  "SNICA.IS", "SNPAM.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS", "SUMAS.IS", "SUNTK.IS",
-  "SURGY.IS", "SUWEN.IS", "SVGYO.IS", "TABGD.IS", "TARKM.IS", "TATEN.IS", "TATGD.IS", "TAVHL.IS",
-  "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS", "TEZOL.IS", "TGSAS.IS", "THYAO.IS",
-  "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS", "TNZTP.IS", "TOASO.IS", "TRCAS.IS",
-  "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", "TTRAK.IS", "TUCLK.IS",
-  "TUKAS.IS", "TUPRS.IS", "TUREX.IS", "TURGG.IS", "TURSG.IS", "UFUK.IS", "ULAS.IS", "ULUFA.IS",
-  "ULUSE.IS", "ULUUN.IS", "UMPAS.IS", "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS",
-  "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKGYO.IS", "VKING.IS", "VRGYO.IS",
-  "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", "YESIL.IS", "YGGYO.IS", "YIGIT.IS",
-  "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS", "XU100"
   ]
 
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
@@ -1578,6 +1513,18 @@ def ensemble_prediction(df, sembol="Genel"):
         t_df['Trend_5_8'] = np.where(t_df['EMA_5'] > t_df['EMA_8'], 1, -1)
         t_df['Trend_8_13'] = np.where(t_df['EMA_8'] > t_df['EMA_13'], 1, -1)
 
+        # --- LSTM ENTEGRASYONU (XGBoost'a Öznitelik Olarak Verilmek Üzere) ---
+        # LSTM'in ihtiyaç duyduğu Target_Class, Tilson_Dist_Norm ve Volume_Trend
+        # sütunlarını burada üretiyoruz (daha önce hiç çağrılmadıkları için LSTM
+        # sessizce hep nötr/0.5 dönüyor ve gerçek bir entegrasyon oluşmuyordu).
+        try:
+            t_df = ozellikleri_zenginlestir(t_df)   # Tilson_Dist_Norm, Volume_Trend (ATR de tazelenir)
+            t_df = hedef_degiskeni_olustur(t_df)    # Target_Class (LSTM'in eğitim etiketi)
+            t_df = lstm_tahmin_yap(t_df, lookback_days=40)  # Tüm seri için LSTM_Score üretir
+        except Exception as e:
+            logging.warning(f"[{sembol}] LSTM öznitelik üretimi başarısız, nötr skorla devam: {e}")
+            t_df['LSTM_Score'] = 0.5
+
         # Ham Öznitelik Listesi
         raw_features = [
             'RSI', 'MACD_Hist', 'BB_Pozisyon', 'ATR', 'Z_Score', 
@@ -1591,7 +1538,7 @@ def ensemble_prediction(df, sembol="Genel"):
             'Bayrak_Formasyonu', 'Tepe_Uzakligi_Z', 'Dip_Uzakligi_Z', 
             'High_Slope', 'Low_Slope', 'Makro_Guc_Skoru', 'Cross_Sinyali', 
             'SMA_50_200_Farki', 'ABCD_Formasyonu', 'F_K', 'PD_DD', 'ROE', 'Cari_Oran', 'Temel_Skor', 
-            'XU100_Return', 'XU100_Trend'
+            'XU100_Return', 'XU100_Trend', 'LSTM_Score'
         ]
         
         # Sadece tabloda var olan özellikleri güvenli şekilde filtreliyoruz
@@ -1671,27 +1618,24 @@ def ensemble_prediction(df, sembol="Genel"):
 
         # --- 3. TAHMİN VE KARAR ---
         # --- 3. TAHMİN VE KARAR ---
+        # LSTM_Score artık yukarıda gerçek bir öznitelik olarak eğitime dahil edildi;
+        # ensemble.predict() çağrısı LSTM'in sinyalini de içeren tam tahmini üretir.
         beklenen_getiri_pct = float(ensemble.predict(son_veri).item())
-        
-        # Yeni LSTM Entegrasyon Kontrolü
+
+        # LSTM'in son gündeki ham skorunu (0-1 arası olasılık) güven skoruna küçük bir
+        # katkı olarak yansıtıyoruz — tahminin kendisini artık değiştirmiyor (çifte sayımı önlemek için)
+        lstm_guven_katkisi = 0.0
         try:
-            # Artık fonksiyon DataFrame döndürüyor
-            lstm_df = lstm_tahmin_yap(t_df, lookback_days=40)
-            
-            if lstm_df is not None and 'LSTM_Score' in lstm_df.columns:
-                # En güncel günün (son satırın) LSTM güven skorunu al (0.0 ile 1.0 arası)
-                lstm_skoru = float(lstm_df['LSTM_Score'].iloc[-1])
-                
-                lstm_carpan = lstm_skoru / 0.5 
-                
-                beklenen_getiri_pct = beklenen_getiri_pct * lstm_carpan
-                
-        except Exception as e:
+            if 'LSTM_Score' in t_df.columns:
+                lstm_skoru = float(t_df['LSTM_Score'].iloc[-1])
+                # 0.5 nötr kabul edilir; sapma ne kadar büyükse güvene katkısı o kadar artar (±10 puan)
+                lstm_guven_katkisi = (lstm_skoru - 0.5) * 20
+        except Exception:
             pass
 
         anlik_fiyat = float(t_df['Close'].iloc[-1])
         hedef_fiyat = anlik_fiyat * (1 + (beklenen_getiri_pct / 100))
-        guven_skoru = min(abs(beklenen_getiri_pct) * 8 + 50, 99.0)
+        guven_skoru = min(max(abs(beklenen_getiri_pct) * 8 + 50 + lstm_guven_katkisi, 0.0), 99.0)
         
         # Grafik Okuma
         makro_skor = int(t_df['Makro_Guc_Skoru'].iloc[-1]) if 'Makro_Guc_Skoru' in t_df.columns else 0
@@ -2290,13 +2234,14 @@ with tabs[1]:
     # Yardımcı Fonksiyon: İlerleme çubuklu paralel tarama
     def paralel_tara(sembol_listesi, analiz_tipi, max_workers=8):
         sonuclar = []
+        veri_yok_sayisi = 0
         toplam = len(sembol_listesi)
         ilerleme_cubugu = st.progress(0, text=f"Taranıyor... 0/{toplam} hisse")
         tamamlanan = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             gelecek_sonuclar = {
-                executor.submit(asenkron_analiz_yap, s, baslangic, bitis, analiz_tipi): s
+                executor.submit(asenkron_analiz_yap, s, baslangic, bitis, analiz_tipi, veri_kaynagi): s
                 for s in sembol_listesi
             }
             for future in concurrent.futures.as_completed(gelecek_sonuclar):
@@ -2306,7 +2251,10 @@ with tabs[1]:
                     sonuc = future.result()
                     if sonuc:
                         sonuclar.append(sonuc)
+                    else:
+                        veri_yok_sayisi += 1
                 except Exception as e:
+                    veri_yok_sayisi += 1
                     logging.error(f"[{sembol}] Tarama hatası: {e}")
 
                 yuzde = int((tamamlanan / toplam) * 100) if toplam else 100
@@ -2315,6 +2263,8 @@ with tabs[1]:
                 )
 
         ilerleme_cubugu.empty()
+        if veri_yok_sayisi > 0:
+            st.caption(f"ℹ️ {veri_yok_sayisi}/{toplam} hisse için veri kaynağından fiyat verisi alınamadı (bunlar tabloya hiç girmedi).")
         return sonuclar
 
     # 1. GENEL RADAR
@@ -2340,7 +2290,7 @@ with tabs[1]:
                 st.dataframe(df_goster, width="stretch", hide_index=True)
                 st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
             else:
-                st.warning("⚠️ Tarama sonucu bulunamadı.")
+                st.warning("⚠️ Tarama sonucu bulunamadı. Bu genellikle veri kaynağından hiç fiyat verisi çekilemediği anlamına gelir (kriterlerle ilgisi yoktur — kriterler ne kadar sert olursa olsun her hisse en azından 'PAS GEÇİLDİ' satırı olarak tabloya girer). Veri kaynağını (Yahoo/TradingView/İş Yatırım) değiştirmeyi deneyin.")
 
     # 2. STOCH ANALİZİ
     elif btn_stoch:
@@ -2353,7 +2303,7 @@ with tabs[1]:
                 st.dataframe(df_stoch, width="stretch", hide_index=True)
                 st.success("✅ Stoch taraması kaydedildi!")
             else:
-                st.warning("⚠️ Stoch tarama sonucu bulunamadı.")
+                st.warning("⚠️ Stoch tarama sonucu bulunamadı. Veri kaynağından hiç fiyat verisi çekilemedi.")
 
     # 3. TİLSON ANALİZİ
     elif btn_tilson:
@@ -2366,7 +2316,7 @@ with tabs[1]:
                 st.dataframe(df_tilson, width="stretch", hide_index=True)
                 st.success("✅ Tilson T3 taraması kaydedildi!")
             else:
-                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı.")
+                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı. Veri kaynağından hiç fiyat verisi çekilemedi.")
 
     # 4. NOKTA ATIŞI (SNIPER)
     elif btn_nokta_atisi:
@@ -2399,9 +2349,23 @@ with tabs[1]:
                     st.dataframe(df_sniper, width="stretch", hide_index=True)
                     st.balloons()
                 else:
-                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarına tam uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
+                    boga_sayisi = (df_radar['Günlük T3'] == '🚀 BOĞA').sum()
+                    skor_sayisi = (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30).sum()
+                    tetik_sayisi = (
+                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) |
+                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) |
+                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+                    ).sum()
+                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarının HEPSİNE birden uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
+                    st.caption(
+                        f"ℹ️ Kırılım — {len(df_radar)} hisse tarandı: "
+                        f"{boga_sayisi} tanesi Günlük BOĞA trendinde, "
+                        f"{skor_sayisi} tanesi Temel Skor ≥ 30, "
+                        f"{tetik_sayisi} tanesi hacim/uyuşmazlık/spring tetikleyicilerinden birine sahip. "
+                        f"Sniper filtresi bu üç şartın AYNI ANDA sağlanmasını istiyor — bu yüzden tek tek sayılar dolu olsa bile kesişim boş çıkabilir."
+                    )
             else:
-                st.warning("⚠️ Tarama yapılamadı.")
+                st.warning("⚠️ Tarama yapılamadı. Veri kaynağından hiç fiyat verisi çekilemedi — kriterlerle ilgisi yok. Veri kaynağını (Yahoo/TradingView/İş Yatırım) değiştirmeyi deneyin.")
 
     # 5. EN SON TARAMAYI GETİR
     elif btn_son_tarama:

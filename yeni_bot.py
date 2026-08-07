@@ -87,7 +87,70 @@ def tum_bist_hisselerini_getir():
     return ["A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS",
   "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AHSGY.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS",
   "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSUE.IS", "AKYHO.IS",
-  "ALARK.IS"
+  "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS",
+  "ALTNY.IS", "ALVES.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS",
+  "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARTMS.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS",
+  "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "AVGYO.IS", "AVHOL.IS",
+  "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYGAZ.IS", "AZTEK.IS",
+  "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS",
+  "BEGYO.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIGTK.IS", "BIMAS.IS", "BINHO.IS",
+  "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS",
+  "BORLS.IS", "BORSK.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS",
+  "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BULGS.IS", "BURCE.IS",
+  "BURVA.IS", "BVSAN.IS", "BYDNR.IS", "CANTE.IS", "CASA.IS", "CATES.IS", "CCOLA.IS", "CELHA.IS",
+  "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CGCAM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS",
+  "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGI.IS",
+  "DAPGM.IS", "DARDL.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGGYO.IS",
+  "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMRGD.IS", "DNISI.IS", "DOAS.IS", "DOCO.IS", "DOFER.IS",
+  "DOFRB.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DSTKF.IS", "DUNYH.IS", "DURDO.IS", "DURKN.IS",
+  "DYOBY.IS", "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECOGR.IS", "ECZYT.IS", "EDATA.IS", "EDIP.IS",
+  "EFOR.IS", "EGEEN.IS", "EGEGY.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKDMR.IS", "EKGYO.IS",
+  "EKIM.IS", "EKIZ.IS", "EKOS.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "EMPAE.IS", "ENERY.IS",
+  "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", "ENTRA.IS", "EPLAS.IS", "ERBOS.IS", "EREGL.IS", "ERSU.IS",
+  "ESCAR.IS", "ESCOM.IS", "ESEN.IS", "ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUPWR.IS", "EUREN.IS",
+  "EUYO.IS", "EYGYO.IS", "FADE.IS", "FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS", "FORMT.IS",
+  "FORTE.IS", "FRIGO.IS", "FROTO.IS", "FZLGY.IS", "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS",
+  "GENIL.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLCVY.IS", "GLRYH.IS",
+  "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS",
+  "GSDDE.IS", "GSDHO.IS", "GSRAY.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", "HALKB.IS", "HATEK.IS",
+  "HATSN.IS", "HDFGS.IS", "HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HOROZ.IS", "HRKET.IS",
+  "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS", "ICBCT.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS",
+  "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS",
+  "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS",
+  "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "IZENR.IS",
+  "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS", "KAPLM.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS",
+  "KATMR.IS", "KAYSE.IS", "KBORU.IS", "KCAER.IS", "KCHOL.IS", "KENT.IS", "KERVN.IS", "KFEIN.IS",
+  "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS", "KLNMA.IS", "KLRHO.IS", "KLSER.IS",
+  "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KOCMT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS",
+  "KORDS.IS", "KOTON.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS",
+  "KRSTL.IS", "KRTEK.IS", "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", "KUVVA.IS",
+  "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS", "LILAK.IS", "LINK.IS", "LKMNH.IS",
+  "LOGO.IS", "LRSHO.IS", "LUKSK.IS", "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS",
+  "MANAS.IS", "MARBL.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEGMT.IS",
+  "MEKAG.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "MGROS.IS", "MHRGY.IS",
+  "MIATK.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MOGAN.IS", "MPARK.IS", "MRGYO.IS",
+  "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS",
+  "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "OBASE.IS", "OBAMS.IS", "ODAS.IS", "ODINE.IS",
+  "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", "OSTIM.IS", "OTKAR.IS",
+  "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS",
+  "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PATEK.IS", "PCILT.IS", "PEKGY.IS",
+  "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS",
+  "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS",
+  "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QNBFK.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS",
+  "REEDR.IS", "RGYAS.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS",
+  "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS",
+  "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS",
+  "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SKYLP.IS", "SKYMD.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS",
+  "SNICA.IS", "SNPAM.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS", "SUMAS.IS", "SUNTK.IS",
+  "SURGY.IS", "SUWEN.IS", "SVGYO.IS", "TABGD.IS", "TARKM.IS", "TATEN.IS", "TATGD.IS", "TAVHL.IS",
+  "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS", "TEZOL.IS", "TGSAS.IS", "THYAO.IS",
+  "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS", "TNZTP.IS", "TOASO.IS", "TRCAS.IS",
+  "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", "TTRAK.IS", "TUCLK.IS",
+  "TUKAS.IS", "TUPRS.IS", "TUREX.IS", "TURGG.IS", "TURSG.IS", "UFUK.IS", "ULAS.IS", "ULUFA.IS",
+  "ULUSE.IS", "ULUUN.IS", "UMPAS.IS", "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS",
+  "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKGYO.IS", "VKING.IS", "VRGYO.IS",
+  "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", "YESIL.IS", "YGGYO.IS", "YIGIT.IS",
+  "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS", "XU100.IS"
   ]
 
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
@@ -615,6 +678,129 @@ def ileri_teknik_gostergeler(df):
         np.where((df_ta['EMA_5'] < df_ta['EMA_8']) & (df_ta['EMA_8'] < df_ta['EMA_13']), "🔻 GÜÇLÜ DÜŞÜŞ", "⚖️ YATAY NÖTR")
     )
     return df_ta
+
+
+def genisletilmis_indikatorler_hesapla(df, period=14):
+    """
+    RSI(14), MACD(12,26,9), Bollinger Bantları(20,2), ADX/+DI/-DI(14) ve
+    Wilder ATR(14) hesaplayıp DataFrame'e ekler. Tüm hesaplamalar sadece
+    OHLCV verisi üzerinden yapılır, ek ağ isteği gerektirmez.
+    """
+    d = df.copy()
+    if d is None or len(d) < period + 1:
+        for kol in ['RSI', 'MACD', 'MACD_Signal', 'MACD_Hist', 'BB_Orta', 'BB_Ust',
+                    'BB_Alt', 'BB_Yuzde', 'ATR', 'Plus_DI', 'Minus_DI', 'ADX']:
+            d[kol] = np.nan
+        return d
+
+    # --- RSI (Wilder) ---
+    delta = d['Close'].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    rs = avg_gain / avg_loss.replace(0, 1e-9)
+    d['RSI'] = 100 - (100 / (1 + rs))
+
+    # --- MACD (12, 26, 9) ---
+    ema12 = d['Close'].ewm(span=12, adjust=False).mean()
+    ema26 = d['Close'].ewm(span=26, adjust=False).mean()
+    d['MACD'] = ema12 - ema26
+    d['MACD_Signal'] = d['MACD'].ewm(span=9, adjust=False).mean()
+    d['MACD_Hist'] = d['MACD'] - d['MACD_Signal']
+
+    # --- Bollinger Bantları (20, 2) ---
+    d['BB_Orta'] = d['Close'].rolling(window=20).mean()
+    bb_std = d['Close'].rolling(window=20).std()
+    d['BB_Ust'] = d['BB_Orta'] + (bb_std * 2)
+    d['BB_Alt'] = d['BB_Orta'] - (bb_std * 2)
+    bb_genislik = (d['BB_Ust'] - d['BB_Alt']).replace(0, 1e-9)
+    # %B: 0 = alt bant, 0.5 = orta bant, 1 = üst bant
+    d['BB_Yuzde'] = (d['Close'] - d['BB_Alt']) / bb_genislik
+
+    # --- ATR (Wilder, True Range üzerinden) ---
+    prev_close = d['Close'].shift(1)
+    tr = pd.concat([
+        d['High'] - d['Low'],
+        (d['High'] - prev_close).abs(),
+        (d['Low'] - prev_close).abs()
+    ], axis=1).max(axis=1)
+    d['ATR'] = tr.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    # --- ADX / +DI / -DI (Wilder) ---
+    up_move = d['High'].diff()
+    down_move = -d['Low'].diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    atr_di = d['ATR'].replace(0, 1e-9)
+    plus_di = 100 * pd.Series(plus_dm, index=d.index).ewm(alpha=1 / period, adjust=False, min_periods=period).mean() / atr_di
+    minus_di = 100 * pd.Series(minus_dm, index=d.index).ewm(alpha=1 / period, adjust=False, min_periods=period).mean() / atr_di
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1e-9)) * 100
+    d['Plus_DI'] = plus_di
+    d['Minus_DI'] = minus_di
+    d['ADX'] = dx.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    return d
+
+
+def fibonacci_seviyeleri_hesapla(df, lookback=60):
+    """
+    Son `lookback` bar içindeki en yüksek/en düşük noktalar arasında
+    Fibonacci geri çekilme seviyelerini (0, %23.6, %38.2, %50, %61.8, %78.6,
+    %100) hesaplar ve fiyata en yakın seviyeyi döner.
+    """
+    if df is None or df.empty:
+        return None
+    pencere = df.tail(lookback) if len(df) >= 10 else df
+    if len(pencere) < 10:
+        return None
+
+    tepe = float(pencere['High'].max())
+    dip = float(pencere['Low'].min())
+    fark = tepe - dip
+    if fark <= 0:
+        return None
+
+    fiyat = float(df['Close'].iloc[-1])
+    tepe_idx = pencere['High'].idxmax()
+    dip_idx = pencere['Low'].idxmin()
+    # Dip, tepeden önce oluştuysa bu bir YÜKSELİŞ bacağıdır -> tepeden geri çekilme
+    yukselis_bacagi = dip_idx < tepe_idx
+
+    oranlar = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+    seviyeler = {}
+    for o in oranlar:
+        seviyeler[o] = (tepe - fark * o) if yukselis_bacagi else (dip + fark * o)
+
+    en_yakin_oran = min(seviyeler, key=lambda o: abs(seviyeler[o] - fiyat))
+    en_yakin_fiyat = seviyeler[en_yakin_oran]
+    uzaklik_pct = (abs(fiyat - en_yakin_fiyat) / fiyat * 100) if fiyat else 0.0
+
+    return {
+        "tepe": tepe, "dip": dip, "yukselis_bacagi": yukselis_bacagi,
+        "en_yakin_oran": en_yakin_oran, "en_yakin_fiyat": en_yakin_fiyat,
+        "uzaklik_pct": uzaklik_pct, "seviyeler": seviyeler,
+    }
+
+
+def haftalik_veri_turet(df_gunluk):
+    """
+    Ayrı bir ağ isteği ATMADAN, zaten elde olan günlük veriyi haftalığa
+    (Pazartesi-Cuma) resample ederek türetir. Haftalık teyit için ekstra
+    API çağrısı gerekmediğinden tarama hızını etkilemez.
+    """
+    if df_gunluk is None or df_gunluk.empty:
+        return pd.DataFrame()
+    try:
+        gerekli = ['Open', 'High', 'Low', 'Close', 'Volume']
+        if not all(c in df_gunluk.columns for c in gerekli):
+            return pd.DataFrame()
+        df_w = df_gunluk[gerekli].resample('W').agg({
+            'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
+        }).dropna()
+        return df_w
+    except Exception:
+        return pd.DataFrame()
 def grafik_formasyon_bul(df, window=10, tolerans=0.03):
     try:
         df_form = df.copy()
@@ -1330,8 +1516,9 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         df_g = stokastik_hesapla(df_g)
         df_g['Tilson_T3'] = tilson_t3(df_g['Close'])
         df_g = ileri_teknik_gostergeler(df_g)
-        
-    
+        # RSI / MACD / Bollinger / ADX / ATR — ek ağ isteği gerektirmez
+        df_g = genisletilmis_indikatorler_hesapla(df_g)
+
         # Yenilenen dipten dönüş analizi çağrılıyor
         temp_g = dipten_donus_analizi(df_g)
         
@@ -1352,6 +1539,95 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         g_spring = temp_g['Wyckoff_Spring'].iloc[-1]
         g_ma_kestimi = (g_ema5 > g_ema8) and (g_ema8 > g_ema13)
 
+        # --- C2. HAFTALIK ZAMAN DİLİMİ TEYİDİ (ek ağ isteği YOK — günlükten türetilir) ---
+        df_w = haftalik_veri_turet(df_g)
+        w_boga = g_boga  # veri yetersizse günlük yönle aynı kabul edilir (nötr varsayım)
+        if not df_w.empty and len(df_w) >= 10:
+            try:
+                df_w['Tilson_T3'] = tilson_t3(df_w['Close'])
+                w_fiyat = float(df_w['Close'].iloc[-1])
+                w_tilson = float(df_w['Tilson_T3'].iloc[-1])
+                if pd.notna(w_tilson):
+                    w_boga = w_fiyat > w_tilson
+            except Exception as e:
+                logging.debug(f"[{sembol}] Haftalık analiz hatası: {e}")
+
+        # --- C3. RSI / MACD / BOLLINGER / ADX METİNLERİ ---
+        g_rsi = df_g['RSI'].iloc[-1] if 'RSI' in df_g.columns else np.nan
+        if pd.notna(g_rsi):
+            if g_rsi >= 70:
+                rsi_metin = f"🔴 {g_rsi:.1f} (Aşırı Alım)"
+            elif g_rsi <= 30:
+                rsi_metin = f"🟢 {g_rsi:.1f} (Aşırı Satım)"
+            else:
+                rsi_metin = f"{g_rsi:.1f}"
+        else:
+            rsi_metin = "-"
+
+        g_macd_hist = df_g['MACD_Hist'].iloc[-1] if 'MACD_Hist' in df_g.columns else np.nan
+        g_macd_hist_onceki = df_g['MACD_Hist'].iloc[-2] if ('MACD_Hist' in df_g.columns and len(df_g) > 1) else np.nan
+        if pd.notna(g_macd_hist):
+            if g_macd_hist > 0 and (pd.isna(g_macd_hist_onceki) or g_macd_hist_onceki <= 0):
+                macd_metin = "🟢 Yeni Pozitif Kesişim"
+            elif g_macd_hist < 0 and (pd.isna(g_macd_hist_onceki) or g_macd_hist_onceki >= 0):
+                macd_metin = "🔴 Yeni Negatif Kesişim"
+            elif g_macd_hist > 0:
+                macd_metin = "🟢 Pozitif"
+            else:
+                macd_metin = "🔴 Negatif"
+        else:
+            macd_metin = "-"
+
+        g_bb_yuzde = df_g['BB_Yuzde'].iloc[-1] if 'BB_Yuzde' in df_g.columns else np.nan
+        if pd.notna(g_bb_yuzde):
+            if g_bb_yuzde >= 1:
+                bb_metin = "🔴 Üst Bandın Üstünde"
+            elif g_bb_yuzde <= 0:
+                bb_metin = "🟢 Alt Bandın Altında"
+            elif g_bb_yuzde >= 0.8:
+                bb_metin = "Üst Banda Yakın"
+            elif g_bb_yuzde <= 0.2:
+                bb_metin = "Alt Banda Yakın"
+            else:
+                bb_metin = "Orta Bant"
+        else:
+            bb_metin = "-"
+
+        g_adx = df_g['ADX'].iloc[-1] if 'ADX' in df_g.columns else np.nan
+        if pd.notna(g_adx):
+            if g_adx >= 25:
+                adx_metin = f"💪 {g_adx:.1f} (Güçlü Trend)"
+            elif g_adx >= 15:
+                adx_metin = f"〰️ {g_adx:.1f} (Orta)"
+            else:
+                adx_metin = f"😴 {g_adx:.1f} (Zayıf/Yatay)"
+        else:
+            adx_metin = "-"
+
+        # --- C4. FİBONACCİ SEVİYELERİ (son 60 bar) ---
+        fib_bilgi = fibonacci_seviyeleri_hesapla(df_g, lookback=60)
+        if fib_bilgi:
+            fib_metin = f"%{fib_bilgi['en_yakin_oran'] * 100:.1f} ({fib_bilgi['en_yakin_fiyat']:.2f} TL, %{fib_bilgi['uzaklik_pct']:.1f} uzak)"
+        else:
+            fib_metin = "-"
+
+        # --- C5. ATR TABANLI STOP-LOSS / KAR-AL HEDEFİ (1.5x ATR stop, 2x/3x ATR hedef) ---
+        g_atr = df_g['ATR'].iloc[-1] if 'ATR' in df_g.columns else np.nan
+        if pd.notna(g_atr) and g_atr > 0 and g_fiyat:
+            atr_stop = round(g_fiyat - 1.5 * g_atr, 2)
+            atr_hedef1 = round(g_fiyat + 2 * g_atr, 2)
+            atr_hedef2 = round(g_fiyat + 3 * g_atr, 2)
+            risk = g_fiyat - atr_stop
+            odul = atr_hedef1 - g_fiyat
+            rr_orani = round(odul / risk, 2) if risk > 0 else None
+            stop_metin = f"{atr_stop} TL (%{((g_fiyat - atr_stop) / g_fiyat * 100):.1f})"
+            hedef_metin = f"{atr_hedef1} TL / {atr_hedef2} TL"
+            rr_metin = f"1:{rr_orani}" if rr_orani else "-"
+        else:
+            stop_metin = "-"
+            hedef_metin = "-"
+            rr_metin = "-"
+
         # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (g_super_sinyal eklendi)
         umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
         
@@ -1360,18 +1636,27 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
                 "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
+                "Günlük T3": "🐻 AYI",
+                "4S T3": "-",
+                "Haftalık T3": "🚀 BOĞA" if w_boga else "🐻 AYI",
                 "🤖 AI Kararı": "Zaman Tasarrufu",
                 "🎯 AI Hedef": "-",
                 "🎯 AL/SAT Kararı": "🐻 PAS GEÇİLDİ (Ölü Trend)",
                 "🎯 Kesin Dip Onayı": "-",
                 "🔍 Tespit Edilen Formasyon": "Yok",
                 "🎯 Formasyon Hedefi (%)": "% 0.00",
-                "Günlük T3": "🐻 AYI",
-                "4S T3": "-",
                 "📈 Pozitif Uyuşmazlık": "-",
                 "📊 Temel Skor": "-",
                 "💥 Hacim Analizi": "Normal",
-                "🪤 Spring (Tuzak)": "-"
+                "🪤 Spring (Tuzak)": "-",
+                "📉 RSI(14)": rsi_metin,
+                "〰️ MACD Durumu": macd_metin,
+                "📏 Bollinger Pozisyonu": bb_metin,
+                "💪 Trend Gücü (ADX)": adx_metin,
+                "🧮 Fibonacci Seviyesi": fib_metin,
+                "🛡️ ATR Stop-Loss": stop_metin,
+                "🎯 ATR Kar Hedefi": hedef_metin,
+                "⚖️ Risk/Ödül": rr_metin
             }
 
         # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ ---
@@ -1396,13 +1681,17 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             except Exception as e:
                 logging.error(f"[{sembol}] 4S Analiz Hatası: {e}")
 
-        # --- E. KARAR MEKANİZMASI ---
-        if g_boga and h4_boga:
-            al_sat_karari = "🚀 GÜÇLÜ AL (4S + Günlük Onaylı)" if (g_stoch_al and h4_stoch_al) else "🟢 AL (Trend Onaylı)"
+        # --- E. KARAR MEKANİZMASI (Günlük + 4S + Haftalık 3'lü Teyit) ---
+        if g_boga and h4_boga and w_boga:
+            al_sat_karari = "🚀🚀 SÜPER GÜÇLÜ AL (Haftalık+4S+Günlük Onaylı)" if (g_stoch_al and h4_stoch_al) else "🚀 GÜÇLÜ AL (3 Zaman Dilimi Onaylı)"
+        elif g_boga and h4_boga and not w_boga:
+            al_sat_karari = "🟢 AL (Günlük+4S Onaylı / Haftalık Zayıf)" if (g_stoch_al and h4_stoch_al) else "🟢 AL (Trend Onaylı)"
         elif g_boga and not h4_boga:
             al_sat_karari = "⚠️ DÜZELTME (Günlük Boğa / 4S Ayı)"
         elif not g_boga and h4_boga:
             al_sat_karari = "⚡ TEPKİ YÜKSELİŞİ (4S Boğa / Günlük Ayı)"
+        elif not g_boga and not h4_boga and w_boga:
+            al_sat_karari = "🟡 ANA TREND HALA BOĞA (Haftalık) — Kısa Vade Düzeltmede"
         else:
             al_sat_karari = "🐻 GÜÇLÜ SAT / AYI"
 
@@ -1469,18 +1758,27 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Varlık": sembol,
                 "Güncel Fiyat": f"{guncel_fiyat:.2f}",
                 "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
+                "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
+                "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
+                "Haftalık T3": "🚀 BOĞA" if w_boga else "🐻 AYI",
                 "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'), # İçinde gün tahmini de yazacak
                 "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL",
                 "🎯 AL/SAT Kararı": al_sat_karari,
                 "🎯 Kesin Dip Onayı": dip_durum,
                 "🔍 Tespit Edilen Formasyon": formasyon_adi,
                 "🎯 Formasyon Hedefi (%)": formasyon_hedef,
-                "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
-                "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
                 "📈 Pozitif Uyuşmazlık": uyusmazlik_durum,
                 "📊 Temel Skor": s_skor,
                 "💥 Hacim Analizi": hacim_durum,
                 "🪤 Spring (Tuzak)": spring_durum,
+                "📉 RSI(14)": rsi_metin,
+                "〰️ MACD Durumu": macd_metin,
+                "📏 Bollinger Pozisyonu": bb_metin,
+                "💪 Trend Gücü (ADX)": adx_metin,
+                "🧮 Fibonacci Seviyesi": fib_metin,
+                "🛡️ ATR Stop-Loss": stop_metin,
+                "🎯 ATR Kar Hedefi": hedef_metin,
+                "⚖️ Risk/Ödül": rr_metin,
             }
 
         elif analiz_tipi == "stoch":
@@ -1510,6 +1808,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Günlük Fark (%)": round(g_fark_pct, 2),
                 "4S T3": round(float(h4_tilson), 2),
                 "4S Fark (%)": round(h4_fark_pct, 2),
+                "Haftalık Yön": "🚀 BOĞA" if w_boga else "🐻 AYI",
                 "Durum": tilson_durum
             }
 

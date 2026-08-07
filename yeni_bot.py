@@ -83,6 +83,7 @@ def tum_bist_hisselerini_getir():
     """BIST hisselerini sabit listeden hızlıca getirir. API engellerine takılmaz."""
     return ["A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS",
   "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AHSGY.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS",
+  "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSUE.IS", "AKYHO.IS"
   ]
 
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
@@ -1160,7 +1161,51 @@ def haber_duygu_analizi(ticker):
             sonuclar.append({"baslik": n.get('title'), "kaynak": n.get('publisher'), "link": n.get('link'), "duygu": duygu})
         return sonuclar
     except: return []
-def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)"):
+@st.cache_data(ttl=60, show_spinner=False)
+def toplu_guncel_fiyat_getir(sembol_tuple, kaynak="Yahoo Finance (yfinance)"):
+    """
+    Tarama listesindeki TÜM hisselerin anlık (1 dakikalık) son fiyatını TEK bir
+    toplu istekte çeker. Önceden her hisse için ayrı ayrı yf.download çağrısı
+    yapılıyordu (700 hisse = 700 ayrı, önbelleksiz istek) — bu hem Yahoo
+    Finance'i rate-limit'e sokuyor hem de istek başarısız olduğunda sessizce
+    dünün kapanışına düşülmesine (bayat fiyat) yol açıyordu. Sonuç 60 saniye
+    önbelleklenir, böylece aynı tarama içindeki tekrar çağrılar ek istek atmaz.
+    """
+    fiyatlar = {}
+    if not sembol_tuple:
+        return fiyatlar
+    try:
+        veri = yf.download(
+            list(sembol_tuple),
+            period="1d",
+            interval="1m",
+            progress=False,
+            auto_adjust=True,
+            group_by='ticker',
+            threads=True,
+        )
+        if veri is None or veri.empty:
+            return fiyatlar
+
+        for sembol in sembol_tuple:
+            try:
+                if isinstance(veri.columns, pd.MultiIndex):
+                    if sembol not in veri.columns.get_level_values(0):
+                        continue
+                    kapanislar = veri[sembol]['Close'].dropna()
+                else:
+                    # Tek sembol istenmişse MultiIndex oluşmayabilir
+                    kapanislar = veri['Close'].dropna()
+                if not kapanislar.empty:
+                    fiyatlar[sembol] = float(kapanislar.iloc[-1])
+            except Exception:
+                continue
+    except Exception as e:
+        logging.debug(f"Toplu anlık fiyat çekme hatası: {e}")
+    return fiyatlar
+
+
+def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)", guncel_fiyat_override=None):
     try:
         # 1. Günlük Veriyi Çek
         df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
@@ -1169,61 +1214,41 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             
         df_g = df_gunluk.copy()
         
-        # --- A. ÖNCEKİ KAPANIŞ FİYATI (Dünün Resmi Kapanışı) ---
-        try:
-            guncel_df = yf.download(
-                sembol,
-                period="1d",
-                interval="1m",
-                progress=False,
-                auto_adjust=True
-            )
-
-            if not guncel_df.empty:
-                guncel_fiyat = float(guncel_df["Close"].iloc[-1])
-            else:
+        # --- A. ANLIK FİYAT ---
+        # Toplu taramadan (paralel_tara) bir fiyat verildiyse onu kullan; verilmediyse
+        # (örn. tek hisse görüntüleme gibi doğrudan çağrılarda) eski tek-tek yöntemle dene.
+        if guncel_fiyat_override is not None:
+            guncel_fiyat = float(guncel_fiyat_override)
+        else:
+            try:
+                guncel_df = yf.download(
+                    sembol,
+                    period="1d",
+                    interval="1m",
+                    progress=False,
+                    auto_adjust=True
+                )
+                if not guncel_df.empty:
+                    guncel_fiyat = float(guncel_df["Close"].iloc[-1])
+                else:
+                    guncel_fiyat = float(df_g["Close"].iloc[-1])
+            except:
                 guncel_fiyat = float(df_g["Close"].iloc[-1])
 
-        except:
-            guncel_fiyat = float(df_g["Close"].iloc[-1])
-
 
 # --------------------------------------------------
-# BIST seans kontrolü
+# Kapanış fiyatı (veriye bakarak - saat tahminine dayanmadan)
 # --------------------------------------------------
+        # df_g'nin son barının tarihi bugünse, o bar muhtemelen canlı/tamamlanmamıştır;
+        # "resmi kapanış" bir önceki tamamlanmış bardır. Son bar bugünden eskiyse
+        # (piyasa henüz bugünün barını oluşturmadıysa), zaten en son tamamlanmış kapanıştır.
         tz = pytz.timezone("Europe/Istanbul")
-        simdi = datetime.now(tz)
+        bugun_tarih = datetime.now(tz).date()
+        son_bar_tarihi = df_g.index[-1].date() if len(df_g) > 0 else None
 
-        saat = simdi.hour
-        dakika = simdi.minute
-        haftaici = simdi.weekday() < 5
-
-        seans_acik = False
-
-        if haftaici:
-
-            dakika_toplam = saat * 60 + dakika
-
-    # 09:40 - 18:10
-            if 9 * 60 + 40 <= dakika_toplam <= 18 * 60 + 10:
-                seans_acik = True
-
-
-# --------------------------------------------------
-# Kapanış fiyatı
-# --------------------------------------------------
-
-        if seans_acik:
-
-    # Dünkü resmi kapanış
-            if len(df_g) >= 2:
-                kapanis_fiyati = float(df_g["Close"].iloc[-2])
-            else:
-                kapanis_fiyati = float(df_g["Close"].iloc[-1])
-
+        if son_bar_tarihi == bugun_tarih and len(df_g) >= 2:
+            kapanis_fiyati = float(df_g["Close"].iloc[-2])
         else:
-
-    # Bugünkü resmi kapanış
             kapanis_fiyati = float(df_g["Close"].iloc[-1])
 
         # İndikatörler anlık fiyata göre hesaplansın diye son barın kapanışını canlı fiyatla güncelle
@@ -1396,6 +1421,27 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Günlük Stoch %K": round(g_stoch_k, 2),
                 "4S Stoch %K": round(h4_stoch_k, 2),
                 "Durum": "🟢 Çift Dip/Al" if (g_stoch_al and h4_stoch_al) else ("↗️ Pozitif" if h4_stoch_al else "⚪ Nötr")
+            }
+
+        elif analiz_tipi == "tilson":
+            g_fark_pct = ((g_fiyat - g_tilson) / g_tilson * 100) if g_tilson else 0.0
+            h4_fark_pct = ((h4_fiyat - h4_tilson) / h4_tilson * 100) if h4_tilson else 0.0
+            if g_boga and h4_boga:
+                tilson_durum = "🚀 ÇİFT BOĞA (4S + Günlük)"
+            elif g_boga and not h4_boga:
+                tilson_durum = "⚠️ Günlük Boğa / 4S Ayı"
+            elif not g_boga and h4_boga:
+                tilson_durum = "⚡ 4S Boğa / Günlük Ayı"
+            else:
+                tilson_durum = "🐻 ÇİFT AYI (4S + Günlük)"
+            return {
+                "Varlık": sembol,
+                "Son Fiyat": f"{guncel_fiyat:.2f}",
+                "Günlük T3": round(float(g_tilson), 2),
+                "Günlük Fark (%)": round(g_fark_pct, 2),
+                "4S T3": round(float(h4_tilson), 2),
+                "4S Fark (%)": round(h4_fark_pct, 2),
+                "Durum": tilson_durum
             }
 
     except Exception as e:
@@ -2239,9 +2285,15 @@ with tabs[1]:
         ilerleme_cubugu = st.progress(0, text=f"Taranıyor... 0/{toplam} hisse")
         tamamlanan = 0
 
+        # Tüm liste için TEK istekte anlık fiyatları önceden çek (700 ayrı istek yerine)
+        guncel_fiyat_sozlugu = toplu_guncel_fiyat_getir(tuple(sembol_listesi), veri_kaynagi)
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             gelecek_sonuclar = {
-                executor.submit(asenkron_analiz_yap, s, baslangic, bitis, analiz_tipi, veri_kaynagi): s
+                executor.submit(
+                    asenkron_analiz_yap, s, baslangic, bitis, analiz_tipi, veri_kaynagi,
+                    guncel_fiyat_sozlugu.get(s)
+                ): s
                 for s in sembol_listesi
             }
             for future in concurrent.futures.as_completed(gelecek_sonuclar):

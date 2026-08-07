@@ -16,6 +16,9 @@ import concurrent.futures
 import logging
 import os
 import pytz
+import threading
+import json
+import time
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 # Yapay Zeka Kütüphaneleri
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
@@ -84,70 +87,7 @@ def tum_bist_hisselerini_getir():
     return ["A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS",
   "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AHSGY.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS",
   "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSUE.IS", "AKYHO.IS",
-  "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS",
-  "ALTNY.IS", "ALVES.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS",
-  "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARTMS.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS",
-  "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "AVGYO.IS", "AVHOL.IS",
-  "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYGAZ.IS", "AZTEK.IS",
-  "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS",
-  "BEGYO.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIGTK.IS", "BIMAS.IS", "BINHO.IS",
-  "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS",
-  "BORLS.IS", "BORSK.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS",
-  "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BULGS.IS", "BURCE.IS",
-  "BURVA.IS", "BVSAN.IS", "BYDNR.IS", "CANTE.IS", "CASA.IS", "CATES.IS", "CCOLA.IS", "CELHA.IS",
-  "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CGCAM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS",
-  "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGI.IS",
-  "DAPGM.IS", "DARDL.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGGYO.IS",
-  "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMRGD.IS", "DNISI.IS", "DOAS.IS", "DOCO.IS", "DOFER.IS",
-  "DOFRB.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DSTKF.IS", "DUNYH.IS", "DURDO.IS", "DURKN.IS",
-  "DYOBY.IS", "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECOGR.IS", "ECZYT.IS", "EDATA.IS", "EDIP.IS",
-  "EFOR.IS", "EGEEN.IS", "EGEGY.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKDMR.IS", "EKGYO.IS",
-  "EKIM.IS", "EKIZ.IS", "EKOS.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "EMPAE.IS", "ENERY.IS",
-  "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", "ENTRA.IS", "EPLAS.IS", "ERBOS.IS", "EREGL.IS", "ERSU.IS",
-  "ESCAR.IS", "ESCOM.IS", "ESEN.IS", "ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUPWR.IS", "EUREN.IS",
-  "EUYO.IS", "EYGYO.IS", "FADE.IS", "FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS", "FORMT.IS",
-  "FORTE.IS", "FRIGO.IS", "FROTO.IS", "FZLGY.IS", "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS",
-  "GENIL.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLCVY.IS", "GLRYH.IS",
-  "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS",
-  "GSDDE.IS", "GSDHO.IS", "GSRAY.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", "HALKB.IS", "HATEK.IS",
-  "HATSN.IS", "HDFGS.IS", "HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HOROZ.IS", "HRKET.IS",
-  "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS", "ICBCT.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS",
-  "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS",
-  "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS",
-  "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "IZENR.IS",
-  "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS", "KAPLM.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS",
-  "KATMR.IS", "KAYSE.IS", "KBORU.IS", "KCAER.IS", "KCHOL.IS", "KENT.IS", "KERVN.IS", "KFEIN.IS",
-  "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS", "KLNMA.IS", "KLRHO.IS", "KLSER.IS",
-  "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KOCMT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS",
-  "KORDS.IS", "KOTON.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS",
-  "KRSTL.IS", "KRTEK.IS", "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", "KUVVA.IS",
-  "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS", "LILAK.IS", "LINK.IS", "LKMNH.IS",
-  "LOGO.IS", "LRSHO.IS", "LUKSK.IS", "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS",
-  "MANAS.IS", "MARBL.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEGMT.IS",
-  "MEKAG.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "MGROS.IS", "MHRGY.IS",
-  "MIATK.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MOGAN.IS", "MPARK.IS", "MRGYO.IS",
-  "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS",
-  "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "OBASE.IS", "OBAMS.IS", "ODAS.IS", "ODINE.IS",
-  "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", "OSTIM.IS", "OTKAR.IS",
-  "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS",
-  "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PATEK.IS", "PCILT.IS", "PEKGY.IS",
-  "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS",
-  "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS",
-  "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QNBFK.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS",
-  "REEDR.IS", "RGYAS.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS",
-  "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS",
-  "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS",
-  "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SKYLP.IS", "SKYMD.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS",
-  "SNICA.IS", "SNPAM.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS", "SUMAS.IS", "SUNTK.IS",
-  "SURGY.IS", "SUWEN.IS", "SVGYO.IS", "TABGD.IS", "TARKM.IS", "TATEN.IS", "TATGD.IS", "TAVHL.IS",
-  "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS", "TEZOL.IS", "TGSAS.IS", "THYAO.IS",
-  "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS", "TNZTP.IS", "TOASO.IS", "TRCAS.IS",
-  "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", "TTRAK.IS", "TUCLK.IS",
-  "TUKAS.IS", "TUPRS.IS", "TUREX.IS", "TURGG.IS", "TURSG.IS", "UFUK.IS", "ULAS.IS", "ULUFA.IS",
-  "ULUSE.IS", "ULUUN.IS", "UMPAS.IS", "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS",
-  "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKGYO.IS", "VKING.IS", "VRGYO.IS",
-  "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", "YESIL.IS", "YGGYO.IS", "YIGIT.IS",
-  "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS", "XU100.IS"
+  "ALARK.IS"
   ]
 
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
@@ -388,6 +328,7 @@ def veri_yukle(ticker, start, end, interval="1d", kaynak="Yahoo Finance (yfinanc
 # ==========================================
 # 2. 4 SAATLİK VERİ ÇEKME FONKSİYONU
 # ==========================================
+@st.cache_data(ttl=900, show_spinner=False)
 def veri_4saatlik_getir(ticker, start, end, kaynak="Yahoo Finance (yfinance)"):
     import yfinance as yf
     import pandas as pd
@@ -1269,10 +1210,73 @@ def toplu_guncel_fiyat_getir(sembol_tuple, kaynak="Yahoo Finance (yfinance)"):
     return fiyatlar
 
 
-def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)", guncel_fiyat_override=None):
+@st.cache_data(ttl=300, show_spinner=False)
+def toplu_gecmis_veri_getir(sembol_tuple, start, end, kaynak="Yahoo Finance (yfinance)"):
+    """
+    Tarama listesindeki TÜM hisselerin günlük geçmiş verisini TEK toplu
+    istekte çeker (536 ayrı istek yerine yfinance'in kendi iç gruplamasıyla
+    birkaç istek). Sadece Yahoo Finance toplu indirmeyi destekler; başka bir
+    kaynak seçiliyse boş sözlük döner ve paralel_tara/asenkron_analiz_yap
+    otomatik olarak eski tek-tek veri_yukle() yöntemine (TV/İş Yatırım dahil
+    çoklu-kaynak deneme mantığı) düşer.
+    """
+    sonuc = {}
+    if not sembol_tuple or kaynak != "Yahoo Finance (yfinance)":
+        return sonuc
     try:
-        # 1. Günlük Veriyi Çek
-        df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
+        if end is not None:
+            yf_end = (pd.to_datetime(end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        else:
+            yf_end = None
+
+        veri = yf.download(
+            list(sembol_tuple),
+            start=start,
+            end=yf_end,
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            group_by='ticker',
+            threads=True,
+        )
+        if veri is None or veri.empty:
+            return sonuc
+
+        gerekli = ["Open", "High", "Low", "Close", "Volume"]
+        for sembol in sembol_tuple:
+            try:
+                if isinstance(veri.columns, pd.MultiIndex):
+                    if sembol not in veri.columns.get_level_values(0):
+                        continue
+                    df = veri[sembol].copy()
+                else:
+                    # Tek sembol istenmişse MultiIndex oluşmayabilir
+                    df = veri.copy()
+
+                if not all(c in df.columns for c in gerekli):
+                    continue
+                df = df.dropna(subset=['Close'])
+                if df.empty or len(df) < 20:
+                    continue
+                df.index = df.index.tz_localize(None)
+                df.index = pd.to_datetime(df.index).normalize()
+                sonuc[sembol] = df
+            except Exception:
+                continue
+    except Exception as e:
+        logging.debug(f"Toplu geçmiş veri çekme hatası: {e}")
+    return sonuc
+
+
+def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kaynagi="Yahoo Finance (yfinance)", guncel_fiyat_override=None, df_gunluk_override=None):
+    try:
+        # 1. Günlük Veriyi Çek — toplu taramadan (paralel_tara) hazır veri geldiyse
+        # onu kullan, gelmediyse (tek hisse görüntüleme ya da toplu indirmede
+        # bulunamayan sembol) eski çoklu-kaynak yöntemiyle tek tek çek.
+        if df_gunluk_override is not None and not df_gunluk_override.empty:
+            df_gunluk = df_gunluk_override
+        else:
+            df_gunluk = veri_yukle(sembol, baslangic, bitis, interval="1d", kaynak=veri_kaynagi)
         if df_gunluk is None or df_gunluk.empty or len(df_gunluk) < 20: 
             return None
             
@@ -2342,150 +2346,242 @@ with tabs[1]:
         with open("son_tarama_tipi.txt", "w", encoding="utf-8") as f:
             f.write(tip_adi)
 
-    # Yardımcı Fonksiyon: İlerleme çubuklu paralel tarama
-    def paralel_tara(sembol_listesi, analiz_tipi, max_workers=8):
-        sonuclar = []
-        veri_yok_sayisi = 0
+    # ==========================================================
+    # ARKA PLAN TARAMA MİMARİSİ
+    # ----------------------------------------------------------
+    # Eskiden tarama, butona basıldığında ana Streamlit script akışı
+    # içinde SENKRON çalışıyordu. 536 hissenin taranması dakikalar
+    # sürdüğü için bu süre içinde websocket bağlantısı kopup yeniden
+    # kurulursa (Streamlit Cloud'da, sekme arka plana alındığında,
+    # ağ kesintisinde vs.) Streamlit TÜM SCRIPT'İ YENİDEN ÇALIŞTIRIR
+    # ve devam etmekte olan tarama sonucu kaybolurdu.
+    #
+    # Çözüm: Tarama artık ayrı bir arka plan thread'inde çalışıyor ve
+    # ilerlemesini/sonucunu periyodik olarak DİSKE yazıyor. Sayfa
+    # yeniden yüklense, bağlantı kopup tekrar kurulsa bile thread arka
+    # planda çalışmaya devam eder (Streamlit sunucu process'i ayakta
+    # kaldığı sürece). Ekranda sadece durum dosyası okunup gösteriliyor
+    # (st.fragment ile SADECE bu küçük blok periyodik yenileniyor, tüm
+    # sayfa değil).
+    # ==========================================================
+    TARAMA_DURUM_DOSYASI = "tarama_durum.json"
+    TARAMA_SONUC_DOSYASI = "tarama_sonuc_gecici.pkl"
+
+    if 'tarama_calisiyor' not in st.session_state:
+        st.session_state.tarama_calisiyor = False
+
+    def paralel_tara_arkaplan(sembol_listesi, analiz_tipi, goster_tipi, max_workers,
+                                baslangic_, bitis_, veri_kaynagi_,
+                                durum_dosyasi, sonuc_dosyasi):
+        """Ana Streamlit script akışından BAĞIMSIZ ayrı bir thread'de çalışır.
+        Sayfa rerun olsa/bağlantı kopsa bile bu fonksiyon durmaz."""
         toplam = len(sembol_listesi)
-        ilerleme_cubugu = st.progress(0, text=f"Taranıyor... 0/{toplam} hisse")
-        tamamlanan = 0
+        try:
+            # Tüm liste için TEK toplu istekte anlık fiyat + günlük geçmiş veri
+            # (536 ayrı istek yerine sadece birkaç toplu istek)
+            guncel_fiyat_sozlugu = toplu_guncel_fiyat_getir(tuple(sembol_listesi), veri_kaynagi_)
+            gecmis_veri_sozlugu = toplu_gecmis_veri_getir(tuple(sembol_listesi), baslangic_, bitis_, veri_kaynagi_)
 
-        # Tüm liste için TEK istekte anlık fiyatları önceden çek (700 ayrı istek yerine)
-        guncel_fiyat_sozlugu = toplu_guncel_fiyat_getir(tuple(sembol_listesi), veri_kaynagi)
+            with open(durum_dosyasi, "w", encoding="utf-8") as f:
+                json.dump({"tamamlanan": 0, "toplam": toplam, "bitti": False,
+                           "goster_tipi": goster_tipi, "veri_yok_sayisi": 0, "hata": None}, f)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            gelecek_sonuclar = {
-                executor.submit(
-                    asenkron_analiz_yap, s, baslangic, bitis, analiz_tipi, veri_kaynagi,
-                    guncel_fiyat_sozlugu.get(s)
-                ): s
-                for s in sembol_listesi
-            }
-            for future in concurrent.futures.as_completed(gelecek_sonuclar):
-                sembol = gelecek_sonuclar[future]
-                tamamlanan += 1
-                try:
-                    sonuc = future.result()
-                    if sonuc:
-                        sonuclar.append(sonuc)
-                    else:
+            sonuclar = []
+            veri_yok_sayisi = 0
+            tamamlanan = 0
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                gelecek_sonuclar = {
+                    executor.submit(
+                        asenkron_analiz_yap, s, baslangic_, bitis_, analiz_tipi, veri_kaynagi_,
+                        guncel_fiyat_sozlugu.get(s), gecmis_veri_sozlugu.get(s)
+                    ): s
+                    for s in sembol_listesi
+                }
+                for future in concurrent.futures.as_completed(gelecek_sonuclar):
+                    sembol = gelecek_sonuclar[future]
+                    tamamlanan += 1
+                    try:
+                        sonuc = future.result()
+                        if sonuc:
+                            sonuclar.append(sonuc)
+                        else:
+                            veri_yok_sayisi += 1
+                    except Exception as e:
                         veri_yok_sayisi += 1
-                except Exception as e:
-                    veri_yok_sayisi += 1
-                    logging.error(f"[{sembol}] Tarama hatası: {e}")
+                        logging.error(f"[{sembol}] Tarama hatası: {e}")
 
-                yuzde = int((tamamlanan / toplam) * 100) if toplam else 100
-                ilerleme_cubugu.progress(
-                    yuzde, text=f"Taranıyor... {tamamlanan}/{toplam} hisse ({sembol})"
-                )
+                    # Her 15 hissede bir kısmi sonucu diske yaz — bağlantı kopsa
+                    # ya da process yeniden başlasa bile o ana kadarki sonuç kaybolmaz
+                    if tamamlanan % 15 == 0 or tamamlanan == toplam:
+                        pd.DataFrame(sonuclar).to_pickle(sonuc_dosyasi)
+                        with open(durum_dosyasi, "w", encoding="utf-8") as f:
+                            json.dump({"tamamlanan": tamamlanan, "toplam": toplam, "bitti": False,
+                                       "goster_tipi": goster_tipi, "veri_yok_sayisi": veri_yok_sayisi,
+                                       "hata": None}, f)
 
-        ilerleme_cubugu.empty()
+            pd.DataFrame(sonuclar).to_pickle(sonuc_dosyasi)
+            with open(durum_dosyasi, "w", encoding="utf-8") as f:
+                json.dump({"tamamlanan": toplam, "toplam": toplam, "bitti": True,
+                           "goster_tipi": goster_tipi, "veri_yok_sayisi": veri_yok_sayisi,
+                           "hata": None}, f)
+        except Exception as e:
+            logging.error(f"Arka plan tarama genel hatası: {e}")
+            with open(durum_dosyasi, "w", encoding="utf-8") as f:
+                json.dump({"tamamlanan": 0, "toplam": toplam, "bitti": True,
+                           "goster_tipi": goster_tipi, "veri_yok_sayisi": 0, "hata": str(e)}, f)
+
+    def tarama_baslat(analiz_tipi, goster_tipi, max_workers):
+        if st.session_state.tarama_calisiyor:
+            st.warning("⏳ Zaten devam eden bir tarama var. Bitmesini bekleyin (sayfayı kapatmanıza gerek yok, arka planda çalışmaya devam ediyor).")
+            return
+        if os.path.exists(TARAMA_DURUM_DOSYASI):
+            os.remove(TARAMA_DURUM_DOSYASI)
+        st.session_state.tarama_calisiyor = True
+        th = threading.Thread(
+            target=paralel_tara_arkaplan,
+            args=(tarama_listesi, analiz_tipi, goster_tipi, max_workers,
+                  baslangic, bitis, veri_kaynagi,
+                  TARAMA_DURUM_DOSYASI, TARAMA_SONUC_DOSYASI),
+            daemon=True,
+        )
+        th.start()
+
+    GOSTER_TIPI_ADLARI = {
+        "radar": "Genel Radar Taraması",
+        "stoch": "Stoch Analizi",
+        "tilson": "Tilson (T3) Analizi",
+        "sniper": "Nokta Atışı (Sniper)",
+    }
+
+    def sniper_filtrele(df_radar):
+        df_sniper = df_radar[
+            (df_radar['Günlük T3'] == '🚀 BOĞA') &
+            (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) &
+            (
+                (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) |
+                (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) |
+                (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
+            )
+        ]
+        return df_sniper
+
+    # Sayfada sadece SEÇİLİ küçük bloğu periyodik yeniler (run_every), tüm
+    # sayfayı değil — bu yüzden diğer widget'lar/tab'lar taramadan etkilenmez.
+    # st.fragment Streamlit >= 1.33 gerektirir; daha eski sürümlerde bulunmazsa
+    # aşağıdaki _fragment fallback'i onu sıradan bir fonksiyona çevirir (otomatik
+    # 2sn'lik yenileme olmaz, aşağıdaki "🔄 Durumu Yenile" butonu ile manuel bakılır).
+    if hasattr(st, "fragment"):
+        _fragment = st.fragment
+    else:
+        def _fragment(*_args, **_kwargs):
+            def _decorator(func):
+                return func
+            return _decorator
+
+    @_fragment(run_every=2)
+    def tarama_ilerleme_ve_sonuc_goster():
+        if not os.path.exists(TARAMA_DURUM_DOSYASI):
+            return
+        try:
+            with open(TARAMA_DURUM_DOSYASI, "r", encoding="utf-8") as f:
+                durum = json.load(f)
+        except Exception:
+            return
+
+        if durum.get("hata"):
+            st.error(f"❌ Tarama sırasında hata oluştu: {durum['hata']}")
+            st.session_state.tarama_calisiyor = False
+            return
+
+        if not durum.get("bitti", False):
+            toplam = durum.get("toplam", 0) or 1
+            tamamlanan = durum.get("tamamlanan", 0)
+            st.progress(tamamlanan / toplam, text=f"Taranıyor... {tamamlanan}/{toplam} hisse")
+            st.caption("ℹ️ Tarama arka planda çalışıyor. Sayfa yenilense veya bağlantı kısa süreliğine kesilse bile devam eder; bittiğinde sonuç burada görünecek.")
+            return
+
+        # --- TARAMA BİTTİ ---
+        st.session_state.tarama_calisiyor = False
+        veri_yok_sayisi = durum.get("veri_yok_sayisi", 0)
+        toplam = durum.get("toplam", 0)
+        goster_tipi = durum.get("goster_tipi", "radar")
+
+        if not os.path.exists(TARAMA_SONUC_DOSYASI):
+            st.warning("⚠️ Tarama tamamlandı ama sonuç dosyası bulunamadı.")
+            return
+
+        try:
+            df_ham = pd.read_pickle(TARAMA_SONUC_DOSYASI)
+        except Exception as e:
+            st.error(f"Sonuç dosyası okunamadı: {e}")
+            return
+
+        if df_ham is None or df_ham.empty:
+            st.warning("⚠️ Tarama sonucu bulunamadı. Bu genellikle veri kaynağından hiç fiyat verisi çekilemediği anlamına gelir. Veri kaynağını (Yahoo/TradingView/İş Yatırım) değiştirmeyi deneyin.")
+            return
+
         if veri_yok_sayisi > 0:
-            st.caption(f"ℹ️ {veri_yok_sayisi}/{toplam} hisse için veri kaynağından fiyat verisi alınamadı (bunlar tabloya hiç girmedi).")
-        return sonuclar
+            st.caption(f"ℹ️ {veri_yok_sayisi}/{toplam} hisse için veri kaynağından fiyat verisi alınamadı (bunlar tabloya girmedi).")
 
-    # 1. GENEL RADAR
+        if goster_tipi == "sniper":
+            df_sniper = sniper_filtrele(df_ham)
+            if sadece_super_sinyal:
+                df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+            if sadece_spring:
+                df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
+
+            if not df_sniper.empty:
+                taramayi_kaydet(df_sniper, GOSTER_TIPI_ADLARI["sniper"])
+                st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
+                st.dataframe(df_sniper, width="stretch", hide_index=True)
+                st.balloons()
+            else:
+                boga_sayisi = (df_ham['Günlük T3'] == '🚀 BOĞA').sum()
+                skor_sayisi = (pd.to_numeric(df_ham['📊 Temel Skor'], errors='coerce') >= 30).sum()
+                tetik_sayisi = (
+                    (df_ham['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) |
+                    (df_ham['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) |
+                    (df_ham['🪤 Spring (Tuzak)'] == '✅ VAR')
+                ).sum()
+                st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarının HEPSİNE birden uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
+                st.caption(
+                    f"ℹ️ Kırılım — {len(df_ham)} hisse tarandı: "
+                    f"{boga_sayisi} tanesi Günlük BOĞA trendinde, "
+                    f"{skor_sayisi} tanesi Temel Skor ≥ 30, "
+                    f"{tetik_sayisi} tanesi hacim/uyuşmazlık/spring tetikleyicilerinden birine sahip. "
+                    f"Sniper filtresi bu üç şartın AYNI ANDA sağlanmasını istiyor — bu yüzden tek tek sayılar dolu olsa bile kesişim boş çıkabilir."
+                )
+        else:
+            df_goster = df_ham.copy()
+            if sadece_super_sinyal and '📈 Pozitif Uyuşmazlık' in df_goster.columns:
+                df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
+            if sadece_spring and '🪤 Spring (Tuzak)' in df_goster.columns:
+                df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
+
+            taramayi_kaydet(df_ham, GOSTER_TIPI_ADLARI.get(goster_tipi, goster_tipi))
+            st.dataframe(df_goster, width="stretch", hide_index=True)
+            st.success(f"✅ {GOSTER_TIPI_ADLARI.get(goster_tipi, goster_tipi)} tamamlandı ve hafızaya kaydedildi!")
+
+    # 1-4. TARAMA BUTONLARI — hepsi arka plan thread'i başlatır, script akışını bloklamaz
     if btn_radar:
-        with st.spinner('Tüm liste çift zaman dilimli (4S + Günlük) taranıyor... Lütfen bekleyin.'):
-            radar_sonuclari = paralel_tara(tarama_listesi, "radar", max_workers=8)
-
-            if radar_sonuclari:
-                df_radar = pd.DataFrame(radar_sonuclari)
-                taramayi_kaydet(df_radar, "Genel Radar Taraması")
-            
-            # --- GÜNCELLENMİŞ FİLTRELEME BLOĞU ---
-                df_goster = df_radar.copy()
-            
-            # locals().get() kullanımı Pylance'ın hata vermesini engeller
-                if locals().get('sadece_super_sinyal', False):
-                    df_goster = df_goster[df_goster['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
-                
-                if locals().get('sadece_spring', False):
-                    df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
-            # -------------------------------------
-            
-                st.dataframe(df_goster, width="stretch", hide_index=True)
-                st.success("✅ Tüm tarama başarıyla tamamlandı ve hafızaya kaydedildi!")
-            else:
-                st.warning("⚠️ Tarama sonucu bulunamadı. Bu genellikle veri kaynağından hiç fiyat verisi çekilemediği anlamına gelir (kriterlerle ilgisi yoktur — kriterler ne kadar sert olursa olsun her hisse en azından 'PAS GEÇİLDİ' satırı olarak tabloya girer). Veri kaynağını (Yahoo/TradingView/İş Yatırım) değiştirmeyi deneyin.")
-
-    # 2. STOCH ANALİZİ
+        tarama_baslat("radar", "radar", max_workers=8)
     elif btn_stoch:
-        with st.spinner('Özel Stoch Analizi paralel taranıyor...'):
-            stoch_sonuclari = paralel_tara(tarama_listesi, "stoch", max_workers=10)
-            
-            if stoch_sonuclari:
-                df_stoch = pd.DataFrame(stoch_sonuclari)
-                taramayi_kaydet(df_stoch, "Stoch Analizi")
-                st.dataframe(df_stoch, width="stretch", hide_index=True)
-                st.success("✅ Stoch taraması kaydedildi!")
-            else:
-                st.warning("⚠️ Stoch tarama sonucu bulunamadı. Veri kaynağından hiç fiyat verisi çekilemedi.")
-
-    # 3. TİLSON ANALİZİ
+        tarama_baslat("stoch", "stoch", max_workers=10)
     elif btn_tilson:
-        with st.spinner('Tilson T3 trend analizi taranıyor...'):
-            tilson_sonuclari = paralel_tara(tarama_listesi, "tilson", max_workers=10)
-            
-            if tilson_sonuclari:
-                df_tilson = pd.DataFrame(tilson_sonuclari)
-                taramayi_kaydet(df_tilson, "Tilson (T3) Analizi")
-                st.dataframe(df_tilson, width="stretch", hide_index=True)
-                st.success("✅ Tilson T3 taraması kaydedildi!")
-            else:
-                st.warning("⚠️ Tilson T3 tarama sonucu bulunamadı. Veri kaynağından hiç fiyat verisi çekilemedi.")
-
-    # 4. NOKTA ATIŞI (SNIPER)
+        tarama_baslat("tilson", "tilson", max_workers=10)
     elif btn_nokta_atisi:
-        with st.spinner('Kurumsal dip oluşumları ve likidite avı (Sniper) aranıyor...'):
-            radar_sonuclari = paralel_tara(tarama_listesi, "radar", max_workers=8)
-            
-            if radar_sonuclari:
-                df_radar = pd.DataFrame(radar_sonuclari)
-                
-                # --- GÜNCELLENEN SNIPER FİLTRESİ (SÜPER SİNYAL DESTEKLİ) ---
-                df_sniper = df_radar[
-                    (df_radar['Günlük T3'] == '🚀 BOĞA') & 
-                    (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30) & 
-                    (
-                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) | 
-                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) | 
-                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
-                    )
-                ]
-                
-                # Ekstra Kenar Çubuğu Filtresi İşletilmesi
-                if 'sadece_super_sinyal' in locals() and sadece_super_sinyal:
-                    df_sniper = df_sniper[df_sniper['📈 Pozitif Uyuşmazlık'].str.contains('SÜPER SİNYAL', na=False)]
-                if 'sadece_spring' in locals() and sadece_spring:
-                    df_sniper = df_sniper[df_sniper['🪤 Spring (Tuzak)'] == '✅ VAR']
+        tarama_baslat("radar", "sniper", max_workers=8)
 
-                if not df_sniper.empty:
-                    taramayi_kaydet(df_sniper, "Nokta Atışı (Sniper)")
-                    st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
-                    st.dataframe(df_sniper, width="stretch", hide_index=True)
-                    st.balloons()
-                else:
-                    boga_sayisi = (df_radar['Günlük T3'] == '🚀 BOĞA').sum()
-                    skor_sayisi = (pd.to_numeric(df_radar['📊 Temel Skor'], errors='coerce') >= 30).sum()
-                    tetik_sayisi = (
-                        (df_radar['💥 Hacim Analizi'].str.contains('PATLAMA', na=False)) |
-                        (df_radar['📈 Pozitif Uyuşmazlık'].str.contains('UYUŞMAZLIK|SÜPER SİNYAL', na=False)) |
-                        (df_radar['🪤 Spring (Tuzak)'] == '✅ VAR')
-                    ).sum()
-                    st.warning("📉 Şu anki piyasada belirlenen Sniper şartlarının HEPSİNE birden uyan şirket bulunamadı. Genel Radar'ı inceleyebilirsiniz.")
-                    st.caption(
-                        f"ℹ️ Kırılım — {len(df_radar)} hisse tarandı: "
-                        f"{boga_sayisi} tanesi Günlük BOĞA trendinde, "
-                        f"{skor_sayisi} tanesi Temel Skor ≥ 30, "
-                        f"{tetik_sayisi} tanesi hacim/uyuşmazlık/spring tetikleyicilerinden birine sahip. "
-                        f"Sniper filtresi bu üç şartın AYNI ANDA sağlanmasını istiyor — bu yüzden tek tek sayılar dolu olsa bile kesişim boş çıkabilir."
-                    )
-            else:
-                st.warning("⚠️ Tarama yapılamadı. Veri kaynağından hiç fiyat verisi çekilemedi — kriterlerle ilgisi yok. Veri kaynağını (Yahoo/TradingView/İş Yatırım) değiştirmeyi deneyin.")
+    # Devam eden ya da az önce bitmiş bir tarama varsa ilerleme/sonucu göster
+    if st.session_state.tarama_calisiyor or os.path.exists(TARAMA_DURUM_DOSYASI):
+        if not hasattr(st, "fragment"):
+            # Eski Streamlit sürümünde otomatik yenileme olmadığı için manuel buton
+            st.button("🔄 Durumu Yenile", key="btn_durum_yenile")
+        tarama_ilerleme_ve_sonuc_goster()
 
     # 5. EN SON TARAMAYI GETİR
-    elif btn_son_tarama:
+    if btn_son_tarama:
         # 1. RAM boşsa diskteki pickle dosyasından veri çek
         if st.session_state.son_tarama_df is None and os.path.exists("son_tarama.pkl"):
             try:

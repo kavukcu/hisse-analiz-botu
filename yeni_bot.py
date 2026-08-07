@@ -1388,7 +1388,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 logging.warning(f"[{sembol}] Veto mekanizmasında hata: {e}")
 
             try:
-                sihirli_veri = sihirli_formul_skorla(sembol, df=df_g)
+                info_veri, s_skor = sihirli_formul_skorla(sembol, df=df_g)
                 s_skor = sihirli_veri.get('Puan', 0) if isinstance(sihirli_veri, dict) else 0
             except Exception:
                 s_skor = 0

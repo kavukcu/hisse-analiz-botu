@@ -136,7 +136,7 @@ def tum_bist_hisselerini_getir():
   "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PATEK.IS", "PCILT.IS", "PEKGY.IS",
   "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS",
   "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS",
-  "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFK.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS",
+  "PRZMA.IS", "PSDTC.IS", "PSGYO.IS", "QNBFB.IS", "QNBFK.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS",
   "REEDR.IS", "RGYAS.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS",
   "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS",
   "SDTTR.IS", "SEGYO.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS",
@@ -150,7 +150,7 @@ def tum_bist_hisselerini_getir():
   "ULUSE.IS", "ULUUN.IS", "UMPAS.IS", "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS",
   "VANGD.IS", "VBTYZ.IS", "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKGYO.IS", "VKING.IS", "VRGYO.IS",
   "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YBTAS.IS", "YEOTK.IS", "YESIL.IS", "YGGYO.IS", "YIGIT.IS",
-  "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS", "XU100"
+  "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "ZEDUR.IS", "ZOREN.IS", "XU100.IS"
   ]
 
     """Yapay zekanın tahminlerini tutacağı yerel veritabanını oluşturur."""
@@ -1628,6 +1628,69 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             hedef_metin = "-"
             rr_metin = "-"
 
+        # --- C6. TEKNİK TEYİT PUANI (dahili — ekranda gösterilmez, AI Kararı ve
+        # AL/SAT Kararı'nı etkilemek için kullanılır) ---
+        teknik_puan = 0
+        teknik_notlar = []
+
+        if pd.notna(g_rsi):
+            if g_rsi <= 35:
+                teknik_puan += 15
+                teknik_notlar.append("RSI aşırı satım bölgesinde")
+            elif g_rsi >= 70:
+                teknik_puan -= 15
+                teknik_notlar.append("RSI aşırı alım bölgesinde (risk)")
+
+        if macd_metin.startswith("🟢 Yeni Pozitif"):
+            teknik_puan += 15
+            teknik_notlar.append("MACD yeni pozitif kesişim verdi")
+        elif macd_metin.startswith("🔴 Yeni Negatif"):
+            teknik_puan -= 15
+            teknik_notlar.append("MACD yeni negatif kesişim verdi")
+        elif macd_metin == "🟢 Pozitif":
+            teknik_puan += 5
+        elif macd_metin == "🔴 Negatif":
+            teknik_puan -= 5
+
+        if pd.notna(g_bb_yuzde):
+            if g_bb_yuzde <= 0.05:
+                teknik_puan += 10
+                teknik_notlar.append("Fiyat Bollinger alt bandında (tepki potansiyeli)")
+            elif g_bb_yuzde >= 0.95:
+                teknik_puan -= 10
+                teknik_notlar.append("Fiyat Bollinger üst bandında (aşırı genişleme riski)")
+
+        if pd.notna(g_adx) and g_adx >= 25:
+            if g_boga:
+                teknik_puan += 10
+                teknik_notlar.append(f"ADX ({g_adx:.1f}) güçlü boğa trendini onaylıyor")
+            else:
+                teknik_puan -= 10
+                teknik_notlar.append(f"ADX ({g_adx:.1f}) güçlü ayı trendini onaylıyor")
+
+        if fib_bilgi and fib_bilgi['uzaklik_pct'] < 1.5 and fib_bilgi['en_yakin_oran'] in (0.5, 0.618, 0.786):
+            teknik_puan += 10
+            teknik_notlar.append(f"Fiyat %{fib_bilgi['en_yakin_oran']*100:.1f} Fibonacci seviyesine çok yakın")
+
+        if w_boga and g_boga:
+            teknik_puan += 5
+        elif (not w_boga) and (not g_boga):
+            teknik_puan -= 5
+
+        teknik_detay = {
+            "Haftalık T3": "🚀 BOĞA" if w_boga else "🐻 AYI",
+            "RSI(14)": rsi_metin,
+            "MACD Durumu": macd_metin,
+            "Bollinger Pozisyonu": bb_metin,
+            "Trend Gücü (ADX)": adx_metin,
+            "Fibonacci Seviyesi": fib_metin,
+            "ATR Stop-Loss": stop_metin,
+            "ATR Kar Hedefi": hedef_metin,
+            "Risk/Ödül": rr_metin,
+            "Teknik Teyit Puanı": teknik_puan,
+            "Teknik Notlar": "; ".join(teknik_notlar) if teknik_notlar else "Belirgin bir teknik teyit/uyarı yok",
+        }
+
         # ⚡ DOĞRULANMIŞ AKILLI FİLTRE (g_super_sinyal eklendi)
         umut_var_mi = g_boga or g_stoch_al or g_hacim or g_uyusmazlik or g_super_sinyal or g_spring or g_ma_kestimi
         
@@ -1638,7 +1701,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
                 "Günlük T3": "🐻 AYI",
                 "4S T3": "-",
-                "Haftalık T3": "🚀 BOĞA" if w_boga else "🐻 AYI",
                 "🤖 AI Kararı": "Zaman Tasarrufu",
                 "🎯 AI Hedef": "-",
                 "🎯 AL/SAT Kararı": "🐻 PAS GEÇİLDİ (Ölü Trend)",
@@ -1649,14 +1711,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "📊 Temel Skor": "-",
                 "💥 Hacim Analizi": "Normal",
                 "🪤 Spring (Tuzak)": "-",
-                "📉 RSI(14)": rsi_metin,
-                "〰️ MACD Durumu": macd_metin,
-                "📏 Bollinger Pozisyonu": bb_metin,
-                "💪 Trend Gücü (ADX)": adx_metin,
-                "🧮 Fibonacci Seviyesi": fib_metin,
-                "🛡️ ATR Stop-Loss": stop_metin,
-                "🎯 ATR Kar Hedefi": hedef_metin,
-                "⚖️ Risk/Ödül": rr_metin
+                "_teknik_detay": teknik_detay,
             }
 
         # --- D. 4 SAATLİK VERİ ÇEKME & ANALİZ ---
@@ -1695,6 +1750,12 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
         else:
             al_sat_karari = "🐻 GÜÇLÜ SAT / AYI"
 
+        # Teknik teyit puanı (RSI/MACD/Bollinger/ADX/Fibonacci) kararı destekliyor/zayıflatıyorsa etiketle
+        if teknik_puan >= 25:
+            al_sat_karari += " ⭐ (Teknik Güçlü Teyit)"
+        elif teknik_puan <= -20:
+            al_sat_karari += " ⚠️ (Teknik Zayıflama Sinyali)"
+
         if analiz_tipi == "radar":
             temp_4h = dipten_donus_analizi(df_4h) if not df_4h.empty else temp_g
             h4_hacim = temp_4h['Hacim_Patlamasi'].iloc[-1] if not temp_4h.empty else False
@@ -1720,6 +1781,13 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             # 1. KRİTİK DÜZELTME: AI Verisini Veto'dan ÖNCE Hesapla!
             ai_veri = ensemble_prediction(df_g, sembol) if umut_var_mi else {'signal': "ZAYIF", 'rf_prediction': 0.0}
+
+            # Teknik teyit puanı AI kararına da yansıtılır (RSI/MACD/Bollinger/ADX/Fibonacci)
+            if umut_var_mi:
+                if teknik_puan >= 25:
+                    ai_veri['signal'] = f"{ai_veri.get('signal', 'NÖTR')} ⭐"
+                elif teknik_puan <= -20:
+                    ai_veri['signal'] = f"{ai_veri.get('signal', 'NÖTR')} ⚠️"
             
             # 👇 YENİ EKLENECEK BLOK 👇
             # Eğer yapay zeka bir tahmin ürettiyse bunu SQLite veritabanına kaydet
@@ -1760,7 +1828,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Kapanış Fiyatı": f"{kapanis_fiyati:.2f}",
                 "Günlük T3": "🚀 BOĞA" if g_boga else "🐻 AYI",
                 "4S T3": "🚀 BOĞA" if h4_boga else "🐻 AYI",
-                "Haftalık T3": "🚀 BOĞA" if w_boga else "🐻 AYI",
                 "🤖 AI Kararı": ai_veri.get('signal', 'NÖTR'), # İçinde gün tahmini de yazacak
                 "🎯 AI Hedef": f"{ai_veri.get('rf_prediction', 0.0)} TL",
                 "🎯 AL/SAT Kararı": al_sat_karari,
@@ -1771,14 +1838,7 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "📊 Temel Skor": s_skor,
                 "💥 Hacim Analizi": hacim_durum,
                 "🪤 Spring (Tuzak)": spring_durum,
-                "📉 RSI(14)": rsi_metin,
-                "〰️ MACD Durumu": macd_metin,
-                "📏 Bollinger Pozisyonu": bb_metin,
-                "💪 Trend Gücü (ADX)": adx_metin,
-                "🧮 Fibonacci Seviyesi": fib_metin,
-                "🛡️ ATR Stop-Loss": stop_metin,
-                "🎯 ATR Kar Hedefi": hedef_metin,
-                "⚖️ Risk/Ödül": rr_metin,
+                "_teknik_detay": teknik_detay,
             }
 
         elif analiz_tipi == "stoch":
@@ -1808,7 +1868,6 @@ def asenkron_analiz_yap(sembol, baslangic, bitis, analiz_tipi="radar", veri_kayn
                 "Günlük Fark (%)": round(g_fark_pct, 2),
                 "4S T3": round(float(h4_tilson), 2),
                 "4S Fark (%)": round(h4_fark_pct, 2),
-                "Haftalık Yön": "🚀 BOĞA" if w_boga else "🐻 AYI",
                 "Durum": tilson_durum
             }
 
@@ -2765,6 +2824,65 @@ with tabs[1]:
         ]
         return df_sniper
 
+    def _tablo_goster_ve_detay_paneli(df_tablo, anahtar):
+        """
+        Tabloyu ekrana basar; '_teknik_detay' kolonu varsa (RSI/MACD/Bollinger/
+        ADX/Fibonacci/ATR Stop-Hedef/Haftalık T3/Teknik Teyit Puanı — bunlar
+        artık ana tabloda GÖSTERİLMİYOR, sadece dahili AI/AL-SAT kararını
+        etkiliyorlar) ekrandan gizler ve kullanıcı bir satıra tıkladığında
+        (destekleyen Streamlit sürümlerinde) veya bir hisse seçtiğinde (eski
+        sürümlerde fallback) altında ayrı bir 'Gelişmiş Teknik Analiz Paneli'
+        açar.
+        """
+        detaylar_var = '_teknik_detay' in df_tablo.columns
+        df_gorunen = df_tablo.drop(columns=['_teknik_detay']) if detaylar_var else df_tablo
+
+        secili_sembol = None
+        if detaylar_var:
+            try:
+                event = st.dataframe(
+                    df_gorunen, width="stretch", hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key=f"tablo_{anahtar}_{len(df_gorunen)}"
+                )
+                secim_nesnesi = getattr(event, "selection", None)
+                secili_satirlar = getattr(secim_nesnesi, "rows", None) if secim_nesnesi is not None else None
+                if not secili_satirlar and isinstance(event, dict):
+                    secili_satirlar = event.get("selection", {}).get("rows", [])
+                if secili_satirlar:
+                    secili_sembol = df_gorunen.iloc[secili_satirlar[0]]['Varlık']
+            except TypeError:
+                # Eski Streamlit sürümü satır tıklama seçimini (on_select) desteklemiyor
+                st.dataframe(df_gorunen, width="stretch", hide_index=True)
+                secim = st.selectbox(
+                    "📊 Detaylı teknik paneli görmek için bir hisse seç:",
+                    options=["-"] + df_gorunen['Varlık'].tolist(),
+                    key=f"secim_{anahtar}_{len(df_gorunen)}"
+                )
+                secili_sembol = None if secim == "-" else secim
+        else:
+            st.dataframe(df_gorunen, width="stretch", hide_index=True)
+
+        if secili_sembol is not None:
+            eslesen = df_tablo.loc[df_tablo['Varlık'] == secili_sembol, '_teknik_detay']
+            if not eslesen.empty and isinstance(eslesen.iloc[0], dict):
+                d = eslesen.iloc[0]
+                with st.expander(f"📊 {secili_sembol} — Gelişmiş Teknik Analiz Paneli", expanded=True):
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("RSI(14)", d.get("RSI(14)", "-"))
+                    c1.write(f"**MACD:** {d.get('MACD Durumu', '-')}")
+                    c2.write(f"**Bollinger:** {d.get('Bollinger Pozisyonu', '-')}")
+                    c2.write(f"**Trend Gücü:** {d.get('Trend Gücü (ADX)', '-')}")
+                    c3.write(f"**Haftalık Trend:** {d.get('Haftalık T3', '-')}")
+                    c3.write(f"**Fibonacci:** {d.get('Fibonacci Seviyesi', '-')}")
+                    st.markdown("---")
+                    r1, r2, r3 = st.columns(3)
+                    r1.metric("🛡️ Stop-Loss (ATR)", d.get("ATR Stop-Loss", "-"))
+                    r2.metric("🎯 Kar Hedefi (ATR)", d.get("ATR Kar Hedefi", "-"))
+                    r3.metric("⚖️ Risk/Ödül", d.get("Risk/Ödül", "-"))
+                    puan = d.get("Teknik Teyit Puanı", 0)
+                    st.caption(f"🧠 Teknik Teyit Puanı: **{puan}** (AI Kararı ve AL/SAT Kararı'na dahil edilmiştir) — {d.get('Teknik Notlar', '')}")
+
     # Sayfada sadece SEÇİLİ küçük bloğu periyodik yeniler (run_every), tüm
     # sayfayı değil — bu yüzden diğer widget'lar/tab'lar taramadan etkilenmez.
     # st.fragment Streamlit >= 1.33 gerektirir; daha eski sürümlerde bulunmazsa
@@ -2833,7 +2951,7 @@ with tabs[1]:
             if not df_sniper.empty:
                 taramayi_kaydet(df_sniper, GOSTER_TIPI_ADLARI["sniper"])
                 st.success(f"🎯 Dipten Dönüş Fırsatı! Temeli sağlam ve akıllı para girişi tespit edilen {len(df_sniper)} hisse var.")
-                st.dataframe(df_sniper, width="stretch", hide_index=True)
+                _tablo_goster_ve_detay_paneli(df_sniper, "sniper")
                 st.balloons()
             else:
                 boga_sayisi = (df_ham['Günlük T3'] == '🚀 BOĞA').sum()
@@ -2859,7 +2977,7 @@ with tabs[1]:
                 df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
 
             taramayi_kaydet(df_ham, GOSTER_TIPI_ADLARI.get(goster_tipi, goster_tipi))
-            st.dataframe(df_goster, width="stretch", hide_index=True)
+            _tablo_goster_ve_detay_paneli(df_goster, goster_tipi)
             st.success(f"✅ {GOSTER_TIPI_ADLARI.get(goster_tipi, goster_tipi)} tamamlandı ve hafızaya kaydedildi!")
 
     # 1-4. TARAMA BUTONLARI — hepsi arka plan thread'i başlatır, script akışını bloklamaz
@@ -2905,7 +3023,7 @@ with tabs[1]:
                     df_goster = df_goster[df_goster['🪤 Spring (Tuzak)'] == '✅ VAR']
             # -----------------------------------------------------------
             
-            st.dataframe(df_goster, width="stretch", hide_index=True)
+            _tablo_goster_ve_detay_paneli(df_goster, "son_tarama")
         else:
             st.warning("⚠️ Hafızada veya dosyada kaydedilmiş bir tarama sonucu bulunamadı. Lütfen önce bir tarama yapın.")
 with tabs[2]:
